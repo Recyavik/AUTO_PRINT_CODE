@@ -3,13 +3,34 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import { test } from "node:test";
-import { BLOCK_CODE, BLOCK_MARKDOWN, DEFAULT_SETTINGS, makeBlock, makeTemplate, navBlocks } from "../shared/model.ts";
-import { printable, typingText } from "../shared/textprint.ts";
+import {
+  BLOCK_CODE, BLOCK_MARKDOWN, DEFAULT_SETTINGS, makeBlock, makeTemplate, navBlocks, typingSlice,
+} from "../shared/model.ts";
+import { findSelection, printable, selectionText, typingText } from "../shared/textprint.ts";
 
 const ref = JSON.parse(fs.readFileSync(new URL("./fixtures/textprint-reference.json", import.meta.url), "utf-8"));
 
 test("printable = textprint.printable", () => {
   for (const c of ref) assert.equal(printable(c.text, c.mode, c.lang), c.out, `${c.mode}/${c.lang}: ${JSON.stringify(c.text.slice(0, 40))}`);
+});
+
+test("выделение в отрисованном тексте = textprint.find_selection / selection_text", () => {
+  const sref = JSON.parse(fs.readFileSync(new URL("./fixtures/textselect-reference.json", import.meta.url), "utf-8"));
+  const src: string = sref.source;
+  for (const c of sref.cases) {
+    const sel = findSelection(src, c.selected, c.hint);
+    assert.deepEqual(sel, c.sel, JSON.stringify(c.selected));
+    if (!sel.length) continue;
+    const [part, base] = typingSlice(src, sel, true);
+    for (const [mode, out] of Object.entries(c.out)) assert.equal(selectionText(src, part, base, mode, "javascript"), out, `${mode}: ${c.selected}`);
+  }
+});
+
+test("текстовый блок: выделенные строки", () => {
+  const md = makeBlock(BLOCK_MARKDOWN, "## Условие\n\n- `a`\n- `b`", { print_as: "plain" });
+  md.sel = [md.text.indexOf("`b`"), md.text.length];
+  assert.deepEqual(typingText(makeTemplate("t", [md]), md, DEFAULT_SETTINGS),
+    ["- b", md.text.indexOf("- `b`"), "простой текст, выделенные строки"]);
 });
 
 test("текстовый блок: язык комментария — от блока кода ниже, затем выше", () => {

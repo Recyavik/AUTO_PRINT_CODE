@@ -198,7 +198,7 @@ class TemplateView(QWidget):
         for w in self.widgets:
             on = w.block.id == self.template.active_block
             w.set_armed(on)
-            if isinstance(w, CodeBlockWidget) and not on and w.block.sel:
+            if isinstance(w, (CodeBlockWidget, MarkdownBlockWidget)) and not on and w.block.sel:
                 w.clear_selection()   # выделение — только у активного блока
 
     def block_widget(self, block_id: str) -> BlockWidget | None:

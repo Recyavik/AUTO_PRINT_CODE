@@ -6,7 +6,7 @@ import { stripComments } from "../../../shared/comments.ts";
 import {
   BLOCK_CODE, BLOCK_MARKDOWN, type Block, blockTitle, makeBlock, ROLES, type Settings, type Template, typingSlice,
 } from "../../../shared/model.ts";
-import { PRINT_MODES } from "../../../shared/textprint.ts";
+import { findSelection, PRINT_MODES } from "../../../shared/textprint.ts";
 import { getState, updateTemplate, useApp } from "../api.ts";
 import { CodeEditor } from "./CodeEditor.tsx";
 import { Menu, type MenuItem } from "./Menu.tsx";
@@ -155,6 +155,9 @@ function BlockView({ block: b, codeNumber, armed, settings, typed, onChange, onA
             {Object.entries(PRINT_MODES).map(([k, name]) => <option key={k} value={k}>Печатать {name}</option>)}
           </select>
         )}
+        {!isCode && b.sel.length === 2 && (
+          <span className="info sel-info">· выделено строк: {b.text.slice(b.sel[0], b.sel[1]).replace(/\n+$/, "").split("\n").length}</span>
+        )}
         {isCode && (
           <>
             <select value={b.lang} onChange={(e) => onChange({ ...b, lang: e.target.value }, 0)} title="Язык подсветки и комментариев">
@@ -206,6 +209,7 @@ function MarkdownBlock({ block: b, onChange, onArm }: { block: Block; onChange: 
   const [editing, setEditing] = useState(!b.text.trim());
   const html = useMemo(() => DOMPurify.sanitize(marked.parse(b.text, { async: false, gfm: true, breaks: false })), [b.text]);
   const ta = useRef<HTMLTextAreaElement>(null);
+  const view = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (editing && ta.current) {
       ta.current.style.height = "auto";
@@ -213,18 +217,40 @@ function MarkdownBlock({ block: b, onChange, onArm }: { block: Block; onChange: 
     }
   }, [editing, b.text]);
 
+  // выделение: печатаются только выделенные строки (как в блоке кода)
+  const setSel = (sel: number[]) => {
+    if (sel.join() !== b.sel.join()) onChange({ ...b, sel }, 250);
+  };
+  const selectionFromView = () => {
+    const el = view.current;
+    const s = window.getSelection();
+    if (!el || !s || !s.rangeCount) return;
+    if (s.isCollapsed) return setSel([]);
+    const r = s.getRangeAt(0);
+    if (!el.contains(r.commonAncestorContainer)) return;
+    const pre = document.createRange();   // где началось выделение — если кусок встречается несколько раз
+    pre.selectNodeContents(el);
+    pre.setEnd(r.startContainer, r.startOffset);
+    setSel(findSelection(b.text, s.toString(), pre.toString().length / Math.max(1, el.textContent?.length ?? 0)));
+  };
+
   if (editing) {
     return (
       <textarea ref={ta} className="md-edit" value={b.text} autoFocus={!!b.text} spellCheck
         style={{ fontSize: `${(13.5 * b.zoom) / 100}px` }} placeholder="Текст в формате Markdown"
         onChange={(e) => onChange({ ...b, text: e.target.value })}
+        onSelect={(e) => {
+          const { selectionStart: a, selectionEnd: z } = e.currentTarget;
+          setSel(z > a ? [a, z] : []);
+        }}
         onBlur={() => b.text.trim() && setEditing(false)}
         onKeyDown={(e) => { if (e.key === "Escape") (e.target as HTMLTextAreaElement).blur(); }} />
     );
   }
   return (
-    <div className="md-view" style={{ fontSize: `${(14 * b.zoom) / 100}px` }} title="Щёлкните дважды, чтобы изменить"
+    <div ref={view} className="md-view" style={{ fontSize: `${(14 * b.zoom) / 100}px` }} title="Щёлкните дважды, чтобы изменить"
+      onMouseUp={selectionFromView} onKeyUp={selectionFromView}
       onClick={(e) => !(e.target as HTMLElement).closest("a") && onArm()}
-      onDoubleClick={() => setEditing(true)} dangerouslySetInnerHTML={{ __html: html }} />
+      onDoubleClick={() => { setSel([]); setEditing(true); }} dangerouslySetInnerHTML={{ __html: html }} />
   );
 }

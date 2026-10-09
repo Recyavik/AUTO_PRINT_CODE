@@ -133,6 +133,7 @@ input[type="range"] { accent-color: var(--accent); }
 }
 .block-head .title-edit:hover, .block-head .title-edit:focus { border-color: var(--border); background: var(--panel-2); }
 .block-head .info { color: var(--muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.block-head .info.sel-info { color: #d29922; font-weight: 600; }
 .block-head .grow { flex: 1; }
 .block-head select { padding: 1px 4px; font-size: 12.5px; }
 .block-head .tools { display: flex; gap: 2px; opacity: 0.55; transition: opacity 0.15s; }

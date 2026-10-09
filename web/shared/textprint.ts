@@ -108,6 +108,132 @@ export function printable(text: string, mode: string, lang = "python"): string {
   return text.replace(/^\n+|\n+$/g, "");
 }
 
+/** Открывающая строка ```-блока, внутри которого стоит позиция pos ("" — не внутри). */
+function fenceAt(text: string, pos: number): string {
+  let fence = "";
+  let opener = "";
+  for (const line of text.slice(0, pos).split("\n").slice(0, -1)) {
+    const m = FENCE.exec(line);
+    if (fence) {
+      if (m && m[1] === fence) fence = opener = "";
+    } else if (m) {
+      fence = m[1];
+      opener = line;
+    }
+  }
+  return opener;
+}
+
+/** Печатаемый текст выделенного куска part (начинается в source с позиции base).
+ *  Кусок из середины ```-блока остаётся кодом и в простом тексте. */
+export function selectionText(source: string, part: string, base: number, mode: string, lang = "python"): string {
+  if (mode !== PRINT_MARKDOWN) {
+    const opener = fenceAt(source, base);
+    if (opener) return printable(opener + "\n" + part + "\n" + opener.trim().slice(0, 3), mode, lang);
+  }
+  return printable(part, mode, lang);
+}
+
+// ---------------------------------------------------------------- выделение в отрисованном тексте
+
+const LIST_MARK = /^\s*(?:[-*+]|\d+[.)])\s+(?:\[[ xX]\]\s+)?/;
+const VIEW_BULLET = /^\s*[•◦▪▫·‣○●■□]\s*/;   // маркеры, которые просмотр может добавить к выделению
+// разрывы строк, как у str.splitlines() в Python (просмотр Qt отдаёт абзацы через U+2029)
+const LINE_BREAKS = new RegExp("(?:" + String.fromCharCode(13, 10) + ")|[" +
+  String.fromCharCode(10, 13, 11, 12, 0x1c, 0x1d, 0x1e, 0x85, 0x2028, 0x2029) + "]");
+
+/** Каждая строка исходника — так, как её видно в отрисованном Markdown (без ##, **, маркеров списка). */
+function renderedLines(source: string): string[] {
+  const out: string[] = [];
+  let fence = "";
+  let para = false;
+  for (let line of source.split("\n")) {
+    const m = FENCE.exec(line);
+    if (fence) {
+      if (m && m[1] === fence) {
+        fence = "";
+        out.push("");
+      } else out.push(line);
+      continue;
+    }
+    if (m) {
+      fence = m[1];
+      para = false;
+      out.push("");
+      continue;
+    }
+    if ((para && SETEXT.test(line)) || RULE.test(line)) {
+      para = false;
+      out.push("");
+      continue;
+    }
+    para = !!line.trim();
+    line = line.replace(QUOTE, "");
+    const h = HEADING.exec(line);
+    if (h) line = h[1];
+    out.push(inline(line.replace(LIST_MARK, "").replace(HARD_BREAK, "")));
+  }
+  return out;
+}
+
+/** Схлопывает пробельные символы в один пробел → [строка, индекс исходного символа для каждого]. */
+function squash(text: string): [string, number[]] {
+  let out = "";
+  const idx: number[] = [];
+  for (let i = 0; i < text.length; i++) {
+    if (/\s/.test(text[i])) {
+      if (out && out[out.length - 1] !== " ") { out += " "; idx.push(i); }
+    } else { out += text[i]; idx.push(i); }
+  }
+  return [out, idx];
+}
+
+/** Выделение в отрисованном тексте → [начало, конец] целых строк исходника; [] — не нашлось.
+ *  selected — выделенный текст, как его отдаёт просмотр; hint — где примерно началось выделение
+ *  (0…1 от длины отрисованного текста): если такой же кусок встречается несколько раз. */
+export function findSelection(source: string, selected: string, hint = 0): number[] {
+  const lines = renderedLines(source);
+  let flat = "";
+  const lineOf: number[] = [];
+  lines.forEach((line, j) => {
+    flat += line + "\n";
+    for (let k = 0; k <= line.length; k++) lineOf.push(j);
+  });
+  const [hay, hayIdx] = squash(flat);
+  selected = selected.split(LINE_BREAKS).map((x) => x.replace(VIEW_BULLET, "")).join("\n");
+  const need = squash(selected)[0].trim();
+  if (!need) return [];
+
+  const occurrences = (s: string, start = 0): number[] => {
+    const found: number[] = [];
+    for (let i = hay.indexOf(s, start); i >= 0; i = hay.indexOf(s, i + 1)) found.push(i);
+    return found;
+  };
+  const nearest = (found: number[]) =>
+    found.reduce((best, i) => (Math.abs(i / Math.max(1, hay.length) - hint) < Math.abs(best / Math.max(1, hay.length) - hint) ? i : best));
+
+  let a: number;
+  let b: number;
+  const found = occurrences(need);
+  if (found.length) {
+    a = nearest(found);
+    b = a + need.length - 1;
+  } else {
+    // просмотр мог добавить или убрать символы (маркеры списков, таблицы) — ищем первую и последнюю строку
+    const parts = selected.split("\n").map((x) => squash(x)[0].trim()).filter((x) => x);
+    const first = occurrences(parts[0]);
+    if (!first.length) return [];
+    a = nearest(first);
+    const last = occurrences(parts[parts.length - 1], a);
+    b = last.length ? last[0] + parts[parts.length - 1].length - 1 : a + parts[0].length - 1;
+  }
+  const ja = lineOf[hayIdx[a]];
+  const jb = lineOf[hayIdx[b]];
+  const starts = [0];
+  for (const line of source.split("\n")) starts.push(starts[starts.length - 1] + line.length + 1);
+  return [starts[ja], starts[jb + 1] - 1];
+}
+
 /** Что печатать из блока → [текст, смещение в блоке, описание для строки состояния]. */
 export function typingText(t: Template, b: Block, s: Settings): [string, number, string] {
   if (b.type !== BLOCK_CODE) {
@@ -115,7 +241,9 @@ export function typingText(t: Template, b: Block, s: Settings): [string, number,
     const lang = langNear(t, b);
     const part = { [PRINT_MARKDOWN]: "текст как Markdown", [PRINT_PLAIN]: "простой текст",
       [PRINT_COMMENT]: `текст комментарием (${lang})` }[mode]!;
-    return [printable(b.text, mode, lang), 0, part];
+    if (b.sel.length !== 2) return [printable(b.text, mode, lang), 0, part];
+    const [text, base] = typingSlice(b.text, b.sel, s.selection_whole_lines);
+    return [selectionText(b.text, text, base, mode, lang), base, part + ", выделенные строки"];
   }
   let [text, base] = typingSlice(b.text, b.sel, s.selection_whole_lines);
   let part = b.sel.length === 2 ? "выделенные строки" : "весь блок";

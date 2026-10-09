@@ -21,7 +21,7 @@ from ..hotkeys import HotkeyManager, parse_hotkey
 from ..importers import export_ipynb, import_ipynb, import_markdown, import_python
 from ..sounds import KeySoundPlayer
 from ..storage import BLOCK_CODE, PROFILES, Block, Settings, Template, TemplateStore
-from ..textprint import PRINT_COMMENT, PRINT_MARKDOWN, PRINT_MODES, PRINT_PLAIN, printable
+from ..textprint import PRINT_COMMENT, PRINT_MARKDOWN, PRINT_MODES, PRINT_PLAIN, printable, selection_text
 from ..typer import COUNTDOWN, FINISHED, IDLE, PAUSED, RUNNING, TypingEngine
 from .blocks import BlockWidget, typing_slice
 from .settings_dialog import HOTKEYS, SettingsDialog
@@ -746,7 +746,10 @@ class MainWindow(QMainWindow):
             lang = t.lang_near(block)
             part = {PRINT_MARKDOWN: "текст как Markdown", PRINT_PLAIN: "простой текст",
                     PRINT_COMMENT: f"текст комментарием ({lang})"}[mode]
-            return printable(block.text, mode, lang), 0, part
+            if not block.sel:
+                return printable(block.text, mode, lang), 0, part
+            text, base = typing_slice(block.text, block.sel, self.settings.selection_whole_lines)
+            return selection_text(block.text, text, base, mode, lang), base, part + ", выделенные строки"
         text, base = typing_slice(block.text, block.sel, self.settings.selection_whole_lines)
         part = "выделенные строки" if block.sel else "весь блок"
         if self.settings.strip_comments:

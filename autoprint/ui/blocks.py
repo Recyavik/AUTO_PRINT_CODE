@@ -8,7 +8,7 @@ from PySide6.QtWidgets import (QApplication, QComboBox, QFrame, QHBoxLayout, QLa
 
 from ..highlighter import LANGUAGES
 from ..storage import BLOCK_CODE, BLOCK_MARKDOWN, ROLES, Block
-from ..textprint import PRINT_MODES
+from ..textprint import PRINT_MODES, find_selection
 from .code_editor import CodeEditor, code_font
 
 ARMED_COLOR = "#2ea043"
@@ -181,6 +181,9 @@ class MarkdownBlockWidget(BlockWidget):
                                  "• комментарием в коде — каждая строка с # или // по языку блока кода рядом")
         self.print_as.activated.connect(self._on_print_as)
         self.left_slot.addWidget(self.print_as)
+        self.info = QLabel()
+        self.info.setStyleSheet("color: #d29922; font-weight: bold;")
+        self.left_slot.addWidget(self.info)
         self.toggle = _tool("✎ Править", "Переключить: просмотр / редактирование Markdown")
         self.toggle.clicked.connect(self.toggle_mode)
         self.right_slot.addWidget(self.toggle)
@@ -192,11 +195,51 @@ class MarkdownBlockWidget(BlockWidget):
         self.edit.setFont(code_font(10))
         self.edit.setPlaceholderText("Текст в формате Markdown: условие, пояснение к коду, подсказка…")
         self.edit.textChanged.connect(self._on_text)
+        self.view.selectionChanged.connect(self._on_view_selection)
+        self.edit.selectionChanged.connect(self._on_edit_selection)
         self.stack.addWidget(self.view)
         self.stack.addWidget(self.edit)
         self.body.addWidget(self.stack)
         self._render()
         self.set_editing(not block.text.strip())
+        self._update_info()
+
+    # ---- выделение: печатаются только выделенные строки (как в блоке кода)
+    def _on_view_selection(self) -> None:
+        if self.stack.currentWidget() is not self.view:
+            return   # перерисовка при выходе из правки — выделение из исходника не трогаем
+        c = self.view.textCursor()
+        sel = []
+        if c.hasSelection():
+            hint = c.selectionStart() / max(1, self.view.document().characterCount())
+            sel = find_selection(self.block.text, c.selection().toPlainText(), hint)
+        self._set_sel(sel)
+
+    def _on_edit_selection(self) -> None:
+        if self.stack.currentWidget() is not self.edit:
+            return
+        c = self.edit.textCursor()
+        self._set_sel([c.selectionStart(), c.selectionEnd()] if c.hasSelection() else [])
+
+    def _set_sel(self, sel: list[int]) -> None:
+        if sel != self.block.sel:
+            self.block.sel = sel
+            self._update_info()
+            self.changed.emit()
+
+    def _update_info(self) -> None:
+        if self.block.sel:
+            a, b = self.block.sel
+            n = self.block.text[a:b].rstrip("\n").count("\n") + 1
+            self.info.setText(f"· выделено строк: {n}")
+        self.info.setVisible(bool(self.block.sel))
+
+    def clear_selection(self) -> None:
+        for w in (self.view, self.edit):
+            c = w.textCursor()
+            c.clearSelection()
+            w.setTextCursor(c)
+        self._set_sel([])
 
     def eventFilter(self, obj, ev) -> bool:
         if ev.type() == ev.Type.MouseButtonDblClick:

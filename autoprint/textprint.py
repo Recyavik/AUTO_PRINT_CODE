@@ -118,3 +118,124 @@ def printable(text: str, mode: str, lang: str = "python") -> str:
     if mode == PRINT_COMMENT:
         return as_comment(text, lang)
     return text.strip("\n")
+
+
+def _fence_at(text: str, pos: int) -> str:
+    """Открывающая строка ```-блока, внутри которого стоит позиция pos ('' — не внутри)."""
+    fence, opener = "", ""
+    for line in text[:pos].split("\n")[:-1]:
+        m = _FENCE.match(line)
+        if fence:
+            if m and m.group(1) == fence:
+                fence = opener = ""
+        elif m:
+            fence, opener = m.group(1), line
+    return opener
+
+
+def selection_text(source: str, part: str, base: int, mode: str, lang: str = "python") -> str:
+    """Печатаемый текст выделенного куска part (начинается в source с позиции base).
+    Кусок из середины ```-блока остаётся кодом и в простом тексте."""
+    if mode != PRINT_MARKDOWN:
+        opener = _fence_at(source, base)
+        if opener:
+            return printable(opener + "\n" + part + "\n" + opener.strip()[:3], mode, lang)
+    return printable(part, mode, lang)
+
+
+# ---------------------------------------------------------------- выделение в отрисованном тексте
+
+_LIST_MARK = re.compile(r"^\s*(?:[-*+]|\d+[.)])\s+(?:\[[ xX]\]\s+)?")
+_VIEW_BULLET = re.compile(r"^\s*[•◦▪▫·‣○●■□]\s*")   # маркеры, которые просмотр может добавить к выделению
+
+
+def _rendered_lines(source: str) -> list[str]:
+    """Каждая строка исходника — так, как её видно в отрисованном Markdown (без ##, **, маркеров списка)."""
+    out = []
+    fence = ""
+    para = False
+    for line in source.split("\n"):
+        m = _FENCE.match(line)
+        if fence:
+            if m and m.group(1) == fence:
+                fence = ""
+                out.append("")
+            else:
+                out.append(line)
+            continue
+        if m:
+            fence, para = m.group(1), False
+            out.append("")
+            continue
+        if (para and _SETEXT.match(line)) or _RULE.match(line):
+            para = False
+            out.append("")
+            continue
+        para = bool(line.strip())
+        line = _QUOTE.sub("", line)
+        h = _HEADING.match(line)
+        if h:
+            line = h.group(1)
+        line = _LIST_MARK.sub("", line)
+        out.append(_inline(_HARD_BREAK.sub("", line)))
+    return out
+
+
+def _squash(text: str) -> tuple[str, list[int]]:
+    """Схлопывает пробельные символы в один пробел → (строка, индекс исходного символа для каждого)."""
+    out, idx = [], []
+    for i, ch in enumerate(text):
+        if ch.isspace():
+            if out and out[-1] != " ":
+                out.append(" ")
+                idx.append(i)
+        else:
+            out.append(ch)
+            idx.append(i)
+    return "".join(out), idx
+
+
+def find_selection(source: str, selected: str, hint: float = 0.0) -> list[int]:
+    """Выделение в отрисованном тексте → [начало, конец] целых строк исходника; [] — не нашлось.
+
+    selected — выделенный текст, как его отдаёт просмотр; hint — где примерно началось выделение
+    (0…1 от длины отрисованного текста): если такой же кусок встречается несколько раз."""
+    lines = _rendered_lines(source)
+    flat, line_of = "", []
+    for j, line in enumerate(lines):
+        flat += line + "\n"
+        line_of += [j] * (len(line) + 1)
+    hay, hay_idx = _squash(flat)
+    selected = "\n".join(_VIEW_BULLET.sub("", x) for x in selected.splitlines())
+    need = _squash(selected)[0].strip()
+    if not need:
+        return []
+
+    def occurrences(s: str, start: int = 0) -> list[int]:
+        found, i = [], hay.find(s, start)
+        while i >= 0:
+            found.append(i)
+            i = hay.find(s, i + 1)
+        return found
+
+    def nearest(found: list[int]) -> int:
+        return min(found, key=lambda i: abs(i / max(1, len(hay)) - hint))
+
+    found = occurrences(need)
+    if found:
+        a = nearest(found)
+        b = a + len(need) - 1
+    else:
+        # просмотр мог добавить или убрать символы (маркеры списков, таблицы) — ищем первую и последнюю строку
+        parts = [p for p in (_squash(x)[0].strip() for x in selected.splitlines()) if p]
+        first = occurrences(parts[0])
+        if not first:
+            return []
+        a = nearest(first)
+        last = occurrences(parts[-1], a)
+        b = (last[0] + len(parts[-1]) - 1) if last else a + len(parts[0]) - 1
+    ja, jb = line_of[hay_idx[a]], line_of[hay_idx[b]]
+    starts = [0]
+    for line in source.split("\n"):
+        starts.append(starts[-1] + len(line) + 1)
+    return [starts[ja], starts[jb + 1] - 1]
