@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { blockTitle, codeNumber, type EngineState, PROFILES } from "../../shared/model.ts";
 import { typingText } from "../../shared/textprint.ts";
 import {
-  closeTab, command, moveBlock, openTab, pauseHotkeys, shutdownHelper, updateSettings, useApp,
+  closeTab, command, moveBlock, moveTab, openTab, pauseHotkeys, shutdownHelper, updateSettings, useApp,
 } from "./api.ts";
 import { importFiles, Library, newTemplate } from "./components/Library.tsx";
 import { SettingsDialog } from "./components/SettingsDialog.tsx";
@@ -51,6 +51,7 @@ export function App() {
   const toasts = useApp((s) => s.toasts);
   const version = useApp((s) => s.version);
   const [showSettings, setShowSettings] = useState(false);
+  const [drag, setDrag] = useState<{ id: string; over: string; after: boolean } | null>(null);   // перетаскивание вкладки
   const [soundLocked, setSoundLocked] = useState(true);
   const fileInput = useRef<HTMLInputElement>(null);
   const [canInstall, setCanInstall] = useState(!!installEvent);
@@ -174,8 +175,28 @@ export function App() {
         <section className="workspace">
           <nav className="tabs">
             {openTemplates.map((t) => (
-              <div key={t.id} className={`tab${t.id === settings.current_tab ? " current" : ""}`} onClick={() => openTab(t.id)}
-                onAuxClick={(e) => e.button === 1 && closeTab(t.id)} title={t.title}>
+              <div key={t.id} title={t.title} draggable
+                className={`tab${t.id === settings.current_tab ? " current" : ""}${drag?.id === t.id ? " dragging" : ""}` +
+                  (drag && drag.over === t.id && drag.id !== t.id ? (drag.after ? " drop-after" : " drop-before") : "")}
+                onClick={() => openTab(t.id)} onAuxClick={(e) => e.button === 1 && closeTab(t.id)}
+                onDragStart={(e) => {
+                  e.dataTransfer.effectAllowed = "move";
+                  e.dataTransfer.setData("text/plain", t.title);
+                  setDrag({ id: t.id, over: t.id, after: false });
+                }}
+                onDragOver={(e) => {
+                  if (!drag) return;
+                  e.preventDefault();
+                  const r = e.currentTarget.getBoundingClientRect();
+                  const after = e.clientX > r.left + r.width / 2;
+                  if (drag.over !== t.id || drag.after !== after) setDrag({ ...drag, over: t.id, after });
+                }}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  if (drag) moveTab(drag.id, drag.over, drag.after);
+                  setDrag(null);
+                }}
+                onDragEnd={() => setDrag(null)}>
                 <span>{t.title}</span>
                 <button className="x" title="Закрыть вкладку" onClick={(e) => { e.stopPropagation(); closeTab(t.id); }}>✕</button>
               </div>

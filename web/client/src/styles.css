@@ -111,6 +111,9 @@ input[type="range"] { accent-color: var(--accent); }
 }
 .tab span { overflow: hidden; text-overflow: ellipsis; }
 .tab.current { background: var(--panel); color: var(--text); }
+.tab.dragging { opacity: 0.5; }
+.tab.drop-before { box-shadow: inset 3px 0 0 var(--accent); }
+.tab.drop-after { box-shadow: inset -3px 0 0 var(--accent); }
 .tab .x { opacity: 0.6; padding: 0 2px; border: none; background: none; cursor: pointer; }
 .tab .x:hover { opacity: 1; color: var(--danger); }
 

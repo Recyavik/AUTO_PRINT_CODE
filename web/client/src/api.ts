@@ -164,6 +164,17 @@ export function openTab(id: string): void {
   updateSettings({ open_tabs: s.open_tabs.includes(id) ? s.open_tabs : [...s.open_tabs, id], current_tab: id });
 }
 
+/** Перетаскивание вкладки: id встаёт перед вкладкой target (after — после неё). */
+export function moveTab(id: string, target: string, after: boolean): void {
+  const s = state.settings!;
+  if (id === target || !s.open_tabs.includes(id)) return;
+  const tabs = s.open_tabs.filter((x) => x !== id);
+  const i = tabs.indexOf(target);
+  if (i < 0) return;
+  tabs.splice(after ? i + 1 : i, 0, id);
+  if (tabs.join() !== s.open_tabs.join()) updateSettings({ open_tabs: tabs });
+}
+
 export function closeTab(id: string): void {
   const s = state.settings!;
   const i = s.open_tabs.indexOf(id);
