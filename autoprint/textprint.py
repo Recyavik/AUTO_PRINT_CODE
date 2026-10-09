@@ -34,7 +34,6 @@ _BOLD = re.compile(r"(\*\*|__)(?=\S)(.+?)(?<=\S)\1")
 _ITALIC = re.compile(r"(?<![\w*])\*(?=\S)(.+?)(?<=\S)\*(?![\w*])|(?<!\w)_(?=\S)(.+?)(?<=\S)_(?!\w)")
 _STRIKE = re.compile(r"~~(?=\S)(.+?)(?<=\S)~~")
 _HARD_BREAK = re.compile(r"(\\| {2,})$")
-_PRIVATE = 0xE000   # экранированные символы на время разбора прячутся в область частного использования
 
 
 def _emphasis(s: str) -> str:
@@ -45,8 +44,17 @@ def _emphasis(s: str) -> str:
     return _ITALIC.sub(lambda m: m.group(1) or m.group(2), s)
 
 
+def _free_private_base(s: str) -> int | None:
+    """Участок из 128 символов области частного использования (U+E000…U+F8FF), которых нет в строке:
+    туда на время разбора прячутся экранированные символы (\\*), чтобы их не приняли за разметку."""
+    used = {ord(c) >> 7 for c in s if 0xE000 <= ord(c) <= 0xF8FF}
+    return next((b << 7 for b in range(0xE000 >> 7, 0xF900 >> 7) if b not in used), None)
+
+
 def _inline(s: str) -> str:
-    s = _ESCAPE.sub(lambda m: chr(_PRIVATE + ord(m.group(1))), s)
+    base = _free_private_base(s)
+    if base is not None:
+        s = _ESCAPE.sub(lambda m: chr(base + ord(m.group(1))), s)
     out, last = [], 0
     for m in _CODE.finditer(s):
         out.append(_emphasis(s[last:m.start()]))
@@ -56,7 +64,10 @@ def _inline(s: str) -> str:
         out.append(code)
         last = m.end()
     out.append(_emphasis(s[last:]))
-    return "".join(chr(ord(c) - _PRIVATE) if _PRIVATE <= ord(c) < _PRIVATE + 128 else c for c in "".join(out))
+    out = "".join(out)
+    if base is None:
+        return out
+    return "".join(chr(ord(c) - base) if base <= ord(c) < base + 128 else c for c in out)
 
 
 def markdown_to_plain(text: str) -> str:
@@ -101,14 +112,13 @@ def markdown_to_plain(text: str) -> str:
 def as_comment(text: str, lang: str) -> str:
     """Простой текст, закомментированный для языка lang (неизвестный язык → «#»)."""
     lines = markdown_to_plain(text).split("\n")
-    marks, blocks, _quotes = lang_spec(lang) or (("#",), (), ())
+    spec = lang_spec(lang)
+    marks, blocks = spec[:2] if spec else (("#",), ())
     if marks:
         m = marks[0]
         return "\n".join(f"{m} {line}" if line else m for line in lines)
-    if blocks:
-        a, b = blocks[0]
-        return "\n".join([a, *lines, b])
-    return "\n".join(f"# {line}" if line else "#" for line in lines)
+    a, b = blocks[0]                 # у каждого языка есть строчные или блочные комментарии
+    return "\n".join([a, *lines, b])
 
 
 def printable(text: str, mode: str, lang: str = "python") -> str:

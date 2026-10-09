@@ -110,7 +110,6 @@ export function modifiersDown(): boolean {
   return MODIFIER_VKS.some((vk) => GetAsyncKeyState(vk) & 0x8000);
 }
 
-export const isKeyDown = (vk: number): boolean => (GetAsyncKeyState(vk) & 0x8000) !== 0;
 
 export function foregroundWindow(): number {
   return Number(GetForegroundWindow());

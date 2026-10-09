@@ -67,9 +67,9 @@ def parse_version(s: str) -> tuple | None:
     if not m:
         return None
     nums = tuple(int(x) for x in m.group(1).split("."))
-    nums = (nums + (0, 0, 0))[:max(3, len(nums))]
+    nums = (nums + (0,) * 6)[:max(6, len(nums))]   # одна длина: 0.4.2 = 0.4.2.0, сравнение без TypeError
     pre, pre_n = (m.group(2) or "").lower(), int(m.group(3) or 0)
-    return nums + ((1, "", 0) if not pre else (0, pre, pre_n))
+    return nums, ((1, "", 0) if not pre else (0, pre, pre_n))
 
 
 def is_newer(candidate: str, current: str = __version__) -> bool:
@@ -196,7 +196,7 @@ def fetch_latest(include_prerelease: bool = False) -> Release | None:
         for t in _get_json(f"{API}/tags?per_page=50"):
             tag = t.get("name", "")
             key = parse_version(tag)
-            if key is None or (key[-3] == 0 and not include_prerelease):
+            if key is None or (key[1][0] == 0 and not include_prerelease):   # key[1][0] == 0 — бета
                 continue
             rels.append(Release(
                 version=tag.lstrip("vV"), tag=tag, name=tag, notes="", page_url=f"https://github.com/{REPO}/tree/{tag}",
@@ -317,17 +317,23 @@ def apply(root: Path, new_version: str) -> None:
     """Заменяет файлы программы файлами из root. При ошибке всё возвращается как было."""
     target = app_dir()
     new = _files(root)
-    old_code = {f for f in _files(target) if f.startswith("autoprint/") and f.endswith(".py")}
+    # только модули программы: обходить всю папку (.git, web/node_modules) незачем
+    old_code = {p.relative_to(target).as_posix() for p in (target / "autoprint").rglob("*.py")
+                if "__pycache__" not in p.parts}
     replaced = {f for f in new if (target / f).is_file()}
     removed = old_code - new           # модули, которых в новой версии нет
     added = new - replaced
 
     shutil.rmtree(BACKUP_DIR, ignore_errors=True)
     files_dir = BACKUP_DIR / "files"
-    for f in replaced | removed:
-        dst = files_dir / f
-        dst.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(target / f, dst)
+    try:
+        for f in replaced | removed:
+            dst = files_dir / f
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(target / f, dst)
+    except OSError as e:   # программа ещё не тронута — просто не ставим
+        raise UpdateError(f"Не удалось сделать резервную копию перед обновлением ({e}). "
+                          "Проверьте место на диске; программа не изменена.") from e
 
     try:
         for f in sorted(new):

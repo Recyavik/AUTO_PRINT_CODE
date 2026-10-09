@@ -69,3 +69,22 @@ test("отсчёт перед стартом и «сначала»", async () =>
   assert.equal(sounds, 14, "два полных прогона по 7 единиц");
   await e.close();
 });
+
+test("пауза во время отсчёта и задержки хоткея: печать не начинается", async () => {
+  for (const [delay, countdown] of [[0, 2], [1, 0]]) {
+    const { e, events, waitState } = make({ ...S, cpm: 3000 });
+    e.load("пауза");
+    e.start(delay, countdown);
+    await sleep(300);
+    assert.ok(e.active, `готовится: delay=${delay} countdown=${countdown}`);
+    e.pause();
+    await waitState("paused");
+    await sleep((delay + countdown) * 1000 + 500);
+    assert.equal(e.state, "paused", "пауза не теряется, движок не «залипает» в печати");
+    assert.equal(events.filter((x) => x.e === "sound").length, 0, "ни одного нажатия");
+    e.resume(0, 0);
+    await waitState("finished");
+    assert.equal(events.filter((x) => x.e === "sound").length, 5);
+    await e.close();
+  }
+});

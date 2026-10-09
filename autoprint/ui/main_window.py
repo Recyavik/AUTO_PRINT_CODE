@@ -122,6 +122,11 @@ class MainWindow(QMainWindow):
         self._save_timer.setSingleShot(True)
         self._save_timer.setInterval(700)
         self._save_timer.timeout.connect(self._save_store)
+        # настройки — тоже с задержкой: стрелки у скорости и колёсико громкости шлют шаг за шагом
+        self._settings_timer = QTimer(self)
+        self._settings_timer.setSingleShot(True)
+        self._settings_timer.setInterval(500)
+        self._settings_timer.timeout.connect(self.settings.save)
 
         self.updates = UpdateManager(settings, self)
         self.updates.checked.connect(self._on_update_checked)
@@ -383,7 +388,7 @@ class MainWindow(QMainWindow):
         self._on_state(self.engine.state)
 
     def _save_settings(self) -> None:
-        self.settings.save()
+        self._settings_timer.start()
 
     def _on_profile(self) -> None:
         self.settings.profile = self.profile.currentData()
@@ -426,8 +431,6 @@ class MainWindow(QMainWindow):
                 setattr(self.settings, k, v)   # тот же объект — его читает движок
             self._invalidate_job_if_idle()
             self._save_settings()
-        self.player.set_style(self.settings.sound_style)
-        self.player.set_volume(self.settings.sound_volume)
         self._apply_settings()
 
     def _on_strip_toggle(self, on: bool) -> None:
@@ -500,6 +503,10 @@ class MainWindow(QMainWindow):
             t.title = title
             self._sync_tab_titles()
             self._touch()
+        elif t and it.text() != t.title:
+            self.library.blockSignals(True)   # пустое название не принимаем — вернуть прежнее
+            it.setText(t.title)
+            self.library.blockSignals(False)
 
     def _rename_tab(self, index: int) -> None:
         view = self.tabs.widget(index)
@@ -539,7 +546,7 @@ class MainWindow(QMainWindow):
             v = TemplateView(t)
             v.zoom_changed.connect(lambda z: self.statusBar().showMessage(f"Масштаб блока: {z}%", 1500))
             v.changed.connect(self._touch)
-            v.armed_changed.connect(lambda _bid, v=v: self._on_armed(v))
+            v.armed_changed.connect(lambda _bid: self._update_armed_label())
             self.tabs.addTab(v, t.title)
             self._sync_tab_titles()
         if activate:
@@ -574,7 +581,7 @@ class MainWindow(QMainWindow):
         if v is None:
             return
         if isinstance(v, TemplateView) and self.job and self.job["tid"] == v.template.id \
-                and self.engine.state in (RUNNING, COUNTDOWN, PAUSED):
+                and self._busy_typing():
             self.cmd_stop()
         self.tabs.removeTab(index)
         v.deleteLater()
@@ -736,9 +743,6 @@ class MainWindow(QMainWindow):
         block = v.template.find_block(v.template.active_block)
         return (v, block) if block else None
 
-    def _on_armed(self, v: TemplateView) -> None:
-        self._update_armed_label()
-
     def _typing_text(self, t: Template, block: Block) -> tuple[str, int, str]:
         """Что печатать из блока → (текст, смещение в блоке, описание для строки состояния)."""
         if block.type != BLOCK_CODE:
@@ -786,7 +790,7 @@ class MainWindow(QMainWindow):
     def _load_job(self, job: dict) -> None:
         self._reset_progress()
         self.job = job
-        self.engine.load(job["text"], job["bid"])
+        self.engine.load(job["text"])
 
     def _invalidate_job_if_idle(self) -> None:
         if self.engine.state in (IDLE, FINISHED):
@@ -802,7 +806,7 @@ class MainWindow(QMainWindow):
 
     def cmd_toggle(self, from_button: bool = False, countdown: int | None = None) -> None:
         st = self.engine.state
-        if st in (RUNNING, COUNTDOWN):
+        if self.engine.active:     # печать идёт или готовится (отсчёт, задержка хоткея) — пауза
             self.engine.pause()
             return
         job = self._job_for_armed()
@@ -812,9 +816,9 @@ class MainWindow(QMainWindow):
         if st == PAUSED and self._same_job(job):
             self.engine.resume(*self._start_params(from_button, countdown))
             return
-        if not self._same_job(job) or st == FINISHED or st == PAUSED:
+        if st == PAUSED or st == FINISHED or not self._same_job(job):
             if st == PAUSED:
-                self._notify("Образец или выделение изменились — печать начнётся с начала.")
+                self._notify("Текст для печати изменился (образец, выделение или настройки) — печать начнётся с начала.")
             self._load_job(job)
         self.engine.start(*self._start_params(from_button, countdown))
 
@@ -836,25 +840,25 @@ class MainWindow(QMainWindow):
         if not v:
             return
         t = v.template
-        ids = [b.id for b in t.nav_blocks()]
-        if not ids:
+        nav = t.nav_blocks()
+        if not nav:
             return
-        cur = t.active_block
-        i = ids.index(cur) if cur in ids else -1
+        ids = [b.id for b in nav]
+        i = ids.index(t.active_block) if t.active_block in ids else -1
         j = max(0, min(len(ids) - 1, i + d))
-        if self.engine.state in (RUNNING, COUNTDOWN, PAUSED):
-            self.cmd_stop()
-        v.go_to_block(ids[j])
-        b = t.find_block(ids[j])
-        codes = [x.id for x in t.code_blocks()]
-        where = f" ({codes.index(b.id) + 1} из {len(codes)})" if b.id in codes else ""
-        self._notify(f"Активный блок: {b.display_title(t.code_number(b))}{where}", tray=not self.isActiveWindow())
+        b = nav[j]
+        if j != i:   # на краю ленты переходить некуда — печать на паузе не сбрасываем
+            if self._busy_typing():
+                self.cmd_stop()
+            v.go_to_block(b.id)
+        n = t.code_number(b)
+        where = f" ({n} из {len(t.code_blocks())})" if n else ""
+        self._notify(f"Активный блок: {b.display_title(n)}{where}", tray=not self.isActiveWindow())
 
     def cmd_next_tab(self, d: int = 1) -> None:
         n = self.tabs.count()
         if n:
-            if self.engine.state in (RUNNING, COUNTDOWN):
-                self.engine.pause()
+            self.engine.pause()
             self.tabs.setCurrentIndex((self.tabs.currentIndex() + d) % n)
             v = self.current_view()
             if v and not self.isActiveWindow():
@@ -1077,8 +1081,9 @@ class MainWindow(QMainWindow):
                 log.warning("Обновление при выходе не установлено: %s", err)
         self.engine.stop()
         self._save_timer.stop()
+        self._settings_timer.stop()
         self._save_store()
-        self._save_session()
+        self._save_session()   # сохраняет и настройки
         self.hotkeys.shutdown()
         self.guard.shutdown()
         self.tray.hide()

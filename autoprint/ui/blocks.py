@@ -23,8 +23,7 @@ def _tool(text: str, tip: str) -> QToolButton:
     return b
 
 
-CODE_TYPE = "code"
-TYPE_ITEMS = [(f"{icon} {name}", key) for key, (icon, name, _c) in ROLES.items()] + [("💻 Код", CODE_TYPE)]
+TYPE_ITEMS = [(f"{icon} {name}", key) for key, (icon, name, _c) in ROLES.items()] + [("💻 Код", BLOCK_CODE)]
 
 
 class BlockWidget(QFrame):
@@ -53,7 +52,7 @@ class BlockWidget(QFrame):
         self.kind.setToolTip("Тип блока")
         for label, key in TYPE_ITEMS:
             self.kind.addItem(label, key)
-        self.kind.setCurrentIndex(self.kind.findData(CODE_TYPE if block.type == BLOCK_CODE else block.role))
+        self.kind.setCurrentIndex(self.kind.findData(BLOCK_CODE if block.type == BLOCK_CODE else block.role))
         self.kind.activated.connect(self._on_kind)
         self.header.addWidget(self.kind)
 
@@ -116,6 +115,9 @@ class BlockWidget(QFrame):
     def set_zoom(self, zoom: int) -> None:
         """Шрифт содержимого под масштаб, % — переопределяют наследники."""
 
+    def clear_selection(self) -> None:
+        """Снять выделение (оно бывает только у активного блока) — переопределяют наследники."""
+
     def _update_placeholder(self) -> None:
         self.title.setPlaceholderText(Block(self.block.type, role=self.block.role, title="")
                                       .display_title(self.code_number))
@@ -126,7 +128,7 @@ class BlockWidget(QFrame):
 
     def _on_kind(self, _i: int) -> None:
         key = self.kind.currentData()
-        current = CODE_TYPE if self.block.type == BLOCK_CODE else self.block.role
+        current = BLOCK_CODE if self.block.type == BLOCK_CODE else self.block.role
         if key != current:
             self.type_requested.emit(self, key)
 
@@ -167,10 +169,9 @@ class _AutoBrowser(QTextBrowser):
 
 
 class MarkdownBlockWidget(BlockWidget):
-    edit_requested = Signal()
-
     def __init__(self, block: Block) -> None:
         super().__init__(block)
+        self._rendering = False   # setMarkdown сбрасывает курсор просмотра — это не выбор пользователя
         self.print_as = QComboBox()
         for key, name in PRINT_MODES.items():
             self.print_as.addItem(f"Печатать {name}", key)
@@ -192,6 +193,7 @@ class MarkdownBlockWidget(BlockWidget):
         self.view = _AutoBrowser()
         self.view.viewport().installEventFilter(self)
         self.edit = QPlainTextEdit(block.text)
+        self.edit.installEventFilter(self)
         self.edit.setFont(code_font(10))
         self.edit.setPlaceholderText("Текст в формате Markdown: условие, пояснение к коду, подсказка…")
         self.edit.textChanged.connect(self._on_text)
@@ -201,13 +203,13 @@ class MarkdownBlockWidget(BlockWidget):
         self.stack.addWidget(self.edit)
         self.body.addWidget(self.stack)
         self._render()
-        self.set_editing(not block.text.strip())
+        self.set_editing(not block.text.strip(), focus=False)
         self._update_info()
 
     # ---- выделение: печатаются только выделенные строки (как в блоке кода)
     def _on_view_selection(self) -> None:
-        if self.stack.currentWidget() is not self.view:
-            return   # перерисовка при выходе из правки — выделение из исходника не трогаем
+        if self._rendering or self.stack.currentWidget() is not self.view:
+            return   # перерисовка (выход из правки, масштаб) — выделение не трогаем
         c = self.view.textCursor()
         sel = []
         if c.hasSelection():
@@ -216,10 +218,24 @@ class MarkdownBlockWidget(BlockWidget):
         self._set_sel(sel)
 
     def _on_edit_selection(self) -> None:
-        if self.stack.currentWidget() is not self.edit:
-            return
+        if self.stack.currentWidget() is self.edit:
+            self._sel_from_edit()
+
+    def _sel_from_edit(self) -> None:
         c = self.edit.textCursor()
         self._set_sel([c.selectionStart(), c.selectionEnd()] if c.hasSelection() else [])
+
+    def _restore_edit_selection(self) -> None:
+        """Сохранённое выделение (из просмотра или с прошлого запуска) — видимым в редакторе."""
+        c = self.edit.textCursor()
+        if len(self.block.sel) == 2:
+            n = len(self.block.text)
+            a, b = (min(max(0, x), n) for x in self.block.sel)
+            c.setPosition(a)
+            c.setPosition(b, QTextCursor.MoveMode.KeepAnchor)
+        else:
+            c.clearSelection()
+        self.edit.setTextCursor(c)
 
     def _set_sel(self, sel: list[int]) -> None:
         if sel != self.block.sel:
@@ -242,11 +258,19 @@ class MarkdownBlockWidget(BlockWidget):
         self._set_sel([])
 
     def eventFilter(self, obj, ev) -> bool:
-        if ev.type() == ev.Type.MouseButtonDblClick:
+        t = ev.type()
+        if obj is self.edit:
+            if t == ev.Type.FocusIn:
+                self.arm_requested.emit(self)   # правка блока — блок активный, как у блока кода
+            return False
+        if t == ev.Type.MouseButtonDblClick:
             self.set_editing(True)
             return True
-        if ev.type() == ev.Type.MouseButtonPress:
+        if t == ev.Type.MouseButtonPress:
             self.arm_requested.emit(self)   # щелчок по тексту — блок активный, как у блока кода
+        elif t == ev.Type.MouseButtonRelease and self.stack.currentWidget() is self.view \
+                and not self.view.textCursor().hasSelection():
+            self._set_sel([])               # щелчок без выделения — печатать весь блок
         return False
 
     def _on_print_as(self, _i: int) -> None:
@@ -256,11 +280,16 @@ class MarkdownBlockWidget(BlockWidget):
 
     def _on_text(self) -> None:
         self.block.text = self.edit.toPlainText()
+        self._sel_from_edit()               # прежние позиции выделения после правки неверны
         self._fit_edit()
         self.changed.emit()
 
     def _render(self) -> None:
-        self.view.setMarkdown(self.block.text or "*Пустой блок — дважды щёлкните, чтобы написать*")
+        self._rendering = True
+        try:
+            self.view.setMarkdown(self.block.text or "*Пустой блок — дважды щёлкните, чтобы написать*")
+        finally:
+            self._rendering = False
         QTimer.singleShot(0, self, self._fit)
 
     def _fit(self) -> None:
@@ -277,11 +306,14 @@ class MarkdownBlockWidget(BlockWidget):
             self.edit.setFixedHeight(h)
             self.stack.setFixedHeight(h)
 
-    def set_editing(self, on: bool) -> None:
+    def set_editing(self, on: bool, focus: bool = True) -> None:
+        """focus=False — при создании виджета: фокус в редакторе сделал бы блок активным."""
         if on:
             self.stack.setCurrentWidget(self.edit)
+            self._restore_edit_selection()
             self.toggle.setText("✔ Готово")
-            self.edit.setFocus()
+            if focus:
+                self.edit.setFocus()
         else:
             self._render()
             self.stack.setCurrentWidget(self.view)
@@ -297,7 +329,6 @@ class MarkdownBlockWidget(BlockWidget):
         self.view.setFont(f)
         self.edit.setFont(code_font(max(5, round(10 * zoom / 100))))
         self._render()
-        self._fit()
 
     def resizeEvent(self, e) -> None:
         super().resizeEvent(e)
@@ -307,8 +338,6 @@ class MarkdownBlockWidget(BlockWidget):
 # ------------------------------------------------------------------ Код
 
 class CodeBlockWidget(BlockWidget):
-    selection_changed = Signal(object)
-
     def __init__(self, block: Block, number: int) -> None:
         super().__init__(block, number)
         self.info = QLabel()
@@ -359,7 +388,6 @@ class CodeBlockWidget(BlockWidget):
         c = self.editor.textCursor()
         self.block.sel = [c.selectionStart(), c.selectionEnd()] if c.hasSelection() else []
         self._update_info()
-        self.selection_changed.emit(self)
         self.changed.emit()
 
     def _restore_selection(self) -> None:
@@ -388,9 +416,6 @@ class CodeBlockWidget(BlockWidget):
         else:
             self.info.setText(f"· {lines} стр., {len(text)} симв.")
             self.info.setStyleSheet("color: gray;")
-
-    def typing_text(self, whole_lines: bool) -> tuple[str, int]:
-        return typing_slice(self.block.text, self.block.sel, whole_lines)
 
 
 def typing_slice(text: str, sel: list[int], whole_lines: bool) -> tuple[str, int]:

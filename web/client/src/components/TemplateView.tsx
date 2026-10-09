@@ -7,9 +7,17 @@ import {
   BLOCK_CODE, BLOCK_MARKDOWN, type Block, blockTitle, makeBlock, ROLES, type Settings, type Template, typingSlice,
 } from "../../../shared/model.ts";
 import { findSelection, PRINT_MODES } from "../../../shared/textprint.ts";
-import { getState, updateTemplate, useApp } from "../api.ts";
+import { getState, updateBlock, updateTemplate, useApp } from "../api.ts";
 import { CodeEditor } from "./CodeEditor.tsx";
 import { Menu, type MenuItem } from "./Menu.tsx";
+
+// ссылки из текста блока — в новой вкладке, а не вместо страницы приложения
+DOMPurify.addHook("afterSanitizeAttributes", (node) => {
+  if (node.tagName === "A") {
+    node.setAttribute("target", "_blank");
+    node.setAttribute("rel", "noopener noreferrer");
+  }
+});
 
 const PRINT_AS_TIP = "Как печатать этот блок:\n" +
   "• как Markdown — исходник с ## и `…` (markdown-ячейка Jupyter, .md-файл);\n" +
@@ -33,10 +41,6 @@ export function TemplateView({ template }: { template: Template }) {
   }, [focus?.n]);
 
   const save = (t: Template, delay?: number) => updateTemplate(t, delay);
-  const setBlock = (b: Block, delay?: number) => {
-    const t = getState().templates.find((x) => x.id === template.id) ?? template;
-    save({ ...t, blocks: t.blocks.map((x) => (x.id === b.id ? b : x)) }, delay);
-  };
   const arm = (bid: string) => {
     const t = getState().templates.find((x) => x.id === template.id) ?? template;
     if (t.active_block === bid) return;
@@ -72,7 +76,7 @@ export function TemplateView({ template }: { template: Template }) {
           && engine.state !== "idle" ? [job.base, job.base + engine.pos] : null;
         return (
           <BlockView key={b.id} block={b} codeNumber={n} armed={template.active_block === b.id} settings={settings}
-            typed={typed} onChange={setBlock} onArm={() => arm(b.id)} onMove={(d) => move(i, d)}
+            typed={typed} onChange={(patch, delay) => updateBlock(template.id, b.id, patch, delay)} onArm={() => arm(b.id)} onMove={(d) => move(i, d)}
             onInsert={(after, type) => insertAt(after ? i + 1 : i, type)} onDelete={() => remove(b)} />
         );
       })}
@@ -95,7 +99,7 @@ interface BlockProps {
   armed: boolean;
   settings: Settings;
   typed: [number, number] | null;
-  onChange: (b: Block, delay?: number) => void;
+  onChange: (patch: Partial<Block>, delay?: number) => void;   // правка поверх последней версии блока
   onArm: () => void;
   onMove: (d: number) => void;
   onInsert: (after: boolean, type: string) => void;
@@ -115,7 +119,7 @@ function BlockView({ block: b, codeNumber, armed, settings, typed, onChange, onA
       if (!e.ctrlKey && !e.shiftKey) return;
       e.preventDefault();
       const zoom = Math.max(50, Math.min(300, b.zoom + (e.deltaY < 0 ? 10 : -10)));
-      if (zoom !== b.zoom) onChange({ ...b, zoom });
+      if (zoom !== b.zoom) onChange({ zoom });
     };
     node.addEventListener("wheel", onWheel, { passive: false });
     return () => node.removeEventListener("wheel", onWheel);
@@ -123,8 +127,8 @@ function BlockView({ block: b, codeNumber, armed, settings, typed, onChange, onA
 
   const kindValue = isCode ? "code" : b.role;
   const setKind = (v: string) => {
-    if (v === "code") onChange({ ...b, type: BLOCK_CODE }, 0);
-    else onChange({ ...b, type: BLOCK_MARKDOWN, role: v, sel: [] }, 0);
+    if (v === "code") onChange({ type: BLOCK_CODE }, 0);
+    else onChange({ type: BLOCK_MARKDOWN, role: v }, 0);
   };
 
   const insertMenu = (e: React.MouseEvent) => {
@@ -146,12 +150,12 @@ function BlockView({ block: b, codeNumber, armed, settings, typed, onChange, onA
           <option value="code">💻 Код</option>
         </select>
         <input className="title-edit" value={b.title} placeholder={blockTitle({ ...b, title: "" }, codeNumber)}
-          title="Заголовок блока" onChange={(e) => onChange({ ...b, title: e.target.value })} />
+          title="Заголовок блока" onChange={(e) => onChange({ title: e.target.value })} />
         <button className={`btn small arm-btn${armed ? " on" : ""}`} onClick={onArm}
           title="Блок, который напечатается по хоткею">{armed ? "● Активный" : "▶ Печатать этот"}</button>
         {!isCode && (
           <select value={b.print_as in PRINT_MODES ? b.print_as : "markdown"} title={PRINT_AS_TIP}
-            onChange={(e) => { onChange({ ...b, print_as: e.target.value }, 0); onArm(); }}>
+            onChange={(e) => { onChange({ print_as: e.target.value }, 0); onArm(); }}>
             {Object.entries(PRINT_MODES).map(([k, name]) => <option key={k} value={k}>Печатать {name}</option>)}
           </select>
         )}
@@ -160,7 +164,7 @@ function BlockView({ block: b, codeNumber, armed, settings, typed, onChange, onA
         )}
         {isCode && (
           <>
-            <select value={b.lang} onChange={(e) => onChange({ ...b, lang: e.target.value }, 0)} title="Язык подсветки и комментариев">
+            <select value={b.lang} onChange={(e) => onChange({ lang: e.target.value }, 0)} title="Язык подсветки и комментариев">
               {[...new Set([b.lang, ...LANGS])].map((l) => <option key={l}>{l}</option>)}
             </select>
             <CodeInfo block={b} settings={settings} />
@@ -168,7 +172,7 @@ function BlockView({ block: b, codeNumber, armed, settings, typed, onChange, onA
         )}
         <span className="grow" />
         {b.zoom !== 100 && (
-          <button className="btn small ghost" title="Обычный размер" onClick={() => onChange({ ...b, zoom: 100 })}>{b.zoom}%</button>
+          <button className="btn small ghost" title="Обычный размер" onClick={() => onChange({ zoom: 100 })}>{b.zoom}%</button>
         )}
         <span className="tools">
           <button className="btn small ghost" title="Выше" onClick={() => onMove(-1)}>▲</button>
@@ -181,9 +185,9 @@ function BlockView({ block: b, codeNumber, armed, settings, typed, onChange, onA
         <div className="code-wrap">
           <CodeEditor value={b.text} lang={b.lang} sel={armed ? b.sel : []} zoom={b.zoom} typed={typed}
             onFocus={onArm}
-            onChange={(text) => onChange({ ...b, text, sel: b.sel.length === 2 && b.sel[1] > text.length ? [] : b.sel })}
+            onChange={(text) => onChange({ text })}
             onSelection={(sel) => {
-              if (sel.join() !== b.sel.join()) onChange({ ...b, sel }, 250);
+              if (sel.join() !== b.sel.join()) onChange({ sel }, 250);
             }} />
         </div>
       ) : (
@@ -205,7 +209,7 @@ function CodeInfo({ block: b, settings }: { block: Block; settings: Settings }) 
   return <span className="info">· {part}: {lines} стр., {text.length} симв.{settings.strip_comments ? " без комм." : ""}</span>;
 }
 
-function MarkdownBlock({ block: b, onChange, onArm }: { block: Block; onChange: (b: Block, delay?: number) => void; onArm: () => void }) {
+function MarkdownBlock({ block: b, onChange, onArm }: { block: Block; onChange: (patch: Partial<Block>, delay?: number) => void; onArm: () => void }) {
   const [editing, setEditing] = useState(!b.text.trim());
   const html = useMemo(() => DOMPurify.sanitize(marked.parse(b.text, { async: false, gfm: true, breaks: false })), [b.text]);
   const ta = useRef<HTMLTextAreaElement>(null);
@@ -219,7 +223,7 @@ function MarkdownBlock({ block: b, onChange, onArm }: { block: Block; onChange: 
 
   // выделение: печатаются только выделенные строки (как в блоке кода)
   const setSel = (sel: number[]) => {
-    if (sel.join() !== b.sel.join()) onChange({ ...b, sel }, 250);
+    if (sel.join() !== b.sel.join()) onChange({ sel }, 250);
   };
   const selectionFromView = () => {
     const el = view.current;
@@ -238,7 +242,7 @@ function MarkdownBlock({ block: b, onChange, onArm }: { block: Block; onChange: 
     return (
       <textarea ref={ta} className="md-edit" value={b.text} autoFocus={!!b.text} spellCheck
         style={{ fontSize: `${(13.5 * b.zoom) / 100}px` }} placeholder="Текст в формате Markdown"
-        onChange={(e) => onChange({ ...b, text: e.target.value })}
+        onChange={(e) => onChange({ text: e.target.value })}
         onSelect={(e) => {
           const { selectionStart: a, selectionEnd: z } = e.currentTarget;
           setSel(z > a ? [a, z] : []);

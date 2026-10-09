@@ -35,6 +35,7 @@ CLEAR_BEFORE = set(")]}\"'`")
 log = logging.getLogger(__name__)
 
 IDLE, COUNTDOWN, RUNNING, PAUSED, FINISHED = "idle", "countdown", "running", "paused", "finished"
+_PAUSED_WHILE_PREPARING = object()   # _prepare: пока шёл отсчёт или ждали окно, поставили на паузу
 
 
 @dataclass
@@ -104,25 +105,29 @@ class TypingEngine(QObject):
         self._units: list[Unit] = []
         self._pos = 0
         self._gen = 0
-        self._run = threading.Event()
+        self._run = threading.Event()    # снят — пауза: поток печати ждёт
+        # пауза (GUI-поток) и переход в «печать» (поток печати) — под одной блокировкой,
+        # иначе пауза во время отсчёта терялась бы, а состояние показывало «печать»
+        self._lock = threading.RLock()
         self._resume_delay = 0.0
+        self._resume_countdown = 0
         self._thread: threading.Thread | None = None
-        self.job_key = None    # чем занят движок (id блока) — для UI
 
     # ------------------------------------------------------------ API (GUI-поток)
-    def load(self, text: str, job_key=None) -> None:
+    def load(self, text: str) -> None:
         """Загружает новый текст. Текущая печать прерывается."""
         self._cancel()
         self._text = normalize(text)
         self._units = build_units(self._text, self.settings)
         self._pos = 0
-        self.job_key = job_key
         self._set_state(IDLE)
         self.progress.emit(0, len(self._text))
 
     @property
-    def has_job(self) -> bool:
-        return bool(self._units)
+    def active(self) -> bool:
+        """Печать идёт или готовится (отсчёт, задержка хоткея, ожидание отпускания Ctrl/Alt/Shift)."""
+        return self.state in (RUNNING, COUNTDOWN) or bool(
+            self._thread and self._thread.is_alive() and self._run.is_set())
 
     def start(self, delay: float = 0.0, countdown: int = 0) -> None:
         """Старт с текущей позиции (с начала, если закончили)."""
@@ -143,10 +148,12 @@ class TypingEngine(QObject):
         self._thread.start()
 
     def pause(self, reason: str = "хоткей/кнопка") -> None:
-        if self.state in (RUNNING, COUNTDOWN):
+        with self._lock:
+            if not self.active:
+                return
             self._run.clear()
             self._set_state(PAUSED)
-            log.info("Пауза (%s) на %d/%d", reason, self._pos, len(self._units))
+        log.info("Пауза (%s) на %d/%d", reason, self._pos, len(self._units))
 
     def resume(self, delay: float = 0.0, countdown: int = 0) -> None:
         if self.state != PAUSED:
@@ -158,12 +165,6 @@ class TypingEngine(QObject):
         self._resume_delay = delay
         self._resume_countdown = countdown
         self._run.set()
-
-    def toggle(self, delay: float = 0.0, countdown: int = 0) -> None:
-        if self.state in (RUNNING, COUNTDOWN):
-            self.pause()
-        else:
-            self.start(delay, countdown)
 
     def restart(self, delay: float = 0.0, countdown: int = 0) -> None:
         self._cancel()
@@ -215,6 +216,27 @@ class TypingEngine(QObject):
                 return True
             time.sleep(min(left, 0.05))
 
+    def _interrupted(self, gen: int) -> bool:
+        return not self._alive(gen) or not self._run.is_set()
+
+    def _wait(self, gen: int, seconds: float) -> bool:
+        """Ожидание, которое обрывают и пауза, и остановка. False — оборвали."""
+        end = time.perf_counter() + seconds
+        while not self._interrupted(gen):
+            left = end - time.perf_counter()
+            if left <= 0:
+                return True
+            time.sleep(min(left, 0.05))
+        return False
+
+    def _go_running(self, gen: int) -> bool:
+        """В «печать» — только если за время подготовки не поставили на паузу и не остановили."""
+        with self._lock:
+            if self._interrupted(gen):
+                return False
+            self._set_state(RUNNING)
+            return True
+
     def _think(self, gen: int, seconds: float) -> bool:
         """Пауза-обдумывание: обрывается, если поставили на паузу. False — если печать отменена."""
         end = time.perf_counter() + seconds
@@ -227,21 +249,35 @@ class TypingEngine(QObject):
             time.sleep(min(left, 0.05))
         return self._alive(gen)
 
-    def _prepare(self, gen: int, delay: float, countdown: int) -> int | None:
-        """Отсчёт, ожидание отпускания модификаторов, захват целевого окна."""
+    def _auto_pause(self, gen: int) -> None:
+        """Пауза по решению самого движка (сменилось окно, ошибка ввода)."""
+        with self._lock:
+            if self._alive(gen):
+                self._run.clear()
+                self._set_state(PAUSED)
+
+    def _prepare(self, gen: int, delay: float, countdown: int):
+        """Отсчёт, ожидание отпускания модификаторов, захват целевого окна.
+        → hwnd; None — не начато (сообщение показано); _PAUSED_WHILE_PREPARING — пауза или стоп."""
         if countdown > 0:
-            self._set_state(COUNTDOWN)
+            with self._lock:
+                if self._interrupted(gen):
+                    return _PAUSED_WHILE_PREPARING
+                self._set_state(COUNTDOWN)
             for n in range(countdown, 0, -1):
                 self.countdown.emit(n)
-                if not self._sleep(gen, 1.0):
-                    return None
+                if not self._wait(gen, 1.0):
+                    self.countdown.emit(0)
+                    return _PAUSED_WHILE_PREPARING
             self.countdown.emit(0)
-        if not w.wait_modifiers_released():
+        if not w.wait_modifiers_released(cancelled=lambda: self._interrupted(gen)):
+            if self._interrupted(gen):
+                return _PAUSED_WHILE_PREPARING
             log.warning("Не начато: модификаторы удерживаются дольше 5 с")
             self.message.emit("Отпустите Ctrl/Alt/Shift — печать не начата.")
             return None
-        if delay and not self._sleep(gen, delay):
-            return None
+        if delay and not self._wait(gen, delay):
+            return _PAUSED_WHILE_PREPARING
         hwnd = w.foreground_window()
         if w.is_own_window(hwnd):
             log.info("Не начато: в фокусе окно самого AutoPrintCode")
@@ -261,25 +297,27 @@ class TypingEngine(QObject):
     def _worker(self, gen: int, delay: float, countdown: int) -> None:
         target = self._prepare(gen, delay, countdown)
         if target is None:
-            if self._alive(gen):
-                self._set_state(PAUSED if self._pos else IDLE)
-                self._run.clear()
+            with self._lock:
+                if self._alive(gen):
+                    self._set_state(PAUSED if self._pos else IDLE)
+                    self._run.clear()
             return
-        self._set_state(RUNNING)
+        if target is not _PAUSED_WHILE_PREPARING:
+            self._go_running(gen)
         total = len(self._text)
         thought = -1    # для какой единицы пауза-обдумывание уже выдержана
         while self._alive(gen) and self._pos < len(self._units):
-            if not self._run.is_set():
+            if self.state != RUNNING:
+                # пауза (или пауза во время подготовки): ждём «продолжить», затем снова отсчёт и окно
                 self._run.wait()
                 if not self._alive(gen):
                     return
-                target = self._prepare(gen, self._resume_delay, getattr(self, "_resume_countdown", 0))
+                target = self._prepare(gen, self._resume_delay, self._resume_countdown)
                 if target is None:
-                    if self._alive(gen):
-                        self._run.clear()
-                        self._set_state(PAUSED)
+                    self._auto_pause(gen)
                     continue
-                self._set_state(RUNNING)
+                if target is _PAUSED_WHILE_PREPARING or not self._go_running(gen):
+                    continue
             unit = self._units[self._pos]
             if unit.pause and thought != self._pos:
                 # обдумывание: прерывается паузой и остановкой; после него заново проверяем окно
@@ -288,8 +326,7 @@ class TypingEngine(QObject):
                 thought = self._pos
                 continue
             if self.settings.autopause_on_focus_change and w.foreground_window() != target:
-                self._run.clear()
-                self._set_state(PAUSED)
+                self._auto_pause(gen)
                 log.info("Пауза (сменилось окно → %s) на %d/%d", w.describe_window(w.foreground_window()),
                          self._pos, len(self._units))
                 self.message.emit("Пауза: сменилось активное окно. Вернитесь в нужное окно и продолжите.")
@@ -298,8 +335,7 @@ class TypingEngine(QObject):
                 self._execute(unit)
             except OSError as e:
                 log.error("Ошибка SendInput на %d/%d: %s", self._pos, len(self._units), e)
-                self._run.clear()
-                self._set_state(PAUSED)
+                self._auto_pause(gen)
                 self.message.emit(f"Ошибка ввода: {e}")
                 continue
             self._pos += 1

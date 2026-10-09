@@ -1,5 +1,5 @@
 // Библиотека образцов: поиск, новый, импорт, контекстное меню (переименовать, дублировать, экспорт, удалить).
-import { useRef, useState } from "react";
+import { useState } from "react";
 import { exportIpynb, exportJson, importFile } from "../../../shared/importers.ts";
 import {
   BLOCK_CODE, BLOCK_MARKDOWN, codeBlocks, freshIds, makeBlock, makeTemplate, type Template,
@@ -49,7 +49,6 @@ export function Library({ fileInput }: { fileInput: React.RefObject<HTMLInputEle
   const [q, setQ] = useState("");
   const [menu, setMenu] = useState<{ x: number; y: number; items: MenuItem[] } | null>(null);
   const [renaming, setRenaming] = useState("");
-  const renameInput = useRef<HTMLInputElement>(null);
 
   const query = q.trim().toLowerCase();
   const shown = templates.filter((t) => !query || t.title.toLowerCase().includes(query)
@@ -85,7 +84,7 @@ export function Library({ fileInput }: { fileInput: React.RefObject<HTMLInputEle
           <div key={t.id} className={`item${t.id === current ? " current" : ""}`} onClick={() => openTab(t.id)}
             onContextMenu={(e) => context(e, t)} onDoubleClick={() => setRenaming(t.id)} title={t.title}>
             {renaming === t.id ? (
-              <input ref={renameInput} type="text" defaultValue={t.title} autoFocus style={{ flex: 1 }}
+              <input type="text" defaultValue={t.title} autoFocus style={{ flex: 1 }}
                 onClick={(e) => e.stopPropagation()}
                 onBlur={(e) => {
                   const v = e.target.value.trim();

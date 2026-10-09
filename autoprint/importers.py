@@ -38,7 +38,7 @@ def _guess_lang(nb: dict) -> str:
 
 
 def import_ipynb(path: str) -> Template:
-    nb = json.loads(Path(path).read_text(encoding="utf-8"))
+    nb = json.loads(Path(path).read_text(encoding="utf-8-sig"))
     if "cells" not in nb:
         raise ValueError("Это не тетрадка Jupyter (нет поля cells). Поддерживается формат nbformat 4.")
     lang = _guess_lang(nb)
@@ -56,7 +56,7 @@ _FENCE = re.compile(r"^```[ \t]*([\w+#.-]*)[^\n]*\n(.*?)^```[ \t]*$", re.M | re.
 
 
 def import_markdown(path: str) -> Template:
-    text = Path(path).read_text(encoding="utf-8").replace("\r\n", "\n")
+    text = Path(path).read_text(encoding="utf-8-sig").replace("\r\n", "\n")
     cells: list[tuple] = []
     pos = 0
     langs = []

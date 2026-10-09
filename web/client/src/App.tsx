@@ -5,9 +5,12 @@ import {
   closeTab, command, moveBlock, moveTab, openTab, pauseHotkeys, shutdownHelper, updateSettings, useApp,
 } from "./api.ts";
 import { importFiles, Library, newTemplate } from "./components/Library.tsx";
+import { NumberField } from "./components/NumberField.tsx";
 import { SettingsDialog } from "./components/SettingsDialog.tsx";
 import { TemplateView } from "./components/TemplateView.tsx";
 import { sounds } from "./sound.ts";
+
+const TAB_MIME = "application/x-autoprintcode-tab";
 
 const STATE: Record<EngineState, [string, string]> = {
   idle: ["Готов", "#3b82f6"],
@@ -80,6 +83,9 @@ export function App() {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      // Alt+↑/↓ в редакторе кода — перенос строки (CodeMirror), в полях ввода — их собственные клавиши
+      const inEditor = (e.target as HTMLElement).closest?.(".cm-editor, textarea, input, select");
+      if (e.defaultPrevented || (e.altKey && inEditor)) return;
       if (e.altKey && e.key === "ArrowDown") { e.preventDefault(); moveBlock(+1); }
       else if (e.altKey && e.key === "ArrowUp") { e.preventDefault(); moveBlock(-1); }
       else if (e.ctrlKey && e.key === ",") { e.preventDefault(); setShowSettings(true); }
@@ -137,8 +143,8 @@ export function App() {
           {Object.entries(PROFILES).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
         </select>
         <label htmlFor="cpm">Скорость:</label>
-        <input id="cpm" type="number" min={30} max={3000} step={20} value={settings.cpm}
-          onChange={(e) => updateSettings({ cpm: Math.max(30, Math.min(3000, Number(e.target.value))) })} /> <span className="unit">симв/мин</span>
+        <NumberField id="cpm" min={30} max={3000} step={20} value={settings.cpm}
+          onCommit={(cpm) => updateSettings({ cpm })} /> <span className="unit">симв/мин</span>
         <button className="btn toggle" aria-pressed={settings.strip_comments} title="Не печатать комментарии"
           onClick={() => updateSettings({ strip_comments: !settings.strip_comments })}>Без комментариев</button>
         <button className="btn toggle" aria-pressed={settings.human_typing} title="Имитация ручного ввода: ритм, паузы, опечатки"
@@ -181,7 +187,7 @@ export function App() {
                 onClick={() => openTab(t.id)} onAuxClick={(e) => e.button === 1 && closeTab(t.id)}
                 onDragStart={(e) => {
                   e.dataTransfer.effectAllowed = "move";
-                  e.dataTransfer.setData("text/plain", t.title);
+                  e.dataTransfer.setData(TAB_MIME, t.id);   // не text/plain: иначе вкладку можно «уронить» в редактор как текст
                   setDrag({ id: t.id, over: t.id, after: false });
                 }}
                 onDragOver={(e) => {

@@ -28,8 +28,7 @@ const langCache = new Map<string, Promise<Extension | null>>();
 function loadLang(name: string): Promise<Extension | null> {
   let p = langCache.get(name);
   if (!p) {
-    const desc = languages.find((l) => l.name.toLowerCase() === name || l.alias.includes(name) || l.extensions.includes(name))
-      ?? (name === "javascript" ? languages.find((l) => l.name === "JavaScript") : undefined);
+    const desc = languages.find((l) => l.name.toLowerCase() === name || l.alias.includes(name) || l.extensions.includes(name));
     p = desc ? desc.load().then((s) => s as Extension) : Promise.resolve(null);
     langCache.set(name, p);
   }

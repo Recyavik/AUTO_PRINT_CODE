@@ -279,9 +279,9 @@ export type ClientMsg =
   | { t: "settings"; settings: Partial<Settings> }
   | { t: "cmd"; cmd: "toggle" | "restart" | "stop"; fromButton?: boolean }
   | { t: "block"; d: number }
-  | { t: "pauseHotkeys"; on: boolean }
-  | { t: "shutdown" }
-  | { t: "autostart"; on: boolean };     // запуск помощника при входе в Windows                   // выключить помощника (он работает без окна)   // окно настроек: отпустить хоткеи, чтобы их можно было нажать
+  | { t: "pauseHotkeys"; on: boolean }   // окно настроек: отпустить хоткеи, чтобы их можно было нажать
+  | { t: "shutdown" }                    // выключить помощника (он работает без окна)
+  | { t: "autostart"; on: boolean };     // запуск помощника при входе в Windows
 
 export type ServerMsg =
   | { t: "hello"; version: string; settings: Settings; templates: Template[]; engine: EngineStatus;

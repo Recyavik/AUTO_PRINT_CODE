@@ -90,7 +90,7 @@ class TemplateView(QWidget):
             self.arm(codes[0].block.id)
         self._apply_armed()
         if keep_scroll:
-            QTimer.singleShot(0, lambda: self.scroll.verticalScrollBar().setValue(scroll_pos))
+            QTimer.singleShot(0, self, lambda: self.scroll.verticalScrollBar().setValue(scroll_pos))
         else:
             self.scroll.verticalScrollBar().setValue(0)
 
@@ -115,7 +115,7 @@ class TemplateView(QWidget):
                 w.set_number(n)
 
     def add_block(self, kind: str) -> None:
-        """Кнопки внизу: новый блок встаёт сразу после активного блока кода, а если активного нет — в конец."""
+        """Кнопки внизу: новый блок встаёт сразу после активного блока, а если активного нет — в конец."""
         bl = self.template.blocks
         active = self.template.find_block(self.template.active_block)
         self._insert_block(bl.index(active) + 1 if active else len(bl), kind)
@@ -159,15 +159,14 @@ class TemplateView(QWidget):
         self.changed.emit()
 
     def _change_type(self, wdg: BlockWidget, key: str) -> None:
-        """Смена типа: роль Markdown-блока или превращение текст ⇄ код (текст сохраняется)."""
+        """Смена типа: роль Markdown-блока или превращение текст ⇄ код (текст, выделение и «активный» сохраняются)."""
         b = wdg.block
-        if key == "code":
+        if key == BLOCK_CODE:
             if b.type != BLOCK_CODE:
                 last = next((x for x in self.template.blocks if x.type == BLOCK_CODE), None)
                 b.lang = last.lang if last else b.lang
             b.type = BLOCK_CODE
         else:
-            b.sel = []      # выделение — только в блоке кода; активным блок остаётся: текст тоже печатается
             b.type = BLOCK_MARKDOWN
             b.role = key
         self._rebuild(keep_scroll=True)
@@ -198,7 +197,7 @@ class TemplateView(QWidget):
         for w in self.widgets:
             on = w.block.id == self.template.active_block
             w.set_armed(on)
-            if isinstance(w, (CodeBlockWidget, MarkdownBlockWidget)) and not on and w.block.sel:
+            if not on and w.block.sel:
                 w.clear_selection()   # выделение — только у активного блока
 
     def block_widget(self, block_id: str) -> BlockWidget | None:

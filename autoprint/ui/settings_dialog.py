@@ -6,8 +6,7 @@ from dataclasses import asdict
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QKeySequence
-from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox, QFormLayout, QGroupBox,
-                               QHBoxLayout, QKeySequenceEdit, QLabel, QMessageBox, QPushButton, QSlider,
+from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox, QFormLayout, QHBoxLayout, QKeySequenceEdit, QLabel, QMessageBox, QPushButton, QSlider,
                                QSpinBox, QTabWidget, QVBoxLayout, QWidget)
 
 from .. import __version__
@@ -221,7 +220,9 @@ class SettingsDialog(QDialog):
         self.upd_interval = QComboBox()
         for k, v in INTERVALS.items():
             self.upd_interval.addItem(v, k)
-        self.upd_interval.setCurrentIndex(max(0, self.upd_interval.findData(s.update_interval_h)))
+        if self.upd_interval.findData(s.update_interval_h) < 0:   # своё значение из settings.json — не терять
+            self.upd_interval.addItem(f"Каждые {s.update_interval_h} ч", s.update_interval_h)
+        self.upd_interval.setCurrentIndex(self.upd_interval.findData(s.update_interval_h))
         self.upd_mode = QComboBox()
         # собранный .exe сам себя не заменит — ему доступно только «сообщить»
         modes = {MODE_NOTIFY: UPDATE_MODES[MODE_NOTIFY]} if install_mode() == MODE_FROZEN else UPDATE_MODES

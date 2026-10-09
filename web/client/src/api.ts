@@ -1,7 +1,7 @@
 // Связь с помощником (WebSocket) и состояние страницы.
 // Помощник — источник истины: образцы, настройки, движок печати. Страница показывает и правит.
 import { useSyncExternalStore } from "react";
-import type { ClientMsg, EngineStatus, ServerMsg, Settings, Template } from "../../shared/model.ts";
+import type { Block, ClientMsg, EngineStatus, ServerMsg, Settings, Template } from "../../shared/model.ts";
 import { sounds } from "./sound.ts";
 
 export interface Toast { id: number; text: string; level: "info" | "warn" }
@@ -38,8 +38,13 @@ function set(patch: Partial<AppState>): void {
   for (const l of listeners) l();
 }
 
+function subscribe(l: () => void): () => void {
+  listeners.add(l);
+  return () => listeners.delete(l);
+}
+
 export function useApp<T>(select: (s: AppState) => T): T {
-  return useSyncExternalStore((l) => { listeners.add(l); return () => listeners.delete(l); }, () => select(state));
+  return useSyncExternalStore(subscribe, () => select(state));
 }
 export const getState = () => state;
 
@@ -70,22 +75,29 @@ function connect(): void {
 }
 connect();
 
-function send(msg: ClientMsg): void {
-  if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg));
+function send(msg: ClientMsg): boolean {
+  if (ws?.readyState !== WebSocket.OPEN) return false;
+  ws.send(JSON.stringify(msg));
+  return true;
 }
 
 function onMessage(m: ServerMsg): void {
   switch (m.t) {
-    case "hello":
-      pending.clear();
-      set({ stopped: false, autostart: m.autostart, connected: true, everConnected: true, version: m.version, settings: m.settings, templates: m.templates, engine: m.engine });
+    case "hello": {
+      // правки, которые не дошли до помощника (связь пропадала), важнее его копии — досылаем
+      const templates = m.templates.map((t) => pending.get(t.id)?.template ?? t);
+      set({ stopped: false, autostart: m.autostart, connected: true, everConnected: true, version: m.version, settings: m.settings, templates, engine: m.engine });
+      flushAll();
       sounds.configure(m.settings);
       if (m.hotkeysFailed) toast(`Не удалось занять хоткеи: ${m.hotkeysFailed}. Смените их в настройках.`, "warn");
       break;
+    }
     case "template": {
       // своя несохранённая правка того же образца важнее — от помощника берём только активный блок
+      // (и в отложенную отправку тоже: иначе она вернула бы помощнику прежний активный блок)
       const local = pending.get(m.template.id);
       const t = local ? { ...local.template, active_block: m.template.active_block } : m.template;
+      if (local) local.template = t;
       const exists = state.templates.some((x) => x.id === t.id);
       set({ templates: exists ? state.templates.map((x) => (x.id === t.id ? t : x)) : [...state.templates, t] });
       break;
@@ -129,12 +141,24 @@ export function updateTemplate(t: Template, delay = 400): void {
   pending.set(t.id, { template: t, timer });
 }
 
-export function flushTemplate(id: string): void {
+/** Правка одного блока поверх его последней версии (а не копии из замыкания, которая могла устареть:
+ *  редактор кода в одном обновлении сообщает и текст, и выделение). */
+export function updateBlock(tid: string, bid: string, patch: Partial<Block>, delay?: number): void {
+  const t = state.templates.find((x) => x.id === tid);
+  if (!t) return;
+  updateTemplate({ ...t, blocks: t.blocks.map((b) => (b.id === bid ? { ...b, ...patch } : b)) }, delay);
+}
+
+function flushTemplate(id: string): void {
   const p = pending.get(id);
   if (!p) return;
   clearTimeout(p.timer);
-  pending.delete(id);
-  send({ t: "saveTemplate", template: p.template });
+  // нет связи — правка остаётся в очереди и уйдёт после переподключения (hello)
+  if (send({ t: "saveTemplate", template: p.template })) pending.delete(id);
+}
+
+function flushAll(): void {
+  for (const id of [...pending.keys()]) flushTemplate(id);
 }
 
 export function addTemplate(t: Template, open = true): void {
@@ -185,7 +209,7 @@ export function closeTab(id: string): void {
 
 /** Перед командой печати — отправить несохранённые правки, чтобы помощник печатал то, что на экране. */
 export function command(cmd: "toggle" | "restart" | "stop", fromButton = false): void {
-  for (const id of [...pending.keys()]) flushTemplate(id);
+  flushAll();
   sounds.unlock();
   send({ t: "cmd", cmd, fromButton });
 }
@@ -195,7 +219,7 @@ export function setAutostart(on: boolean): void {
 }
 
 export function shutdownHelper(): void {
-  for (const id of [...pending.keys()]) flushTemplate(id);
+  flushAll();
   send({ t: "shutdown" });
   set({ stopped: true });
 }
@@ -205,6 +229,6 @@ export function pauseHotkeys(on: boolean): void {
 }
 
 export function moveBlock(d: number): void {
-  for (const id of [...pending.keys()]) flushTemplate(id);
+  flushAll();
   send({ t: "block", d });
 }

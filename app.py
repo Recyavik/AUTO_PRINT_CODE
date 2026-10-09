@@ -46,6 +46,8 @@ def main() -> int:
     except RuntimeError as e:
         QMessageBox.critical(None, APP_NAME, str(e))
         return 1
+    if store.warning:
+        QMessageBox.warning(None, APP_NAME, store.warning)
 
     from autoprint.ui.main_window import STATE_COLORS, MainWindow, save_ico
     from autoprint.typer import IDLE
@@ -57,7 +59,7 @@ def main() -> int:
     win.show()
     code = app.exec()
     lock.unlock()
-    if win.relaunch_requested:   # обновление или откат: запустить уже новую версию
+    if win.relaunch_requested:   # установлено обновление: запустить уже новую версию
         from autoprint import updater
         updater.relaunch()
     return code

@@ -5,7 +5,9 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
+import shutil
 import sys
 import time
 import uuid
@@ -25,12 +27,27 @@ SETTINGS_FILE = DATA_DIR / "settings.json"
 TEMPLATES_FILE = DATA_DIR / "templates.json"
 
 
+BACKUP_EVERY_S = 600   # резервная копия обновляется не чаще раза в 10 минут — есть куда откатиться
+
+log = logging.getLogger(__name__)
+
+
 def _atomic_write(path: Path, data: dict, backup: bool = False) -> None:
+    """Запись через временный файл: при сбое на диске остаётся либо старая, либо новая версия.
+    backup — перед записью скопировать текущий файл в .bak (если копия старше BACKUP_EVERY_S)."""
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    with open(tmp, "w", encoding="utf-8") as f:
+        f.write(json.dumps(data, ensure_ascii=False, indent=2))
+        f.flush()
+        os.fsync(f.fileno())     # иначе после сбоя питания файл может оказаться пустым
     if backup and path.exists():
-        os.replace(path, path.with_suffix(path.suffix + ".bak"))
+        bak = path.with_suffix(path.suffix + ".bak")
+        try:
+            if not bak.exists() or time.time() - bak.stat().st_mtime > BACKUP_EVERY_S:
+                shutil.copy2(path, bak)   # копия, а не переименование: основной файл не исчезает ни на миг
+        except OSError as e:
+            log.warning("Резервная копия %s не обновлена: %s", bak, e)
     os.replace(tmp, path)
 
 
@@ -106,12 +123,19 @@ class Settings:
     def load(cls) -> "Settings":
         s = cls()
         try:
-            raw = json.loads(SETTINGS_FILE.read_text(encoding="utf-8"))
+            raw = json.loads(SETTINGS_FILE.read_text(encoding="utf-8-sig"))
         except (OSError, ValueError):
             return s
-        known = {f.name: f.type for f in fields(cls)}
+        if not isinstance(raw, dict):
+            return s
+        known = {f.name for f in fields(cls)}
         for k, v in raw.items():
-            if k in known and type(v) is type(getattr(s, k)):
+            if k not in known:
+                continue
+            default = getattr(s, k)
+            if type(v) is int and type(default) is float:
+                v = float(v)                 # «think_pause_s: 2» — тоже число
+            if type(v) is type(default):
                 setattr(s, k, v)
         s.sound_style = LEGACY_SOUND_STYLES.get(s.sound_style, s.sound_style)
         return s
@@ -237,26 +261,59 @@ def _fresh_ids(t: Template) -> Template:
     return t
 
 
+def _read_templates(path: Path) -> tuple[dict, list[Template]]:
+    """→ (исходный JSON, образцы). ValueError — файл повреждён или не того формата."""
+    raw = json.loads(path.read_text(encoding="utf-8-sig"))
+    try:
+        return raw, [_template_from(t) for t in raw.get("templates", [])]
+    except (AttributeError, TypeError, KeyError) as e:
+        raise ValueError(f"неверная структура: {e}") from e
+
+
 class TemplateStore:
     def __init__(self) -> None:
         self.templates: list[Template] = []
+        self.warning = ""     # что пошло не так при загрузке (показать пользователю)
         self.load()
 
     def load(self) -> None:
+        bak = TEMPLATES_FILE.with_suffix(TEMPLATES_FILE.suffix + ".bak")
         try:
-            raw = json.loads(TEMPLATES_FILE.read_text(encoding="utf-8"))
+            raw, self.templates = _read_templates(TEMPLATES_FILE)
         except FileNotFoundError:
-            self.templates = [sample_template()]
-            self.save()
-            return
+            if not bak.exists():
+                self.templates = [sample_template()]
+                self.save()
+                return
+            raw, self.templates = self._recover(bak, f"{TEMPLATES_FILE.name} не найден")
         except (OSError, ValueError) as e:
-            raise RuntimeError(f"Не удалось прочитать {TEMPLATES_FILE}: {e}") from e
+            if not bak.exists():
+                raise RuntimeError(f"Не удалось прочитать {TEMPLATES_FILE}: {e}") from e
+            raw, self.templates = self._recover(bak, f"{TEMPLATES_FILE.name} повреждён ({e})")
         if raw.get("version", 1) < 3:
             # одноразовая копия базы в старом формате (с задачами) — на случай отката
             old = TEMPLATES_FILE.with_suffix(".v2.json")
             if not old.exists():
                 old.write_text(json.dumps(raw, ensure_ascii=False, indent=2), encoding="utf-8")
-        self.templates = [_template_from(t) for t in raw.get("templates", [])]
+
+    def _recover(self, bak: Path, why: str) -> tuple[dict, list[Template]]:
+        """Основной файл не читается — берём резервную копию, испорченный файл откладываем."""
+        try:
+            raw, templates = _read_templates(bak)
+        except (OSError, ValueError) as e:
+            raise RuntimeError(f"{why}, резервная копия {bak.name} тоже не читается: {e}") from e
+        if TEMPLATES_FILE.exists():
+            stamp, n = time.strftime("%Y%m%d-%H%M%S"), 1
+            broken = TEMPLATES_FILE.with_name(f"templates.broken-{stamp}.json")
+            while broken.exists():
+                n += 1
+                broken = TEMPLATES_FILE.with_name(f"templates.broken-{stamp}-{n}.json")
+            os.replace(TEMPLATES_FILE, broken)
+            why += f"; он сохранён как {broken.name}"
+        shutil.copy2(bak, TEMPLATES_FILE)
+        self.warning = f"{why}. Образцы восстановлены из резервной копии {bak.name}."
+        log.warning(self.warning)
+        return raw, templates
 
     def save(self) -> None:
         _atomic_write(TEMPLATES_FILE, {"version": 3, "templates": [asdict(t) for t in self.templates]},
@@ -292,5 +349,5 @@ class TemplateStore:
 
     @staticmethod
     def read_template_file(path: str) -> Template:
-        raw = json.loads(Path(path).read_text(encoding="utf-8"))
+        raw = json.loads(Path(path).read_text(encoding="utf-8-sig"))
         return _fresh_ids(_template_from(raw.get("autoprintcode_template", raw)))

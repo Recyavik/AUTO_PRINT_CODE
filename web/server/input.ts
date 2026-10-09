@@ -10,7 +10,7 @@ const PostThreadMessageW = koffi.load("user32.dll")
 const WM_QUIT = 0x0012;
 const WM_APP_WAKE = 0x8000 + 1;
 
-export class InputHooks extends EventEmitter<{ hotkey: [string]; failed: [string]; tripped: ["key" | "mouse"] }> {
+export class InputHooks extends EventEmitter<{ hotkey: [string]; failed: [string]; tripped: ["key" | "mouse"]; error: [Error] }> {
   private readonly worker: Worker;
   private readonly port;
   private threadId = 0;
@@ -22,6 +22,7 @@ export class InputHooks extends EventEmitter<{ hotkey: [string]; failed: [string
     this.worker = new Worker(new URL("./input-worker.ts", import.meta.url), {
       workerData: { port: port2 }, transferList: [port2], name: "input-hooks",
     });
+    this.worker.on("error", (err) => this.emit("error", err as Error));   // без обработчика падение потока уронило бы помощника
     port1.on("message", (ev: InputEvent) => {
       if (ev.e === "ready") {
         this.threadId = ev.threadId;

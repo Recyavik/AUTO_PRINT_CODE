@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import math
 import random
-import re
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -104,7 +103,7 @@ def humanize(units: list["Unit"], settings: "Settings", rng: random.Random | Non
             prev_blank = not line_has_text
             line_start, line_has_text, prev_ch = True, False, ""
             continue
-        if u.kind != "char" or (line_start and u.text in " \t"):
+        if u.kind != "char" or (line_start and not u.text.strip()):
             continue        # отступы и служебные единицы — без изменений
         span = word_of[idx]
         w = word(span) if span else ""

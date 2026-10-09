@@ -14,35 +14,66 @@ _HASH = ("#",)
 _SLASH = ("//",)
 _C_BLOCK = (("/*", "*/"),)
 
-# язык → (маркеры строчных комментариев, пары блочных комментариев, кавычки)
-_LANGS: dict[str, tuple[tuple, tuple, tuple]] = {}
+# Особые правила разбора:
+#   ws    — «#» начинает комментарий только в начале строки или после пробела (bash: ${#arr[@]}, ${p##*/})
+#   regex — «/…/» после оператора или «(» — регулярное выражение, а не начало комментария (JS: /https?:\/\//)
+#   attr  — «#[» — атрибут PHP 8, а не комментарий
+_JS_FLAGS = frozenset({"regex"})
+
+# язык → (маркеры строчных комментариев, пары блочных комментариев, кавычки, особые правила)
+_LANGS: dict[str, tuple[tuple, tuple, tuple, frozenset]] = {}
 for _names, _spec in (
-    ("python py python3 ipython", (_HASH, (), ('"""', "'''", '"', "'"))),
-    ("bash sh shell zsh powershell ps1 yaml yml toml r ruby rb perl makefile dockerfile",
-     (_HASH, (), ('"', "'"))),
-    ("javascript js jsx typescript ts tsx java kotlin kt scala dart go rust rs swift c cpp c++ cs csharp "
-     "objective-c json5", (_SLASH, _C_BLOCK, ('"', "'", "`"))),
-    ("php", (_SLASH + _HASH, _C_BLOCK, ('"', "'"))),
-    ("css scss less", ((), _C_BLOCK, ('"', "'"))),
-    ("sql lua haskell hs", (("--",), (("/*", "*/"),), ('"', "'"))),
-    ("html xml svg vue", ((), (("<!--", "-->"),), ())),
+    ("python py python3 ipython", (_HASH, (), ('"""', "'''", '"', "'"), frozenset())),
+    ("bash sh shell zsh yaml yml toml r ruby rb perl makefile dockerfile",
+     (_HASH, (), ('"', "'"), frozenset({"ws"}))),
+    ("powershell ps1", (_HASH, (("<#", "#>"),), ('"', "'"), frozenset({"ws"}))),
+    ("javascript js jsx typescript ts tsx", (_SLASH, _C_BLOCK, ('"', "'", "`"), _JS_FLAGS)),
+    ("java kotlin kt scala dart go rust rs swift c cpp c++ cs csharp objective-c json5",
+     (_SLASH, _C_BLOCK, ('"', "'", "`"), frozenset())),
+    ("php", (_SLASH + _HASH, _C_BLOCK, ('"', "'"), frozenset({"attr"}))),
+    ("css scss less", ((), _C_BLOCK, ('"', "'"), frozenset())),
+    ("sql", (("--",), _C_BLOCK, ('"', "'"), frozenset())),
+    ("lua", (("--",), (("--[[", "]]"),), ('"', "'"), frozenset())),
+    ("haskell hs", (("--",), (("{-", "-}"),), ('"',), frozenset())),
+    ("html xml svg vue", ((), (("<!--", "-->"),), (), frozenset())),
 ):
     for _n in _names.split():
         _LANGS[_n] = _spec
 
 _KEEP_HEAD = re.compile(r"^#!|^#.*coding[:=]")
+_REGEX_BEFORE = set("(,=:[!&|?{};+-*%<>~^")   # после этих символов «/» открывает регулярное выражение
 
 
-def supported(lang: str) -> bool:
-    return (lang or "").lower() in _LANGS
-
-
-def lang_spec(lang: str) -> tuple[tuple, tuple, tuple] | None:
-    """→ (маркеры строчных комментариев, пары блочных, кавычки) или None для неизвестного языка."""
+def lang_spec(lang: str) -> tuple[tuple, tuple, tuple, frozenset] | None:
+    """→ (маркеры строчных комментариев, пары блочных, кавычки, особые правила) или None."""
     return _LANGS.get((lang or "").lower())
 
 
-def _comment_spans(text: str, line_marks: tuple, blocks: tuple, quotes: tuple) -> list[tuple[int, int]]:
+def _regex_end(text: str, i: int) -> int:
+    """Если в позиции i («/») начинается регулярное выражение JS — позиция после него, иначе -1."""
+    j = i - 1
+    while j >= 0 and text[j] in " \t":
+        j -= 1
+    if j >= 0 and text[j] not in _REGEX_BEFORE and text[j] != "\n" and not text[:j + 1].endswith("return"):
+        return -1                       # после значения «/» — это деление
+    k, in_class = i + 1, False
+    while k < len(text) and text[k] != "\n":
+        c = text[k]
+        if c == "\\":
+            k += 2
+            continue
+        if c == "[":
+            in_class = True
+        elif c == "]":
+            in_class = False
+        elif c == "/" and not in_class:
+            return k + 1
+        k += 1
+    return -1
+
+
+def _comment_spans(text: str, line_marks: tuple, blocks: tuple, quotes: tuple,
+                   flags: frozenset = frozenset()) -> list[tuple[int, int]]:
     spans = []
     i, n = 0, len(text)
     while i < n:
@@ -68,7 +99,14 @@ def _comment_spans(text: str, line_marks: tuple, blocks: tuple, quotes: tuple) -
             spans.append((i, end))
             i = end
             continue
-        if any(text.startswith(m, i) for m in line_marks):
+        if "regex" in flags and text[i] == "/" and not text.startswith(("//", "/*"), i):
+            end = _regex_end(text, i)
+            if end > 0:
+                i = end
+                continue
+        m = next((m for m in line_marks if text.startswith(m, i)), None)
+        if m and not ("ws" in flags and m == "#" and i > 0 and not text[i - 1].isspace()) \
+                and not ("attr" in flags and text.startswith("#[", i)):
             end = text.find("\n", i)
             end = n if end < 0 else end
             spans.append((i, end))

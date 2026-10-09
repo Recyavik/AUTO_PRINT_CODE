@@ -32,15 +32,27 @@ const BOLD = /(\*\*|__)(?=\S)(.+?)(?<=\S)\1/g;
 const ITALIC = /(?<![\p{L}\p{N}_*])\*(?=\S)(.+?)(?<=\S)\*(?![\p{L}\p{N}_*])|(?<![\p{L}\p{N}_])_(?=\S)(.+?)(?<=\S)_(?![\p{L}\p{N}_])/gu;
 const STRIKE = /~~(?=\S)(.+?)(?<=\S)~~/g;
 const HARD_BREAK = /(\\| {2,})$/;
-const PRIVATE = 0xe000;   // экранированные символы на время разбора прячутся в область частного использования
 
 function emphasis(s: string): string {
   return s.replace(IMAGE, "$1").replace(LINK, "$1").replace(STRIKE, "$1").replace(BOLD, "$2")
     .replace(ITALIC, (_m, a: string | undefined, b: string | undefined) => a ?? b ?? "");
 }
 
+/** Участок из 128 символов области частного использования (U+E000…U+F8FF), которых нет в строке:
+ *  туда на время разбора прячутся экранированные символы (\\*), чтобы их не приняли за разметку. */
+function freePrivateBase(s: string): number | null {
+  const used = new Set<number>();
+  for (let i = 0; i < s.length; i++) {
+    const c = s.charCodeAt(i);
+    if (c >= 0xe000 && c <= 0xf8ff) used.add(c >> 7);
+  }
+  for (let b = 0xe000 >> 7; b < 0xf900 >> 7; b++) if (!used.has(b)) return b << 7;
+  return null;
+}
+
 function inline(s: string): string {
-  s = s.replace(ESCAPE, (_m, c: string) => String.fromCharCode(PRIVATE + c.charCodeAt(0)));
+  const base = freePrivateBase(s);
+  if (base !== null) s = s.replace(ESCAPE, (_m, c: string) => String.fromCharCode(base + c.charCodeAt(0)));
   let out = "";
   let last = 0;
   for (const m of s.matchAll(CODE)) {
@@ -51,7 +63,13 @@ function inline(s: string): string {
     last = m.index! + m[0].length;
   }
   out += emphasis(s.slice(last));
-  return out.replace(/[-]/g, (c) => String.fromCharCode(c.charCodeAt(0) - PRIVATE));
+  if (base === null) return out;
+  let res = "";
+  for (const ch of out) {
+    const c = ch.charCodeAt(0);
+    res += c >= base && c < base + 128 ? String.fromCharCode(c - base) : ch;
+  }
+  return res;
 }
 
 export function markdownToPlain(text: string): string {
@@ -97,8 +115,7 @@ export function asComment(text: string, lang: string): string {
   const lines = markdownToPlain(text).split("\n");
   const [marks, blocks] = langSpec(lang) ?? [["#"], []];
   if (marks.length) return lines.map((l) => (l ? `${marks[0]} ${l}` : marks[0])).join("\n");
-  if (blocks.length) return [blocks[0][0], ...lines, blocks[0][1]].join("\n");
-  return lines.map((l) => (l ? `# ${l}` : "#")).join("\n");
+  return [blocks[0][0], ...lines, blocks[0][1]].join("\n");   // у каждого языка есть строчные или блочные
 }
 
 /** Что печатать для текстового блока в выбранном виде. */

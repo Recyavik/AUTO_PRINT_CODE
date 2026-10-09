@@ -16,7 +16,6 @@ INPUT_KEYBOARD = 1
 KEYEVENTF_EXTENDEDKEY = 0x0001
 KEYEVENTF_KEYUP = 0x0002
 KEYEVENTF_UNICODE = 0x0004
-KEYEVENTF_SCANCODE = 0x0008
 MAPVK_VK_TO_VSC = 0
 
 VK_BACK = 0x08
@@ -26,7 +25,6 @@ VK_SHIFT = 0x10
 VK_CONTROL = 0x11
 VK_MENU = 0x12
 VK_ESCAPE = 0x1B
-VK_SPACE = 0x20
 VK_END = 0x23
 VK_HOME = 0x24
 VK_LEFT = 0x25
@@ -144,14 +142,15 @@ def modifiers_down() -> bool:
     return any(user32.GetAsyncKeyState(vk) & 0x8000 for vk in _MODIFIER_VKS)
 
 
-def wait_modifiers_released(timeout: float = 5.0) -> bool:
+def wait_modifiers_released(timeout: float = 5.0, cancelled=lambda: False) -> bool:
     """Ждёт, пока пользователь отпустит Ctrl/Alt/Shift/Win после нажатия хоткея.
 
-    Иначе напечатанное «а» превратится в Ctrl+A и т.п.
+    Иначе напечатанное «а» превратится в Ctrl+A и т.п. False — не отпустили за timeout
+    или ожидание прервано (cancelled() вернул True: пауза, стоп).
     """
     deadline = time.monotonic() + timeout
     while modifiers_down():
-        if time.monotonic() > deadline:
+        if time.monotonic() > deadline or cancelled():
             return False
         time.sleep(0.01)
     time.sleep(0.03)
@@ -257,6 +256,8 @@ def window_elevated(hwnd: int) -> bool:
     if not h:
         return True
     try:
-        return bool(_process_elevated(h))
+        elevated = _process_elevated(h)
+        # маркер повышенного процесса обычному процессу обычно не прочитать — значит, повышенный
+        return True if elevated is None else elevated
     finally:
         kernel32.CloseHandle(h)

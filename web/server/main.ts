@@ -12,7 +12,7 @@ import path from "node:path";
 import { type WebSocket, WebSocketServer } from "ws";
 import {
   blockTitle, type ClientMsg, codeBlocks, codeNumber, type EngineStatus, HOTKEYS, mergeSettings, navBlocks,
-  type ServerMsg, type Settings, type Template, templateFrom,
+  type ServerMsg, type Template, templateFrom,
 } from "../shared/model.ts";
 import { typingText } from "../shared/textprint.ts";
 import { Engine } from "./engine.ts";
@@ -26,7 +26,7 @@ const DEV = process.argv.includes("--dev");
 const NO_OPEN = DEV || process.argv.includes("--no-open");
 const VERSION = JSON.parse(fs.readFileSync(path.join(WEB_DIR, "package.json"), "utf-8")).version as string;
 // заголовок страницы начинается с этой метки — так помощник узнаёт окно браузера со страницей
-export const OWN_TITLE_MARK = "⌨ AutoPrintCode";
+const OWN_TITLE_MARK = "⌨ AutoPrintCode";
 const DIST = path.join(WEB_DIR, "dist");
 const SOUNDS = path.resolve(WEB_DIR, "..", "autoprint", "sounds");
 const URL_SELF = `http://127.0.0.1:${PORT}`;
@@ -37,6 +37,11 @@ const ALLOWED_HOSTS = new Set([`127.0.0.1:${PORT}`, `localhost:${PORT}`]);
 // помощник работает без окна — непредвиденная ошибка должна остаться хотя бы в журнале
 process.on("uncaughtException", (e) => {
   log("error", `Непредвиденная ошибка: ${e.stack ?? e}`);
+  try {
+    store?.flush();   // несохранённые правки (до 0,7 с) — на диск
+  } catch {
+    // выходим в любом случае
+  }
   hardExit();
 });
 
@@ -55,6 +60,10 @@ if (process.platform !== "win32") {
 // ---------------------------------------------------------------- состояние
 
 const store = new Store();
+store.onSaveError = (text) => {
+  log("error", text);
+  notify(text, "warn");
+};
 const s = store.settings;
 // движок и хоткеи запускаются только после того, как помощник занял порт (startServices):
 // второй экземпляр не должен трогать хоткеи — он лишь открывает страницу и выходит
@@ -84,10 +93,17 @@ function engineStatus(): EngineStatus {
 const notify = (text: string, level: "info" | "warn" = "info") => broadcast({ t: "notify", text, level });
 
 let hotkeysPaused = false;
+let appliedBindings = "";
 
 function applySettings(): void {
   engine.setSettings(s);
-  input.setBindings(hotkeysPaused ? {} : Object.fromEntries(HOTKEYS.map(([k]) => [k, String(s[k] ?? "")])));
+  // хоткеи перерегистрируются, только если они изменились (ползунок громкости шлёт настройки на каждом шаге)
+  const bindings = hotkeysPaused ? {} : Object.fromEntries(HOTKEYS.map(([k]) => [k, String(s[k] ?? "")]));
+  const key = JSON.stringify(bindings);
+  if (key === appliedBindings) return;
+  appliedBindings = key;
+  hotkeysFailed = "";   // новая попытка — прошлая ошибка больше не актуальна
+  input.setBindings(bindings);
 }
 
 // ---------------------------------------------------------------- команды (как в главном окне Python-версии)
@@ -132,12 +148,12 @@ function startParams(fromButton: boolean, countdown?: number): [number, number] 
 
 function cmdToggle(fromButton = false): void {
   const st = engine.state;
-  if (st === "running" || st === "countdown") return engine.pause();
+  if (engine.active) return engine.pause();   // идёт или готовится (отсчёт, задержка хоткея)
   const j = jobForArmed();
   if (!j) return notify("Нечего печатать: выберите (щёлкните) непустой блок кода или текста.", "warn");
   if (st === "paused" && sameJob(j)) return engine.resume(...startParams(fromButton));
-  if (!sameJob(j) || st === "finished" || st === "paused") {
-    if (st === "paused") notify("Образец или выделение изменились — печать начнётся с начала.");
+  if (st === "paused" || st === "finished" || !sameJob(j)) {
+    if (st === "paused") notify("Текст для печати изменился (образец, выделение или настройки) — печать начнётся с начала.");
     loadJob(j);
   }
   engine.start(...startParams(fromButton));
@@ -162,10 +178,12 @@ function cmdBlock(d: number): void {
   if (!ids.length) return;
   const i = ids.indexOf(t.active_block);
   const j = Math.max(0, Math.min(ids.length - 1, i + d));
-  if (engine.busy) cmdStop();
-  t.active_block = ids[j];
-  store.put(t);
-  broadcast({ t: "template", template: t });
+  if (j !== i) {   // на краю ленты переходить некуда — печать на паузе не сбрасываем
+    if (engine.busy) cmdStop();
+    t.active_block = ids[j];
+    store.put(t);
+    broadcast({ t: "template", template: t });
+  }
   broadcast({ t: "focusBlock", tid: t.id, bid: ids[j] });
   const b = t.blocks.find((x) => x.id === ids[j])!;
   const n = codeNumber(t, b);
@@ -175,7 +193,7 @@ function cmdBlock(d: number): void {
 function cmdNextTab(d: number): void {
   const tabs = s.open_tabs.filter((id) => store.get(id));
   if (!tabs.length) return;
-  if (engine.state === "running" || engine.state === "countdown") engine.pause();
+  engine.pause();   // движок сам решит: на паузу ставится только идущая или готовящаяся печать
   const i = tabs.indexOf(s.current_tab);
   s.current_tab = tabs[(i + d + tabs.length) % tabs.length];
   store.saveSettings();
@@ -202,6 +220,7 @@ function startServices(): void {
     log("warn", `Не удалось занять хоткеи: ${text}`);
     notify(`Не удалось занять хоткеи: ${text} (заняты другой программой?). Смените их в настройках.`, "warn");
   });
+  input.on("error", (err: Error) => log("error", `Поток хоткеев упал: ${err.stack ?? err}`));
   input.on("tripped", (kind) => {
     if (engine.state === "running") {
       engine.pause(kind === "key" ? "нажата клавиша" : "клик мышью");
@@ -323,7 +342,17 @@ const server = http.createServer((req, res) => {
     return;
   }
   const url = new URL(req.url ?? "/", URL_SELF);
-  const p = decodeURIComponent(url.pathname);
+  let p: string;
+  try {
+    p = decodeURIComponent(url.pathname);
+  } catch {
+    res.writeHead(400).end("Bad Request");   // «/%» и т. п. — иначе исключение уронило бы помощника
+    return;
+  }
+  if (p === "/api/version") {   // по нему второй запуск узнаёт, что порт занят именно помощником
+    res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" }).end(`AutoPrintCode ${VERSION}`);
+    return;
+  }
   if (p.startsWith("/sounds/") && serveFile(res, SOUNDS, p.slice("/sounds/".length))) return;
   if (p === "/api/log") {
     res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
@@ -347,6 +376,8 @@ wss.on("connection", (ws) => {
   clients.add(ws);
   send(ws, { t: "hello", version: VERSION, settings: s, templates: store.templates, engine: engineStatus(), hotkeysFailed,
     autostart: getAutostart() });
+  if (store.warning) send(ws, { t: "notify", text: store.warning, level: "warn" });
+  ws.on("error", (e) => log("warn", `Соединение со страницей: ${e.message}`));
   ws.on("message", (data) => {
     try {
       onClient(ws, JSON.parse(String(data)) as ClientMsg);
@@ -422,9 +453,16 @@ function openBrowser(): void {
 
 server.on("error", (e: NodeJS.ErrnoException) => {
   if (e.code === "EADDRINUSE") {
-    log("info", "Помощник уже запущен — только открываю страницу");
-    if (!NO_OPEN) openBrowser();
-    setTimeout(() => process.exit(0), 500);   // дать explorer.exe стартовать (службы ещё не запущены)
+    // порт занят: если это наш помощник — только открыть страницу, иначе сказать, что порт чужой
+    http.get(`${URL_SELF}/api/version`, (res) => {
+      let body = "";
+      res.setEncoding("utf-8").on("data", (c) => (body += c)).on("end", () => {
+        if (!body.startsWith("AutoPrintCode")) return portBusy();
+        log("info", "Помощник уже запущен — только открываю страницу");
+        if (!NO_OPEN) openBrowser();
+        setTimeout(() => process.exit(0), 500);   // дать explorer.exe стартовать (службы ещё не запущены)
+      });
+    }).on("error", portBusy);
     return;
   }
   throw e;
@@ -439,9 +477,16 @@ server.listen(PORT, "127.0.0.1", () => {
   if (!NO_OPEN) openBrowser();
 });
 
+function portBusy(): void {
+  const text = `Порт ${PORT} занят другой программой. Освободите его или задайте другой: set AUTOPRINT_PORT=8791`;
+  log("error", text);
+  console.error(text);
+  process.exit(1);
+}
+
 async function shutdown(): Promise<void> {
   wss.close();
-  store.saveTemplatesNow();
+  store.flush();
   await Promise.allSettled([engine?.close(), input?.close()]);
   process.exit(0);
 }

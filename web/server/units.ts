@@ -13,8 +13,6 @@ export interface Unit {
 
 const unit = (kind: UnitKind, text: string, srcEnd: number, k = 1, pause = 0): Unit => ({ kind, text, srcEnd, k, pause });
 
-// Мин. интервал между нажатиями — настройка key_gap_ms. Замер на Блокноте Windows 11:
-// при 8–12 мс символы теряются и переставляются, при 30 мс — набор точный.
 export const PUNCT = new Set(",;:)]}>");
 
 export function normalize(text: string): string {
@@ -82,6 +80,8 @@ export function delayAfter(u: Unit, s: Settings, rng: () => number = Math.random
   return Math.max(d, gapSeconds(s));
 }
 
+// Мин. интервал между нажатиями — настройка key_gap_ms. Замер на Блокноте Windows 11:
+// при 8–12 мс символы теряются и переставляются, при 30 мс — набор точный.
 export function gapSeconds(s: Settings): number {
   return Math.max(5, s.key_gap_ms) / 1000;
 }
@@ -164,7 +164,7 @@ export function humanize(units: Unit[], s: Settings, rng: () => number = Math.ra
       lineStart = true; lineHasText = false; prevCh = "";
       return;
     }
-    if (u.kind !== "char" || (lineStart && (u.text === " " || u.text === "\t"))) return;
+    if (u.kind !== "char" || (lineStart && !u.text.trim())) return;   // отступ (в т.ч. таб → пробелы)
     const span = wordOf[idx];
     const w = span ? word(span) : "";
     const atWordStart = !!span && span[0] === idx;

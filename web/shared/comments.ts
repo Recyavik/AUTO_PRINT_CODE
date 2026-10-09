@@ -6,38 +6,61 @@
 // Строковые литералы (в том числе тройные кавычки и docstring) не трогаются.
 // Shebang «#!» и строка кодировки в начале файла сохраняются.
 
-type Spec = [lineMarks: string[], blocks: [string, string][], quotes: string[]];
+// Особые правила разбора:
+//   ws    — «#» начинает комментарий только в начале строки или после пробела (bash: ${#arr[@]}, ${p##*/})
+//   regex — «/…/» после оператора или «(» — регулярное выражение, а не начало комментария (JS: /https?:\/\//)
+//   attr  — «#[» — атрибут PHP 8, а не комментарий
+type Flag = "ws" | "regex" | "attr";
+type Spec = [lineMarks: string[], blocks: [string, string][], quotes: string[], flags: Flag[]];
 
 const HASH = ["#"];
 const SLASH = ["//"];
 const C_BLOCK: [string, string][] = [["/*", "*/"]];
 
-const LANGS: Record<string, Spec> = {};
+const LANGS = new Map<string, Spec>();
 for (const [names, spec] of [
-  ["python py python3 ipython", [HASH, [], ['"""', "'''", '"', "'"]]],
-  ["bash sh shell zsh powershell ps1 yaml yml toml r ruby rb perl makefile dockerfile", [HASH, [], ['"', "'"]]],
-  ["javascript js jsx typescript ts tsx java kotlin kt scala dart go rust rs swift c cpp c++ cs csharp " +
-    "objective-c json5", [SLASH, C_BLOCK, ['"', "'", "`"]]],
-  ["php", [[...SLASH, ...HASH], C_BLOCK, ['"', "'"]]],
-  ["css scss less", [[], C_BLOCK, ['"', "'"]]],
-  ["sql lua haskell hs", [["--"], [["/*", "*/"]], ['"', "'"]]],
-  ["html xml svg vue", [[], [["<!--", "-->"]], []]],
+  ["python py python3 ipython", [HASH, [], ['"""', "'''", '"', "'"], []]],
+  ["bash sh shell zsh yaml yml toml r ruby rb perl makefile dockerfile", [HASH, [], ['"', "'"], ["ws"]]],
+  ["powershell ps1", [HASH, [["<#", "#>"]], ['"', "'"], ["ws"]]],
+  ["javascript js jsx typescript ts tsx", [SLASH, C_BLOCK, ['"', "'", "`"], ["regex"]]],
+  ["java kotlin kt scala dart go rust rs swift c cpp c++ cs csharp objective-c json5", [SLASH, C_BLOCK, ['"', "'", "`"], []]],
+  ["php", [[...SLASH, ...HASH], C_BLOCK, ['"', "'"], ["attr"]]],
+  ["css scss less", [[], C_BLOCK, ['"', "'"], []]],
+  ["sql", [["--"], C_BLOCK, ['"', "'"], []]],
+  ["lua", [["--"], [["--[[", "]]"]], ['"', "'"], []]],
+  ["haskell hs", [["--"], [["{-", "-}"]], ['"'], []]],
+  ["html xml svg vue", [[], [["<!--", "-->"]], [], []]],
 ] as [string, Spec][]) {
-  for (const n of names.split(" ")) LANGS[n] = spec;
+  for (const n of names.split(" ")) LANGS.set(n, spec);
 }
 
 const KEEP_HEAD = /^#!|^#.*coding[:=]/;
+const REGEX_BEFORE = new Set("(,=:[!&|?{};+-*%<>~^");   // после этих символов «/» открывает регулярное выражение
 
-export function supported(lang: string): boolean {
-  return (lang || "").toLowerCase() in LANGS;
-}
-
-/** → [маркеры строчных комментариев, пары блочных, кавычки] или null для неизвестного языка. */
+/** → [маркеры строчных комментариев, пары блочных, кавычки, особые правила] или null для неизвестного языка. */
 export function langSpec(lang: string): Spec | null {
-  return LANGS[(lang || "").toLowerCase()] ?? null;
+  return LANGS.get((lang || "").toLowerCase()) ?? null;
 }
 
-function commentSpans(text: string, [lineMarks, blocks, quotes]: Spec): [number, number][] {
+/** Если в позиции i («/») начинается регулярное выражение JS — позиция после него, иначе -1. */
+function regexEnd(text: string, i: number): number {
+  let j = i - 1;
+  while (j >= 0 && (text[j] === " " || text[j] === "\t")) j -= 1;
+  if (j >= 0 && !REGEX_BEFORE.has(text[j]) && text[j] !== "\n" && !text.slice(0, j + 1).endsWith("return")) {
+    return -1;   // после значения «/» — это деление
+  }
+  let inClass = false;
+  for (let k = i + 1; k < text.length && text[k] !== "\n"; k++) {
+    const c = text[k];
+    if (c === "\\") { k += 1; continue; }
+    if (c === "[") inClass = true;
+    else if (c === "]") inClass = false;
+    else if (c === "/" && !inClass) return k + 1;
+  }
+  return -1;
+}
+
+function commentSpans(text: string, [lineMarks, blocks, quotes, flags]: Spec): [number, number][] {
   const spans: [number, number][] = [];
   const n = text.length;
   let i = 0;
@@ -62,7 +85,13 @@ function commentSpans(text: string, [lineMarks, blocks, quotes]: Spec): [number,
       i = end;
       continue;
     }
-    if (lineMarks.some((m) => text.startsWith(m, i))) {
+    if (flags.includes("regex") && text[i] === "/" && !text.startsWith("//", i) && !text.startsWith("/*", i)) {
+      const end = regexEnd(text, i);
+      if (end > 0) { i = end; continue; }
+    }
+    const m = lineMarks.find((m) => text.startsWith(m, i));
+    if (m && !(flags.includes("ws") && m === "#" && i > 0 && !/\s/.test(text[i - 1]))
+        && !(flags.includes("attr") && text.startsWith("#[", i))) {
       let end = text.indexOf("\n", i);
       end = end < 0 ? n : end;
       spans.push([i, end]);
@@ -76,7 +105,7 @@ function commentSpans(text: string, [lineMarks, blocks, quotes]: Spec): [number,
 
 /** → [текст без комментариев, карта: индекс символа результата → индекс в исходном тексте]. */
 export function stripComments(text: string, lang: string): [string, number[]] {
-  const spec = LANGS[(lang || "").toLowerCase()];
+  const spec = langSpec(lang);
   const spans = spec ? commentSpans(text, spec) : [];
   if (!spans.length) return [text, Array.from({ length: text.length }, (_, k) => k)];
   const inComment = new Uint8Array(text.length);

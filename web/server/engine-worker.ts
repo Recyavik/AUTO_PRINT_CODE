@@ -31,7 +31,7 @@ export type EngineEvent =
   | { e: "message"; text: string }
   | { e: "sound"; kind: "key" | "space" | "enter" }
   | { e: "finished" }
-  | { e: "target"; hwnd: number }
+  | { e: "preparing"; on: boolean }   // отсчёт, задержка хоткея, ожидание отпускания Ctrl/Alt/Shift
   | { e: "log"; level: "info" | "warn" | "error"; text: string };
 
 const { port, ctrl: ctrlBuf, ownTitleMark, requireTitle, dryRun } = workerData as {
@@ -52,6 +52,7 @@ let pos = 0;
 let gen = 0;            // меняется при отмене (load/stop/restart) — текущий прогон должен завершиться
 let run = false;        // как threading.Event _run: false — пауза
 let inRun = false;      // идёт ли прогон (runJob)
+let preparing = false;  // идёт подготовка к печати (её тоже можно поставить на паузу)
 let pendingStart: { delay: number; countdown: number } | null = null;
 let resumeParams = { delay: 0, countdown: 0 };
 
@@ -122,7 +123,7 @@ function handle(cmd: EngineCmd): void {
       resume(cmd.delay, cmd.countdown);
       break;
     case "pause":
-      if (state === "running" || state === "countdown") {
+      if (state === "running" || state === "countdown" || (preparing && run)) {
         run = false;
         setState("paused");
         log(`Пауза (${cmd.reason}) на ${pos}/${units.length}`);
@@ -203,34 +204,56 @@ function think(myGen: number, seconds: number): boolean {
 
 // ------------------------------------------------------------ печать
 
-function waitModifiersReleased(myGen: number): boolean {
-  // иначе напечатанное «а» после Ctrl+F9 превратится в Ctrl+A
-  const deadline = now() + 5;
-  while (w.modifiersDown()) {
-    if (now() > deadline || !sleep(myGen, 0.01)) return false;
-  }
-  return sleep(myGen, 0.03);
+/** Ожидание, которое обрывают и пауза, и остановка. false — оборвали. */
+function waitRun(myGen: number, seconds: number): boolean {
+  return sleep(myGen, seconds) && run;
 }
 
-/** Отсчёт, ожидание отпускания модификаторов, захват целевого окна. */
-function prepare(myGen: number, delay: number, countdown: number): number | null {
+/** Ждёт, пока отпустят Ctrl/Alt/Shift/Win после хоткея (иначе «а» превратится в Ctrl+A).
+ *  false — не отпустили за 5 с или ожидание прервали (пауза, стоп). */
+function waitModifiersReleased(myGen: number): boolean {
+  const deadline = now() + 5;
+  while (w.modifiersDown()) {
+    if (now() > deadline || !waitRun(myGen, 0.01)) return false;
+  }
+  return waitRun(myGen, 0.03);
+}
+
+const PAUSED = "paused";   // prepare: пока шёл отсчёт или ждали окно, поставили на паузу (или остановили)
+
+/** Отсчёт, ожидание отпускания модификаторов, захват целевого окна.
+ *  → hwnd; null — не начато (сообщение показано); PAUSED — пауза или стоп. */
+function prepare(myGen: number, delay: number, countdown: number): number | null | typeof PAUSED {
+  preparing = true;
+  emit({ e: "preparing", on: true });
+  try {
+    return prepareTarget(myGen, delay, countdown);
+  } finally {
+    preparing = false;
+    emit({ e: "preparing", on: false });
+  }
+}
+
+function prepareTarget(myGen: number, delay: number, countdown: number): number | null | typeof PAUSED {
   if (countdown > 0) {
+    if (!run) return PAUSED;
     setState("countdown");
     for (let n = countdown; n > 0; n--) {
       emit({ e: "countdown", n });
-      if (!sleep(myGen, 1)) return null;
-      if (!run) return null;   // пауза во время отсчёта
+      if (!waitRun(myGen, 1)) {
+        emit({ e: "countdown", n: 0 });
+        return PAUSED;
+      }
     }
     emit({ e: "countdown", n: 0 });
   }
   if (!waitModifiersReleased(myGen)) {
-    if (gen === myGen) {
-      log("Не начато: модификаторы удерживаются дольше 5 с", "warn");
-      emit({ e: "message", text: "Отпустите Ctrl/Alt/Shift — печать не начата." });
-    }
+    if (gen !== myGen || !run) return PAUSED;
+    log("Не начато: модификаторы удерживаются дольше 5 с", "warn");
+    emit({ e: "message", text: "Отпустите Ctrl/Alt/Shift — печать не начата." });
     return null;
   }
-  if (delay && !sleep(myGen, delay)) return null;
+  if (delay && !waitRun(myGen, delay)) return PAUSED;
   const hwnd = w.foregroundWindow();
   if (w.windowTitle(hwnd).includes(ownTitleMark)) {
     log("Не начато: в фокусе страница AutoPrintCode");
@@ -251,34 +274,37 @@ function prepare(myGen: number, delay: number, countdown: number): number | null
   }
   log(`Печать ${pos ? "продолжена" : "начата"} с ${pos}/${units.length} → ${w.describeWindow(hwnd)} · ` +
     `профиль=${s.profile} · ${s.cpm} симв/мин`);
-  emit({ e: "target", hwnd });
   return hwnd;
 }
 
 function runJob(myGen: number, delay: number, countdown: number): void {
-  let target = prepare(myGen, delay, countdown);
-  if (target === null) {
+  const first = prepare(myGen, delay, countdown);
+  if (first === null) {
     if (gen === myGen) {
       setState(pos ? "paused" : "idle");
       run = false;
     }
     return;
   }
-  setState("running");
+  let target = first === PAUSED ? 0 : first;
+  // пауза во время подготовки: состояние уже «пауза», цикл ниже дождётся «продолжить»
+  if (first !== PAUSED && run) setState("running");
   const total = text.length;
   let thought = -1;   // для какой единицы пауза-обдумывание уже выдержана
   while (gen === myGen && pos < units.length) {
-    if (!run) {
+    if (!run || state !== "running") {
       while (!run && gen === myGen) waitSignal(1000);
       if (gen !== myGen) return;
-      target = prepare(myGen, resumeParams.delay, resumeParams.countdown);
-      if (target === null) {
+      const next = prepare(myGen, resumeParams.delay, resumeParams.countdown);
+      if (next === null) {
         if (gen === myGen) {
           run = false;
           setState("paused");
         }
         continue;
       }
+      if (next === PAUSED || !run) continue;
+      target = next;
       setState("running");
     }
     const u = units[pos];
