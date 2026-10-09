@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { stripComments } from "../../shared/comments.ts";
-import { blockTitle, codeBlocks, type EngineState, PROFILES, typingSlice } from "../../shared/model.ts";
+import { blockTitle, codeNumber, type EngineState, PROFILES } from "../../shared/model.ts";
+import { typingText } from "../../shared/textprint.ts";
 import {
   closeTab, command, moveBlock, openTab, pauseHotkeys, shutdownHelper, updateSettings, useApp,
 } from "./api.ts";
@@ -108,13 +108,10 @@ export function App() {
   const current = templates.find((t) => t.id === settings.current_tab);
   const armedBlock = current?.blocks.find((b) => b.id === current.active_block);
 
-  let armedLabel: React.ReactNode = <span style={{ color: "var(--muted)" }}>Нет активного блока кода — щёлкните по блоку кода</span>;
+  let armedLabel: React.ReactNode = <span style={{ color: "var(--muted)" }}>Нет активного блока — щёлкните по блоку кода или текста</span>;
   if (current && armedBlock) {
-    let [text] = typingSlice(armedBlock.text, armedBlock.sel, settings.selection_whole_lines);
-    if (settings.strip_comments) text = stripComments(text, armedBlock.lang)[0];
-    const n = codeBlocks(current).findIndex((b) => b.id === armedBlock.id) + 1;
-    const part = (armedBlock.sel.length === 2 ? "выделенные строки" : "весь блок") + (settings.strip_comments ? ", без комментариев" : "");
-    armedLabel = <>Печатать: <b>{current.title}</b> · {blockTitle(armedBlock, n)} · {part} ({text ? text.split("\n").length : 0} стр., {text.length} симв.)</>;
+    const [text, , part] = typingText(current, armedBlock, settings);
+    armedLabel = <>Печатать: <b>{current.title}</b> · {blockTitle(armedBlock, codeNumber(current, armedBlock))} · {part} ({text ? text.split("\n").length : 0} стр., {text.length} симв.)</>;
   }
 
   return (
@@ -191,7 +188,7 @@ export function App() {
                 <button className="btn" onClick={newTemplate}>＋ Новый образец</button>{" "}
                 <button className="btn" onClick={() => fileInput.current?.click()}>⇪ Импорт .ipynb / .md / .py</button>
               </p>
-              <p className="hint">Щёлкните по блоку кода — он станет активным. Поставьте курсор в нужном окне
+              <p className="hint">Щёлкните по блоку кода или текста — он станет активным. Поставьте курсор в нужном окне
                 (Блокнот, VS Code, Jupyter) и нажмите <b>{settings.hotkey_toggle}</b>.</p>
               <p style={{ fontSize: 12 }}>AutoPrintCode {version}</p>
             </div>

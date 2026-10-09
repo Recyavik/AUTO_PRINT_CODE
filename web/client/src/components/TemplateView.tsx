@@ -6,9 +6,15 @@ import { stripComments } from "../../../shared/comments.ts";
 import {
   BLOCK_CODE, BLOCK_MARKDOWN, type Block, blockTitle, makeBlock, ROLES, type Settings, type Template, typingSlice,
 } from "../../../shared/model.ts";
+import { PRINT_MODES } from "../../../shared/textprint.ts";
 import { getState, updateTemplate, useApp } from "../api.ts";
 import { CodeEditor } from "./CodeEditor.tsx";
 import { Menu, type MenuItem } from "./Menu.tsx";
+
+const PRINT_AS_TIP = "Как печатать этот блок:\n" +
+  "• как Markdown — исходник с ## и `…` (markdown-ячейка Jupyter, .md-файл);\n" +
+  "• простым текстом — без разметки (Блокнот, Word, чат);\n" +
+  "• комментарием в коде — каждая строка с # или // по языку блока кода рядом";
 
 const LANGS = ["python", "javascript", "typescript", "java", "c", "cpp", "csharp", "go", "rust", "php", "kotlin",
   "swift", "sql", "html", "css", "json", "yaml", "bash", "text"];
@@ -141,10 +147,16 @@ function BlockView({ block: b, codeNumber, armed, settings, typed, onChange, onA
         </select>
         <input className="title-edit" value={b.title} placeholder={blockTitle({ ...b, title: "" }, codeNumber)}
           title="Заголовок блока" onChange={(e) => onChange({ ...b, title: e.target.value })} />
+        <button className={`btn small arm-btn${armed ? " on" : ""}`} onClick={onArm}
+          title="Блок, который напечатается по хоткею">{armed ? "● Активный" : "▶ Печатать этот"}</button>
+        {!isCode && (
+          <select value={b.print_as in PRINT_MODES ? b.print_as : "markdown"} title={PRINT_AS_TIP}
+            onChange={(e) => { onChange({ ...b, print_as: e.target.value }, 0); onArm(); }}>
+            {Object.entries(PRINT_MODES).map(([k, name]) => <option key={k} value={k}>Печатать {name}</option>)}
+          </select>
+        )}
         {isCode && (
           <>
-            <button className={`btn small arm-btn${armed ? " on" : ""}`} onClick={onArm}
-              title="Блок, который напечатается по хоткею">{armed ? "● Активный" : "▶ Печатать этот"}</button>
             <select value={b.lang} onChange={(e) => onChange({ ...b, lang: e.target.value }, 0)} title="Язык подсветки и комментариев">
               {[...new Set([b.lang, ...LANGS])].map((l) => <option key={l}>{l}</option>)}
             </select>
@@ -172,7 +184,7 @@ function BlockView({ block: b, codeNumber, armed, settings, typed, onChange, onA
             }} />
         </div>
       ) : (
-        <MarkdownBlock block={b} onChange={onChange} />
+        <MarkdownBlock block={b} onChange={onChange} onArm={onArm} />
       )}
       {menu && <Menu {...menu} onClose={() => setMenu(null)} />}
     </div>
@@ -190,7 +202,7 @@ function CodeInfo({ block: b, settings }: { block: Block; settings: Settings }) 
   return <span className="info">· {part}: {lines} стр., {text.length} симв.{settings.strip_comments ? " без комм." : ""}</span>;
 }
 
-function MarkdownBlock({ block: b, onChange }: { block: Block; onChange: (b: Block, delay?: number) => void }) {
+function MarkdownBlock({ block: b, onChange, onArm }: { block: Block; onChange: (b: Block, delay?: number) => void; onArm: () => void }) {
   const [editing, setEditing] = useState(!b.text.trim());
   const html = useMemo(() => DOMPurify.sanitize(marked.parse(b.text, { async: false, gfm: true, breaks: false })), [b.text]);
   const ta = useRef<HTMLTextAreaElement>(null);
@@ -212,6 +224,7 @@ function MarkdownBlock({ block: b, onChange }: { block: Block; onChange: (b: Blo
   }
   return (
     <div className="md-view" style={{ fontSize: `${(14 * b.zoom) / 100}px` }} title="Щёлкните дважды, чтобы изменить"
+      onClick={(e) => !(e.target as HTMLElement).closest("a") && onArm()}
       onDoubleClick={() => setEditing(true)} dangerouslySetInnerHTML={{ __html: html }} />
   );
 }

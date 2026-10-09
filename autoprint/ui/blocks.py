@@ -8,6 +8,7 @@ from PySide6.QtWidgets import (QApplication, QComboBox, QFrame, QHBoxLayout, QLa
 
 from ..highlighter import LANGUAGES
 from ..storage import BLOCK_CODE, BLOCK_MARKDOWN, ROLES, Block
+from ..textprint import PRINT_MODES
 from .code_editor import CodeEditor, code_font
 
 ARMED_COLOR = "#2ea043"
@@ -28,6 +29,7 @@ TYPE_ITEMS = [(f"{icon} {name}", key) for key, (icon, name, _c) in ROLES.items()
 
 class BlockWidget(QFrame):
     changed = Signal()
+    arm_requested = Signal(object)                # сделать блок активным для печати
     move_requested = Signal(object, int)          # (виджет, -1|+1)
     delete_requested = Signal(object)
     type_requested = Signal(object, str)          # (виджет, роль | "code")
@@ -70,6 +72,11 @@ class BlockWidget(QFrame):
 
         self.left_slot = QHBoxLayout()
         self.header.addLayout(self.left_slot)
+        self.armed = False
+        self.arm_btn = _tool("▶ Печатать этот", "Сделать этот блок активным для печати по хоткею")
+        self.arm_btn.setCheckable(True)
+        self.arm_btn.clicked.connect(lambda: self.arm_requested.emit(self))
+        self.left_slot.addWidget(self.arm_btn)
         self.header.addStretch(1)
         self.right_slot = QHBoxLayout()
         self.header.addLayout(self.right_slot)
@@ -124,9 +131,19 @@ class BlockWidget(QFrame):
             self.type_requested.emit(self, key)
 
     def _apply_role_style(self) -> None:
-        if self.block.type != BLOCK_CODE:
+        if self.armed:
+            self.setStyleSheet(f"QFrame#block {{ border: 2px solid {ARMED_COLOR}; border-radius: 6px; }}")
+        elif self.block.type != BLOCK_CODE:
             color = ROLES.get(self.block.role, ROLES["text"])[2]
             self.setStyleSheet(f"QFrame#block {{ border-left: 4px solid {color}; }}")
+        else:
+            self.setStyleSheet("")
+
+    def set_armed(self, on: bool) -> None:
+        self.armed = on
+        self.arm_btn.setChecked(on)
+        self.arm_btn.setText("● Активный" if on else "▶ Печатать этот")
+        self._apply_role_style()
 
 
 # ------------------------------------------------------------------ Markdown
@@ -154,6 +171,16 @@ class MarkdownBlockWidget(BlockWidget):
 
     def __init__(self, block: Block) -> None:
         super().__init__(block)
+        self.print_as = QComboBox()
+        for key, name in PRINT_MODES.items():
+            self.print_as.addItem(f"Печатать {name}", key)
+        self.print_as.setCurrentIndex(max(0, self.print_as.findData(block.print_as)))
+        self.print_as.setToolTip("Как печатать этот блок:\n"
+                                 "• как Markdown — исходник с ## и `…` (markdown-ячейка Jupyter, .md-файл);\n"
+                                 "• простым текстом — без разметки (Блокнот, Word, чат);\n"
+                                 "• комментарием в коде — каждая строка с # или // по языку блока кода рядом")
+        self.print_as.activated.connect(self._on_print_as)
+        self.left_slot.addWidget(self.print_as)
         self.toggle = _tool("✎ Править", "Переключить: просмотр / редактирование Markdown")
         self.toggle.clicked.connect(self.toggle_mode)
         self.right_slot.addWidget(self.toggle)
@@ -175,7 +202,14 @@ class MarkdownBlockWidget(BlockWidget):
         if ev.type() == ev.Type.MouseButtonDblClick:
             self.set_editing(True)
             return True
+        if ev.type() == ev.Type.MouseButtonPress:
+            self.arm_requested.emit(self)   # щелчок по тексту — блок активный, как у блока кода
         return False
+
+    def _on_print_as(self, _i: int) -> None:
+        self.block.print_as = self.print_as.currentData()
+        self.changed.emit()
+        self.arm_requested.emit(self)
 
     def _on_text(self) -> None:
         self.block.text = self.edit.toPlainText()
@@ -230,16 +264,10 @@ class MarkdownBlockWidget(BlockWidget):
 # ------------------------------------------------------------------ Код
 
 class CodeBlockWidget(BlockWidget):
-    arm_requested = Signal(object)
     selection_changed = Signal(object)
 
     def __init__(self, block: Block, number: int) -> None:
         super().__init__(block, number)
-        self.armed = False
-        self.arm_btn = _tool("▶ Печатать этот", "Сделать этот блок активным для печати по хоткею")
-        self.arm_btn.setCheckable(True)
-        self.arm_btn.clicked.connect(lambda: self.arm_requested.emit(self))
-        self.left_slot.addWidget(self.arm_btn)
         self.info = QLabel()
         self.info.setStyleSheet("color: gray;")
         self.left_slot.addWidget(self.info)
@@ -317,13 +345,6 @@ class CodeBlockWidget(BlockWidget):
         else:
             self.info.setText(f"· {lines} стр., {len(text)} симв.")
             self.info.setStyleSheet("color: gray;")
-
-    def set_armed(self, on: bool) -> None:
-        self.armed = on
-        self.arm_btn.setChecked(on)
-        self.arm_btn.setText("● Активный" if on else "▶ Печатать этот")
-        self.setStyleSheet(f"QFrame#block {{ border: 2px solid {ARMED_COLOR}; border-radius: 6px; }}"
-                           if on else "")
 
     def typing_text(self, whole_lines: bool) -> tuple[str, int]:
         return typing_slice(self.block.text, self.block.sel, whole_lines)

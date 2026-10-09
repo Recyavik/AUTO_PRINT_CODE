@@ -37,7 +37,7 @@ class ZoomWheelFilter(QObject):
 
 class TemplateView(QWidget):
     changed = Signal()            # содержимое образца изменилось → сохранить
-    armed_changed = Signal(str)   # id активного блока кода
+    armed_changed = Signal(str)   # id активного блока (кода или текста)
     zoom_changed = Signal(int)    # масштаб какого-то блока изменился, %
 
     def __init__(self, template: Template) -> None:
@@ -86,7 +86,7 @@ class TemplateView(QWidget):
             self.widgets.append(wdg)
         # если в образце ещё нет активного блока — делаем активным первый блок кода
         codes = [w for w in self.widgets if isinstance(w, CodeBlockWidget)]
-        if codes and not any(w.block.id == self.template.active_block for w in codes):
+        if codes and not self.template.find_block(self.template.active_block):
             self.arm(codes[0].block.id)
         self._apply_armed()
         if keep_scroll:
@@ -105,8 +105,7 @@ class TemplateView(QWidget):
         wdg.type_requested.connect(self._change_type)
         wdg.insert_requested.connect(self._insert_near)
         wdg.zoom_changed.connect(self.zoom_changed)
-        if isinstance(wdg, CodeBlockWidget):
-            wdg.arm_requested.connect(lambda w: self.arm(w.block.id))
+        wdg.arm_requested.connect(lambda w: self.arm(w.block.id))
 
     def _renumber(self) -> None:
         n = 0
@@ -168,10 +167,7 @@ class TemplateView(QWidget):
                 b.lang = last.lang if last else b.lang
             b.type = BLOCK_CODE
         else:
-            if b.type == BLOCK_CODE:
-                b.sel = []
-                if b.id == self.template.active_block:
-                    self.template.active_block = ""
+            b.sel = []      # выделение — только в блоке кода; активным блок остаётся: текст тоже печатается
             b.type = BLOCK_MARKDOWN
             b.role = key
         self._rebuild(keep_scroll=True)
@@ -200,19 +196,18 @@ class TemplateView(QWidget):
 
     def _apply_armed(self) -> None:
         for w in self.widgets:
-            if isinstance(w, CodeBlockWidget):
-                on = w.block.id == self.template.active_block
-                w.set_armed(on)
-                if not on and w.block.sel:
-                    w.clear_selection()   # выделение — только у активного блока
+            on = w.block.id == self.template.active_block
+            w.set_armed(on)
+            if isinstance(w, CodeBlockWidget) and not on and w.block.sel:
+                w.clear_selection()   # выделение — только у активного блока
 
-    def code_widget(self, block_id: str) -> CodeBlockWidget | None:
-        return next((w for w in self.widgets if isinstance(w, CodeBlockWidget) and w.block.id == block_id), None)
+    def block_widget(self, block_id: str) -> BlockWidget | None:
+        return next((w for w in self.widgets if w.block.id == block_id), None)
 
     def go_to_block(self, block_id: str) -> None:
         if not self.template.find_block(block_id):
             return
         self.arm(block_id)
-        w = self.code_widget(block_id)
+        w = self.block_widget(block_id)
         if w:
             QTimer.singleShot(30, w, lambda: self.scroll.ensureWidgetVisible(w, 0, 40))

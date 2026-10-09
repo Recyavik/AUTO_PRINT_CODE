@@ -32,6 +32,11 @@ export function supported(lang: string): boolean {
   return (lang || "").toLowerCase() in LANGS;
 }
 
+/** → [маркеры строчных комментариев, пары блочных, кавычки] или null для неизвестного языка. */
+export function langSpec(lang: string): Spec | null {
+  return LANGS[(lang || "").toLowerCase()] ?? null;
+}
+
 function commentSpans(text: string, [lineMarks, blocks, quotes]: Spec): [number, number][] {
   const spans: [number, number][] = [];
   const n = text.length;

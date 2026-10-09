@@ -1,6 +1,6 @@
 {
   "name": "autoprintcode-web",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "private": true,
   "type": "module",
   "description": "AutoPrintCode в браузере: страница + локальный помощник печати на Node.js",
@@ -13,7 +13,7 @@
     "dev:client": "vite",
     "build": "vite build",
     "typecheck": "tsc --noEmit",
-    "test": "node --test tests/parity.test.ts tests/engine.test.ts"
+    "test": "node --test tests/parity.test.ts tests/engine.test.ts tests/textprint.test.ts"
   },
   "dependencies": {
     "@codemirror/language-data": "^6.5.2",

@@ -144,6 +144,7 @@ class Block:
     role: str = "text"   # для Markdown-блока: text | task | explain | hint (см. ROLES)
     title: str = ""      # свой заголовок блока; пусто → название по типу
     zoom: int = 100      # масштаб содержимого блока, % (Ctrl/Shift + колёсико)
+    print_as: str = "markdown"   # как печатать Markdown-блок: markdown | plain | comment (см. textprint)
 
     def display_title(self, code_number: int = 0) -> str:
         if self.title.strip():
@@ -167,6 +168,24 @@ class Template:
 
     def code_blocks(self) -> list[Block]:
         return [b for b in self.blocks if b.type == BLOCK_CODE]
+
+    def nav_blocks(self) -> list[Block]:
+        """Переходы по хоткею «следующий блок»: блоки кода и активный текстовый блок, если печатается он —
+        так из условия задачи попадаем в код под ним."""
+        return [b for b in self.blocks if b.type == BLOCK_CODE or b.id == self.active_block]
+
+    def code_number(self, block: Block) -> int:
+        """Номер блока кода (1, 2, …) для заголовка «Код N»; 0 — для текстового блока."""
+        ids = [b.id for b in self.code_blocks()]
+        return ids.index(block.id) + 1 if block.id in ids else 0
+
+    def lang_near(self, block: Block) -> str:
+        """Язык ближайшего блока кода — сначала ниже (условие стоит над решением), затем выше."""
+        i = self.blocks.index(block)
+        for b in self.blocks[i + 1:] + self.blocks[:i][::-1]:
+            if b.type == BLOCK_CODE:
+                return b.lang
+        return "python"
 
 
 SAMPLE_TASKS = [

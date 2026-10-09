@@ -20,7 +20,8 @@ from ..guard import InputGuard
 from ..hotkeys import HotkeyManager, parse_hotkey
 from ..importers import export_ipynb, import_ipynb, import_markdown, import_python
 from ..sounds import KeySoundPlayer
-from ..storage import PROFILES, Settings, Template, TemplateStore
+from ..storage import BLOCK_CODE, PROFILES, Block, Settings, Template, TemplateStore
+from ..textprint import PRINT_COMMENT, PRINT_MARKDOWN, PRINT_MODES, PRINT_PLAIN, printable
 from ..typer import COUNTDOWN, FINISHED, IDLE, PAUSED, RUNNING, TypingEngine
 from .blocks import BlockWidget, typing_slice
 from .settings_dialog import HOTKEYS, SettingsDialog
@@ -556,7 +557,7 @@ class MainWindow(QMainWindow):
                 w = w.parentWidget()
             if w is not None and w in v.widgets:
                 return w
-        return v.code_widget(v.template.active_block)
+        return v.block_widget(v.template.active_block)
 
     def _zoom_block(self, steps: int) -> None:
         w = self._target_block()
@@ -738,21 +739,32 @@ class MainWindow(QMainWindow):
     def _on_armed(self, v: TemplateView) -> None:
         self._update_armed_label()
 
+    def _typing_text(self, t: Template, block: Block) -> tuple[str, int, str]:
+        """Что печатать из блока → (текст, смещение в блоке, описание для строки состояния)."""
+        if block.type != BLOCK_CODE:
+            mode = block.print_as if block.print_as in PRINT_MODES else PRINT_MARKDOWN
+            lang = t.lang_near(block)
+            part = {PRINT_MARKDOWN: "текст как Markdown", PRINT_PLAIN: "простой текст",
+                    PRINT_COMMENT: f"текст комментарием ({lang})"}[mode]
+            return printable(block.text, mode, lang), 0, part
+        text, base = typing_slice(block.text, block.sel, self.settings.selection_whole_lines)
+        part = "выделенные строки" if block.sel else "весь блок"
+        if self.settings.strip_comments:
+            text, _ = strip_comments(text, block.lang)
+            part += ", без комментариев"
+        return text, base, part
+
     def _update_armed_label(self) -> None:
         a = self._armed()
         if not a:
-            self.armed_lbl.setText("<span style='color:gray'>Нет активного блока кода — щёлкните по блоку кода</span>")
+            self.armed_lbl.setText("<span style='color:gray'>Нет активного блока — щёлкните по блоку кода "
+                                   "или текста</span>")
             return
         v, block = a
-        n = [b.id for b in v.template.code_blocks()].index(block.id) + 1
-        text, _ = typing_slice(block.text, block.sel, self.settings.selection_whole_lines)
-        if self.settings.strip_comments:
-            text, _ = strip_comments(text, block.lang)
-        part = "выделенные строки" if block.sel else "весь блок"
-        if self.settings.strip_comments:
-            part += ", без комментариев"
+        text, _, part = self._typing_text(v.template, block)
         lines = text.count("\n") + 1 if text else 0
-        self.armed_lbl.setText(f"Печатать: <b>{v.template.title}</b> · {block.display_title(n)} · {part} "
+        self.armed_lbl.setText(f"Печатать: <b>{v.template.title}</b> · "
+                               f"{block.display_title(v.template.code_number(block))} · {part} "
                                f"({lines} стр., {len(text)} симв.)")
 
     def _job_for_armed(self) -> dict | None:
@@ -760,9 +772,7 @@ class MainWindow(QMainWindow):
         if not a:
             return None
         v, block = a
-        text, base = typing_slice(block.text, block.sel, self.settings.selection_whole_lines)
-        if self.settings.strip_comments:
-            text, _ = strip_comments(text, block.lang)
+        text, base, _ = self._typing_text(v.template, block)
         if not text.strip():
             return None
         return {"tid": v.template.id, "bid": block.id, "base": base, "text": text}
@@ -794,7 +804,7 @@ class MainWindow(QMainWindow):
             return
         job = self._job_for_armed()
         if job is None:
-            self._notify("Нечего печатать: выберите (щёлкните) непустой блок кода.", True)
+            self._notify("Нечего печатать: выберите (щёлкните) непустой блок кода или текста.", True)
             return
         if st == PAUSED and self._same_job(job):
             self.engine.resume(*self._start_params(from_button, countdown))
@@ -808,7 +818,7 @@ class MainWindow(QMainWindow):
     def cmd_restart(self, from_button: bool = False) -> None:
         job = self._job_for_armed()
         if job is None:
-            self._notify("Нечего печатать: выберите (щёлкните) непустой блок кода.", True)
+            self._notify("Нечего печатать: выберите (щёлкните) непустой блок кода или текста.", True)
             return
         self._load_job(job)
         self.engine.restart(*self._start_params(from_button))
@@ -822,17 +832,20 @@ class MainWindow(QMainWindow):
         v = self.current_view()
         if not v:
             return
-        ids = [b.id for b in v.template.code_blocks()]
+        t = v.template
+        ids = [b.id for b in t.nav_blocks()]
         if not ids:
             return
-        cur = v.template.active_block
+        cur = t.active_block
         i = ids.index(cur) if cur in ids else -1
         j = max(0, min(len(ids) - 1, i + d))
         if self.engine.state in (RUNNING, COUNTDOWN, PAUSED):
             self.cmd_stop()
         v.go_to_block(ids[j])
-        self._notify(f"Активный блок: {v.template.find_block(ids[j]).display_title(j + 1)}"
-                     f" ({j + 1} из {len(ids)})", tray=not self.isActiveWindow())
+        b = t.find_block(ids[j])
+        codes = [x.id for x in t.code_blocks()]
+        where = f" ({codes.index(b.id) + 1} из {len(codes)})" if b.id in codes else ""
+        self._notify(f"Активный блок: {b.display_title(t.code_number(b))}{where}", tray=not self.isActiveWindow())
 
     def cmd_next_tab(self, d: int = 1) -> None:
         n = self.tabs.count()
@@ -898,7 +911,7 @@ class MainWindow(QMainWindow):
         if self.settings.auto_advance:
             v = self.view_for(self.job["tid"]) if self.job else None
             if v and v is self.current_view():
-                ids = [b.id for b in v.template.code_blocks()]
+                ids = [b.id for b in v.template.nav_blocks()]
                 if self.job["bid"] in ids and ids.index(self.job["bid"]) + 1 < len(ids):
                     QTimer.singleShot(400, lambda: self.cmd_block(+1))
 
@@ -920,7 +933,9 @@ class MainWindow(QMainWindow):
 <ol>
 <li>Слева выберите образец (или <b>Импорт</b> из .ipynb). Образец — это лента блоков: условия, пояснения и код.</li>
 <li>Щёлкните по блоку кода — он станет <b>активным</b> (зелёная рамка).
-Выделите строки, если нужно напечатать только их.</li>
+Выделите строки, если нужно напечатать только их.
+Текст (условие, пояснение) тоже печатается: кнопка <b>▶ Печатать этот</b> в его шапке,
+рядом — как печатать: Markdown, простым текстом или комментарием в коде.</li>
 <li>Перейдите в целевое окно (Блокнот, VS Code, браузер, Jupyter), поставьте курсор.</li>
 <li>Нажмите <b>{s.hotkey_toggle}</b> — начнётся набор. Ещё раз — пауза, ещё раз — продолжение.</li>
 </ol>

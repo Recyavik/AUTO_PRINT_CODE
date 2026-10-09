@@ -141,6 +141,7 @@ export interface Block {
   role: string;
   title: string;
   zoom: number;
+  print_as: string;      // как печатать Markdown-блок: markdown | plain | comment (см. textprint.ts)
 }
 
 export interface Template {
@@ -158,7 +159,7 @@ export function newId(): string {
 }
 
 export function makeBlock(type: string, text = "", extra: Partial<Block> = {}): Block {
-  return { type, text, lang: "python", sel: [], id: newId(), role: "text", title: "", zoom: 100, ...extra };
+  return { type, text, lang: "python", sel: [], id: newId(), role: "text", title: "", zoom: 100, print_as: "markdown", ...extra };
 }
 
 export function makeTemplate(title: string, blocks: Block[] = []): Template {
@@ -206,6 +207,24 @@ export function freshIds(t: Template): Template {
 
 export function codeBlocks(t: Template): Block[] {
   return t.blocks.filter((b) => b.type === BLOCK_CODE);
+}
+
+/** Переходы по хоткею «следующий блок»: блоки кода и активный текстовый блок, если печатается он —
+ *  так из условия задачи попадаем в код под ним. */
+export function navBlocks(t: Template): Block[] {
+  return t.blocks.filter((b) => b.type === BLOCK_CODE || b.id === t.active_block);
+}
+
+/** Номер блока кода (1, 2, …) для заголовка «Код N»; 0 — для текстового блока. */
+export function codeNumber(t: Template, b: Block): number {
+  return codeBlocks(t).findIndex((x) => x.id === b.id) + 1;
+}
+
+/** Язык ближайшего блока кода — сначала ниже (условие стоит над решением), затем выше. */
+export function langNear(t: Template, b: Block): string {
+  const i = t.blocks.findIndex((x) => x.id === b.id);
+  const order = [...t.blocks.slice(i + 1), ...t.blocks.slice(0, Math.max(0, i)).reverse()];
+  return order.find((x) => x.type === BLOCK_CODE)?.lang ?? "python";
 }
 
 export function blockTitle(b: Block, codeNumber = 0): string {

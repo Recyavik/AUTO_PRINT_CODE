@@ -37,6 +37,11 @@ def supported(lang: str) -> bool:
     return (lang or "").lower() in _LANGS
 
 
+def lang_spec(lang: str) -> tuple[tuple, tuple, tuple] | None:
+    """→ (маркеры строчных комментариев, пары блочных, кавычки) или None для неизвестного языка."""
+    return _LANGS.get((lang or "").lower())
+
+
 def _comment_spans(text: str, line_marks: tuple, blocks: tuple, quotes: tuple) -> list[tuple[int, int]]:
     spans = []
     i, n = 0, len(text)

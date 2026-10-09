@@ -10,11 +10,11 @@ import fs from "node:fs";
 import http from "node:http";
 import path from "node:path";
 import { type WebSocket, WebSocketServer } from "ws";
-import { stripComments } from "../shared/comments.ts";
 import {
-  blockTitle, type ClientMsg, codeBlocks, type EngineStatus, HOTKEYS, mergeSettings, type ServerMsg, type Settings,
-  type Template, templateFrom, typingSlice,
+  blockTitle, type ClientMsg, codeBlocks, codeNumber, type EngineStatus, HOTKEYS, mergeSettings, navBlocks,
+  type ServerMsg, type Settings, type Template, templateFrom,
 } from "../shared/model.ts";
+import { typingText } from "../shared/textprint.ts";
 import { Engine } from "./engine.ts";
 import { InputHooks } from "./input.ts";
 import { log, LOG_FILE } from "./log.ts";
@@ -102,8 +102,7 @@ function jobForArmed(): Job | null {
   const a = armed();
   if (!a) return null;
   const block = a.t.blocks.find((b) => b.id === a.bid)!;
-  let [text, base] = typingSlice(block.text, block.sel, s.selection_whole_lines);
-  if (s.strip_comments) text = stripComments(text, block.lang)[0];
+  const [text, base] = typingText(a.t, block, s);
   if (!text.trim()) return null;
   return { tid: a.t.id, bid: block.id, base, text };
 }
@@ -135,7 +134,7 @@ function cmdToggle(fromButton = false): void {
   const st = engine.state;
   if (st === "running" || st === "countdown") return engine.pause();
   const j = jobForArmed();
-  if (!j) return notify("Нечего печатать: выберите (щёлкните) непустой блок кода.", "warn");
+  if (!j) return notify("Нечего печатать: выберите (щёлкните) непустой блок кода или текста.", "warn");
   if (st === "paused" && sameJob(j)) return engine.resume(...startParams(fromButton));
   if (!sameJob(j) || st === "finished" || st === "paused") {
     if (st === "paused") notify("Образец или выделение изменились — печать начнётся с начала.");
@@ -146,7 +145,7 @@ function cmdToggle(fromButton = false): void {
 
 function cmdRestart(fromButton = false): void {
   const j = jobForArmed();
-  if (!j) return notify("Нечего печатать: выберите (щёлкните) непустой блок кода.", "warn");
+  if (!j) return notify("Нечего печатать: выберите (щёлкните) непустой блок кода или текста.", "warn");
   loadJob(j);
   engine.restart(...startParams(fromButton));
 }
@@ -159,7 +158,7 @@ function cmdStop(): void {
 function cmdBlock(d: number): void {
   const t = store.get(s.current_tab);
   if (!t) return;
-  const ids = codeBlocks(t).map((b) => b.id);
+  const ids = navBlocks(t).map((b) => b.id);
   if (!ids.length) return;
   const i = ids.indexOf(t.active_block);
   const j = Math.max(0, Math.min(ids.length - 1, i + d));
@@ -168,7 +167,9 @@ function cmdBlock(d: number): void {
   store.put(t);
   broadcast({ t: "template", template: t });
   broadcast({ t: "focusBlock", tid: t.id, bid: ids[j] });
-  notify(`Активный блок: ${blockTitle(t.blocks.find((b) => b.id === ids[j])!, j + 1)} (${j + 1} из ${ids.length})`);
+  const b = t.blocks.find((x) => x.id === ids[j])!;
+  const n = codeNumber(t, b);
+  notify(`Активный блок: ${blockTitle(b, n)}${n ? ` (${n} из ${codeBlocks(t).length})` : ""}`);
 }
 
 function cmdNextTab(d: number): void {
@@ -232,7 +233,7 @@ function startServices(): void {
         notify("Набор завершён.");
         if (s.auto_advance && job && job.tid === s.current_tab) {
           const t = store.get(job.tid);
-          const ids = t ? codeBlocks(t).map((b) => b.id) : [];
+          const ids = t ? navBlocks(t).map((b) => b.id) : [];
           const i = ids.indexOf(job.bid);
           if (i >= 0 && i + 1 < ids.length) setTimeout(() => cmdBlock(+1), 400);
         }

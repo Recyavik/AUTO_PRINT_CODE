@@ -127,7 +127,7 @@ class TypingEngine(QObject):
     def start(self, delay: float = 0.0, countdown: int = 0) -> None:
         """Старт с текущей позиции (с начала, если закончили)."""
         if not self._units:
-            self.message.emit("Нечего печатать: выберите блок кода с текстом.")
+            self.message.emit("Нечего печатать: выберите непустой блок.")
             return
         if self.state == PAUSED:
             self.resume(delay, countdown)
