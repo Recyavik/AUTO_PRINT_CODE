@@ -88,6 +88,13 @@ user32.GetAsyncKeyState.restype = ctypes.c_short
 user32.GetForegroundWindow.restype = wintypes.HWND
 user32.GetWindowThreadProcessId.argtypes = (wintypes.HWND, ctypes.POINTER(wintypes.DWORD))
 user32.GetWindowThreadProcessId.restype = wintypes.DWORD
+user32.GetClassNameW.argtypes = (wintypes.HWND, wintypes.LPWSTR, ctypes.c_int)
+user32.GetKeyboardLayout.argtypes = (wintypes.DWORD,)
+user32.GetKeyboardLayout.restype = ctypes.c_void_p
+user32.GetKeyboardLayoutList.argtypes = (ctypes.c_int, ctypes.POINTER(ctypes.c_void_p))
+user32.VkKeyScanExW.argtypes = (wintypes.WCHAR, ctypes.c_void_p)
+user32.VkKeyScanExW.restype = ctypes.c_short
+user32.PostMessageW.argtypes = (wintypes.HWND, wintypes.UINT, wintypes.WPARAM, ctypes.c_void_p)
 user32.GetWindowTextLengthW.argtypes = (wintypes.HWND,)
 user32.GetWindowTextW.argtypes = (wintypes.HWND, wintypes.LPWSTR, ctypes.c_int)
 
@@ -196,6 +203,75 @@ def window_process_name(hwnd: int) -> str:
         return f"pid {pid}"
     finally:
         kernel32.CloseHandle(h)
+
+
+def window_class(hwnd: int) -> str:
+    if not hwnd:
+        return ""
+    buf = ctypes.create_unicode_buffer(256)
+    user32.GetClassNameW(hwnd, buf, len(buf))
+    return buf.value
+
+
+# Окна терминалов: они не умеют выделять текст Shift+Home/End — превращают их в escape-последовательности,
+# и в строке команды появляются «H» и «F». Класс окна надёжнее имени процесса (консоль Windows — conhost).
+TERMINAL_CLASSES = {"consolewindowclass", "cascadia_hosting_window_class", "mintty", "virtualconsoleclass",
+                    "puttyconfigbox", "putty"}
+TERMINAL_PROCESSES = {"mintty.exe", "windowsterminal.exe", "conhost.exe", "openconsole.exe", "alacritty.exe",
+                      "wezterm-gui.exe", "hyper.exe", "tabby.exe", "conemu64.exe", "conemu.exe", "putty.exe",
+                      "kitty.exe", "fluentterminal.app.exe"}
+
+
+def is_terminal_window(hwnd: int) -> bool:
+    return (window_class(hwnd).lower() in TERMINAL_CLASSES
+            or window_process_name(hwnd).lower() in TERMINAL_PROCESSES)
+
+
+def needs_real_keys(hwnd: int) -> bool:
+    """Windows PowerShell 5.1 в консоли Windows: его PSReadLine 2.0 молча отбрасывает символы,
+    напечатанные юникод-событиями, — там печатаем настоящими клавишами раскладки."""
+    return window_class(hwnd).lower() == "consolewindowclass" and window_process_name(hwnd).lower() == "powershell.exe"
+
+
+# ---------------------------------------------------------------- печать настоящими клавишами
+
+WM_INPUTLANGCHANGEREQUEST = 0x0050
+
+
+def window_layout(hwnd: int) -> int:
+    return user32.GetKeyboardLayout(user32.GetWindowThreadProcessId(hwnd, None)) or 0
+
+
+def keyboard_layouts() -> list[int]:
+    n = user32.GetKeyboardLayoutList(0, None)
+    arr = (ctypes.c_void_p * n)()
+    user32.GetKeyboardLayoutList(n, arr)
+    return [x or 0 for x in arr]
+
+
+def key_for(ch: str, layout: int) -> int | None:
+    """Клавиша символа в раскладке: код VK + 0x100, если нужен Shift; None — такой клавиши нет
+    (или нужны Ctrl/Alt — AltGr не нажимаем, чтобы не задеть чужие сочетания)."""
+    if len(ch) != 1:
+        return None
+    r = user32.VkKeyScanExW(ch, layout)
+    if r == -1 or r & 0x0600:
+        return None
+    return r & 0x1FF
+
+
+def request_layout(hwnd: int, layout: int) -> None:
+    """Попросить окно сменить раскладку (как Alt+Shift). Применяется не сразу и окно об этом не сообщает."""
+    user32.PostMessageW(hwnd, WM_INPUTLANGCHANGEREQUEST, 0, layout)
+
+
+def type_key(ch: str, code: int) -> None:
+    """Нажать клавишу символа ch (code — из key_for): VK с Shift, если нужен.
+    При включённом Caps Lock регистр букв меняется — тогда Shift наоборот."""
+    vk, shift = code & 0xFF, bool(code & 0x100)
+    if ch.isalpha() and user32.GetKeyState(0x14) & 1:
+        shift = not shift
+    tap(vk, *((VK_SHIFT,) if shift else ()))
 
 
 def describe_window(hwnd: int) -> str:

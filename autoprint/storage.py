@@ -59,9 +59,11 @@ def new_id() -> str:
 
 PROFILE_PLAIN = "plain"
 PROFILE_IDE = "ide"
+PROFILE_TERMINAL = "terminal"
 PROFILES = {
     PROFILE_PLAIN: "Блокнот / простое поле",
     PROFILE_IDE: "IDE: VS Code, веб-IDE, Jupyter",
+    PROFILE_TERMINAL: "Терминал: Git Bash, PowerShell, cmd",
 }
 
 

@@ -1,9 +1,10 @@
 // Сквозной тест печати Node-движком в настоящие окна (как tests/run_editors.py у Python-версии).
 //
-//   node tests/e2e-editors.ts tk notepad
+//   node tests/e2e-editors.ts tk notepad terminals
 //
 // tk      — тестовое окно tests/tk_target.py: plain и ide (само дописывает скобки и автоотступ, как редактор)
 // notepad — Блокнот Windows: печать, Ctrl+S, сравнение файла с образцом (оба профиля)
+// terminals — Git Bash (mintty) и Windows PowerShell 5.1 в консоли: профили «Терминал» и IDE
 // Во время прогона НЕ трогать клавиатуру и мышь — тест управляет фокусом.
 import { spawn } from "node:child_process";
 import fs from "node:fs";
@@ -49,9 +50,10 @@ async function waitFg(part: string, timeoutMs = 20000): Promise<boolean> {
   return false;
 }
 
-async function typeText(code: string, profile: string, requireTitle: string): Promise<{ state: string; msgs: string[] }> {
+async function typeText(code: string, profile: string, requireTitle: string,
+  extra: Partial<Settings> = {}): Promise<{ state: string; msgs: string[] }> {
   const s: Settings = { ...DEFAULT_SETTINGS, profile, cpm: 1500, jitter: 0, newline_pause_ms: 40, punct_pause_ms: 0,
-    indent_with_tab: !!process.env.AP_TAB };
+    indent_with_tab: !!process.env.AP_TAB, ...extra };
   const e = new Engine(s, "⌨ AutoPrintCode", { requireTitle });   // в чужое окно — ни одного нажатия
   const msgs: string[] = [];
   const done = new Promise<void>((resolve) => e.on("event", (ev) => {
@@ -59,10 +61,14 @@ async function typeText(code: string, profile: string, requireTitle: string): Pr
     if (ev.e === "message") msgs.push(ev.text);
     // сообщение об ошибке приходит сразу после смены состояния — даём ему дойти
     if (ev.e === "state" && (ev.state === "finished" || ev.state === "paused")) setTimeout(resolve, 200);
+    // печать не началась (не то окно, Ctrl/Alt зажаты): сообщение есть, а состояние осталось «готов»
+    if (ev.e === "message") setTimeout(() => { if (e.state === "idle" && !e.preparing) resolve(); }, 300);
   }));
+  const timer = setTimeout(() => { msgs.push("не закончилось за 120 с"); e.stop(); }, 120_000);
   e.load(code);
   e.start(0.05, 0);
-  await done;
+  await Promise.race([done, new Promise<void>((r) => setTimeout(r, 121_000))]);
+  clearTimeout(timer);
   const state = e.state;
   await e.close();
   return { state, msgs };
@@ -121,7 +127,49 @@ async function runNotepad(profile: "plain" | "ide"): Promise<void> {
   await sleep(800);
 }
 
+// ---- терминалы: команды git-демо пишут строки в out.txt, файл сравнивается с ожидаемым
+const GIT = String.raw`C:\Program Files\Git`;
+const BASH_SCRIPT = `echo "git commit -m 'Первый коммит' (v1) [ok]" > out.txt
+printf '%s\\n' "git log --oneline" "git diff -- \\"file.txt\\"" >> out.txt
+echo {a,b} $((1+2)) >> out.txt
+exit`;
+const BASH_EXPECTED = `git commit -m 'Первый коммит' (v1) [ok]
+git log --oneline
+git diff -- "file.txt"
+a b 3
+`;
+const PS_SCRIPT = `Set-Content -Encoding utf8 out.txt "git commit -m 'Первый коммит' (v1) [ok]"
+Add-Content -Encoding utf8 out.txt ('git log ' + "--oneline")
+exit`;
+const PS_EXPECTED = `git commit -m 'Первый коммит' (v1) [ok]
+git log --oneline
+`;
+
+async function runTerminal(name: "mintty" | "powershell", profile: string): Promise<void> {
+  const dir = fs.mkdtempSync(path.join(TMP, `term-${name}-`));
+  const tag = path.basename(dir);
+  if (name === "mintty") {
+    spawn(path.join(GIT, "git-bash.exe"), [`--cd=${dir}`], { cwd: dir, stdio: "ignore", detached: true }).unref();
+  } else {
+    // Windows PowerShell 5.1 в старой консоли — сюда печать идёт «клавишами раскладки»
+    spawn("conhost.exe", ["powershell.exe", "-NoLogo", "-NoProfile", "-NoExit", "-Command",
+      `$Host.UI.RawUI.WindowTitle = '${tag}'`], { cwd: dir, stdio: "ignore", detached: true }).unref();
+  }
+  if (!(await waitFg(tag, 30000))) return void console.log(`[${name}/${profile}] окно не получило фокус`);
+  await sleep(4000);   // оболочка загрузилась
+  const r = await typeText(name === "mintty" ? BASH_SCRIPT : PS_SCRIPT, profile, tag, { newline_pause_ms: 400, cpm: 900 });
+  const out = path.join(dir, "out.txt");
+  for (let i = 0; i < 30 && !fs.existsSync(out); i++) await sleep(200);
+  await sleep(1000);
+  const got = fs.existsSync(out) ? fs.readFileSync(out, "utf-8").replace(/^\uFEFF/, "").replace(/\r\n/g, "\n") : "<нет out.txt>";
+  report(`${name}/${profile}`, got, name === "mintty" ? BASH_EXPECTED : PS_EXPECTED, `state=${r.state} ${JSON.stringify(r.msgs)}`);
+}
+
 const which = process.argv.slice(2);
 if (which.includes("tk")) { await runTk("plain"); await runTk("ide"); }
 if (which.includes("notepad")) { await runNotepad("plain"); await runNotepad("ide"); }
+// ide — профиль IDE должен сам распознать терминал (иначе Shift+End/Home дадут «F» и «H»)
+if (which.includes("terminals")) {
+  for (const t of ["mintty", "powershell"] as const) { await runTerminal(t, "terminal"); await runTerminal(t, "ide"); }
+}
 process.exit(failures ? 1 : 0);

@@ -1,5 +1,5 @@
 // Текст → «единицы» печати и задержки между ними (порт build_units/_delay_after из typer.py и human.py).
-import { PROFILE_IDE, type Settings } from "../shared/model.ts";
+import { PROFILE_IDE, PROFILE_TERMINAL, type Settings } from "../shared/model.ts";
 
 export type UnitKind = "char" | "fast" | "tab" | "back" | "newline" | "cleanup";
 
@@ -29,7 +29,8 @@ export function buildUnits(text: string, s: Settings, rng: () => number = Math.r
   text.split("\n").forEach((line, li) => {
     if (li > 0) { src += 1; units.push(unit("newline", "\n", src)); }
     const m = line.length - line.replace(/^[ \t]+/, "").length;
-    if (m && s.indent_with_tab) {
+    // в терминале Tab — автодополнение, отступ только пробелами
+    if (m && s.indent_with_tab && s.profile !== PROFILE_TERMINAL) {
       // как человек: Tab на каждый уровень отступа, остаток — пробелами
       let col = 0;
       const cols: number[] = [];       // cols[i] — ширина отступа после i+1 исходных символов

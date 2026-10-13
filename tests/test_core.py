@@ -27,8 +27,8 @@ from autoprint import typer, winapi as w  # noqa: E402
 from autoprint.comments import strip_comments  # noqa: E402
 from autoprint.human import humanize  # noqa: E402
 from autoprint.importers import export_ipynb, import_ipynb, import_markdown, import_python  # noqa: E402
-from autoprint.storage import (BLOCK_CODE, BLOCK_MARKDOWN, PROFILE_IDE, PROFILE_PLAIN, Block, Settings,  # noqa: E402
-                               Template, TemplateStore, sample_template)
+from autoprint.storage import (BLOCK_CODE, BLOCK_MARKDOWN, PROFILE_IDE, PROFILE_PLAIN,  # noqa: E402
+                               PROFILE_TERMINAL, Block, Settings, Template, TemplateStore, sample_template)
 from autoprint.textprint import find_selection, markdown_to_plain, printable, selection_text  # noqa: E402
 from autoprint.typer import FINISHED, IDLE, PAUSED, RUNNING, TypingEngine, build_units  # noqa: E402
 from autoprint.ui.blocks import typing_slice  # noqa: E402
@@ -107,15 +107,52 @@ def fast(**kw) -> Settings:
     return replace(Settings(), **base)
 
 
-class EngineHarness:
-    """Подменяет WinAPI в движке на FakeEditor и «окно в фокусе»."""
+class FakeTerminal(FakeEditor):
+    """Модель строки ввода терминала (Git Bash/readline): Shift+Home/End он не понимает и вставляет
+    хвост escape-последовательности — «H» и «F»; Tab — автодополнение; Esc в PowerShell стирает строку."""
 
-    def __init__(self, test: unittest.TestCase, editor: FakeEditor) -> None:
+    def __init__(self) -> None:
+        super().__init__(ide=False)
+
+    def tap(self, vk: int, *mods: int) -> None:
+        if vk in (w.VK_HOME, w.VK_END) and w.VK_SHIFT in mods:
+            self._insert("H" if vk == w.VK_HOME else "F")
+        elif vk == w.VK_TAB:
+            self._insert("<TAB>")
+        elif vk == w.VK_ESCAPE:
+            self.text = self.text[:self.text.rfind("\n") + 1]
+            self.cur = len(self.text)
+        else:
+            super().tap(vk, *mods)
+
+
+class EngineHarness:
+    """Подменяет WinAPI в движке на FakeEditor и «окно в фокусе».
+    terminal — окно определяется как терминал; real_keys — как Windows PowerShell в консоли
+    (печать «клавишами раскладки»: раскладки 1 — латиница, 2 — кириллица)."""
+
+    def __init__(self, test: unittest.TestCase, editor: FakeEditor, terminal: bool = False,
+                 real_keys: bool = False) -> None:
         self.editor, self.foreground = editor, 1
+        self.layout = 1
+        self.keys: list[str] = []
+
+        def key_for(ch, layout):
+            cyr = "а" <= ch.lower() <= "я" or ch.lower() == "ё"
+            return ord(ch) if (layout == 2) == cyr else None
+
+        def type_key(ch, code):
+            assert key_for(ch, self.layout) == code, f"«{ch}» нажат в раскладке {self.layout}"
+            self.keys.append(ch)
+            editor.type_char(ch)
+
         patches = {"type_char": editor.type_char, "tap": editor.tap, "wait_modifiers_released": lambda *a, **k: True,
                    "foreground_window": lambda: self.foreground, "is_own_window": lambda h: False,
                    "self_elevated": lambda: True, "window_elevated": lambda h: False,
-                   "describe_window": lambda h: f"окно {h}"}
+                   "describe_window": lambda h: f"окно {h}", "is_terminal_window": lambda h: terminal,
+                   "needs_real_keys": lambda h: real_keys, "window_layout": lambda h: 1,
+                   "keyboard_layouts": lambda: [1, 2], "key_for": key_for, "type_key": type_key,
+                   "request_layout": lambda h, layout: setattr(self, "layout", layout)}
         for name, fn in patches.items():
             old = getattr(typer.w, name)
             setattr(typer.w, name, fn)
@@ -185,13 +222,13 @@ class BuildUnitsTest(unittest.TestCase):
 # ---------------------------------------------------------------- движок печати
 
 class EngineTest(unittest.TestCase):
-    def run_engine(self, text: str, settings: Settings, editor: FakeEditor) -> TypingEngine:
-        EngineHarness(self, editor)
+    def run_engine(self, text: str, settings: Settings, editor: FakeEditor, **harness) -> EngineHarness:
+        h = EngineHarness(self, editor, **harness)
         engine = TypingEngine(settings)
         engine.load(text)
         engine.start()
         wait_state(engine, {FINISHED})
-        return engine
+        return h
 
     def test_plain_profile_types_exact_text(self):
         ed = FakeEditor(ide=False)
@@ -208,6 +245,32 @@ class EngineTest(unittest.TestCase):
         ed = FakeEditor(ide=True)
         self.run_engine(CODE, fast(profile=PROFILE_IDE, human_typing=True, typo_per_100_words=30), ed)
         self.assertEqual(ed.text, CODE.replace("\t", "    "))
+
+    def test_terminal_gets_no_shift_home_end_tab_or_esc(self):
+        """Демонстрация git в терминале: ни «F»/«H» от Shift+End/Home, ни Tab-автодополнения."""
+        git = 'git commit -m "Первый коммит (v1)"\ngit log --oneline\n\tgit diff -- "file.txt"\n'
+        expected = git.replace("\t", "    ")
+        cases = [dict(profile=PROFILE_TERMINAL, indent_with_tab=True),                    # свой профиль
+                 dict(profile=PROFILE_IDE, indent_with_tab=True, esc_before_enter=True)]   # IDE, но окно — терминал
+        for kw in cases:
+            ed = FakeTerminal()
+            self.run_engine(git, fast(**kw), ed, terminal=True)
+            self.assertEqual(ed.text, expected, kw)
+
+    def test_ide_profile_in_terminal_without_detection_shows_the_bug(self):
+        """Контрольный: модель терминала действительно воспроизводит ошибку, если терминал не распознан."""
+        ed = FakeTerminal()
+        self.run_engine('git commit -m "x"\n', fast(profile=PROFILE_IDE), ed)
+        self.assertIn("F", ed.text)
+
+    def test_real_keys_switch_layout_like_a_human(self):
+        """Windows PowerShell 5.1 в консоли: печать клавишами, раскладка переключается по ходу и возвращается."""
+        ed = FakeTerminal()
+        text = 'git commit -m "Первый коммит (v1)"'
+        h = self.run_engine(text, fast(profile=PROFILE_TERMINAL), ed, terminal=True, real_keys=True)
+        self.assertEqual(ed.text, text)
+        self.assertEqual("".join(h.keys), text, "каждый символ — клавишей своей раскладки")
+        self.assertEqual(h.layout, 1, "по окончании — исходная раскладка")
 
     def test_pause_resume_and_stop(self):
         ed = FakeEditor(ide=False)

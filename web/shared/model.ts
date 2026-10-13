@@ -3,9 +3,11 @@
 
 export const PROFILE_PLAIN = "plain";
 export const PROFILE_IDE = "ide";
+export const PROFILE_TERMINAL = "terminal";
 export const PROFILES: Record<string, string> = {
   [PROFILE_PLAIN]: "Блокнот / простое поле",
   [PROFILE_IDE]: "IDE: VS Code, веб-IDE, Jupyter",
+  [PROFILE_TERMINAL]: "Терминал: Git Bash, PowerShell, cmd",
 };
 
 export const SOUND_STYLES: Record<string, string> = {

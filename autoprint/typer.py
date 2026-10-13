@@ -22,7 +22,7 @@ from PySide6.QtCore import QObject, Signal
 
 from . import winapi as w
 from .human import humanize
-from .storage import PROFILE_IDE, Settings
+from .storage import PROFILE_IDE, PROFILE_TERMINAL, Settings
 
 # Минимальный интервал между нажатиями задаётся настройкой key_gap_ms.
 # Замер на Блокноте Windows 11: при 8–12 мс символы теряются и переставляются,
@@ -56,7 +56,8 @@ def build_units(text: str, settings: Settings) -> list[Unit]:
             src += 1
             units.append(Unit("newline", "\n", src))
         m = len(line) - len(line.lstrip(" \t"))
-        if m and settings.indent_with_tab:
+        # в терминале Tab — автодополнение, отступ только пробелами
+        if m and settings.indent_with_tab and settings.profile != PROFILE_TERMINAL:
             # как человек: Tab на каждый уровень отступа, остаток — пробелами
             col, cols = 0, []      # cols[i] — ширина отступа после i+1 исходных символов
             for ch in line[:m]:
@@ -112,6 +113,13 @@ class TypingEngine(QObject):
         self._resume_delay = 0.0
         self._resume_countdown = 0
         self._thread: threading.Thread | None = None
+        # окно — терминал: печать без приёмов профиля IDE (Shift+Home/End дали бы в строке «H» и «F»)
+        self._terminal = False
+        # печать настоящими клавишами (Windows PowerShell 5.1 в консоли): раскладку задаём сами и помним —
+        # консоль не сообщает её честно
+        self._keys_hwnd = 0
+        self._layout = 0          # какую раскладку мы последней попросили
+        self._layout_orig = 0     # вернуть по окончании
 
     # ------------------------------------------------------------ API (GUI-поток)
     def load(self, text: str) -> None:
@@ -289,6 +297,19 @@ class TypingEngine(QObject):
             self.message.emit("Окно запущено от имени администратора — Windows не пропустит в него ввод. "
                               "Запустите AutoPrintCode тоже от имени администратора.")
             return None
+        s = self.settings
+        self._terminal = s.profile == PROFILE_TERMINAL or (s.profile == PROFILE_IDE and w.is_terminal_window(hwnd))
+        if self._terminal and w.needs_real_keys(hwnd):
+            if self._keys_hwnd != hwnd:
+                self._keys_hwnd, self._layout, self._layout_orig = hwnd, 0, w.window_layout(hwnd)
+            log.info("Windows PowerShell в консоли — печать клавишами раскладки")
+        else:
+            self._keys_hwnd = 0
+        if self._terminal and s.profile == PROFILE_IDE:
+            log.info("Окно — терминал: приёмы профиля IDE отключены")
+            if not self._pos:
+                self.message.emit("Печать в терминал: приёмы профиля IDE отключены (иначе в строке появились бы "
+                                  "«F» и «H»). Для терминала есть свой профиль «Терминал».")
         log.info("Печать %s с %d/%d → %s · профиль=%s · %d симв/мин",
                  "продолжена" if self._pos else "начата", self._pos, len(self._units),
                  w.describe_window(hwnd), self.settings.profile, self.settings.cpm)
@@ -342,6 +363,7 @@ class TypingEngine(QObject):
             self.progress.emit(unit.src_end, total)
             if not self._sleep(gen, self._delay_after(unit)):
                 return
+        self._restore_layout()
         if self._alive(gen):
             self._set_state(FINISHED)
             log.info("Набор завершён: %d единиц", len(self._units))
@@ -349,19 +371,22 @@ class TypingEngine(QObject):
 
     def _execute(self, u: Unit) -> None:
         s = self.settings
-        ide = s.profile == PROFILE_IDE
+        ide = s.profile == PROFILE_IDE and not self._terminal
         if u.kind == "char":
             if ide and u.text in CLEAR_BEFORE:
                 # не полагаемся на «перепечатывание» автоскобок — оно у редакторов разное
                 # (CodeMirror 6 ломает тройные кавычки): убираем дописанное справа и вставляем символ
                 self._clear_right()
-            w.type_char(u.text) if len(u.text) == 1 else self._fast(u.text)
+            self._char(u.text) if len(u.text) == 1 else self._fast(u.text)
             self.sound.emit("space" if u.text == " " else "key")
         elif u.kind == "fast":
             self.sound.emit("space")
             self._fast(u.text)
         elif u.kind == "tab":
-            w.tap(w.VK_TAB)
+            if self._terminal:   # Tab в терминале — автодополнение
+                self._fast(" " * max(1, s.tab_width))
+            else:
+                w.tap(w.VK_TAB)
             self.sound.emit("key")
         elif u.kind == "back":
             w.tap(w.VK_BACK)
@@ -383,7 +408,8 @@ class TypingEngine(QObject):
                 w.tap(w.VK_BACK)
                 time.sleep(self._gap())
         elif u.kind == "cleanup":
-            self._clear_right()
+            if ide:
+                self._clear_right()
 
     def _clear_right(self) -> None:
         w.tap(w.VK_END, w.VK_SHIFT)
@@ -398,8 +424,31 @@ class TypingEngine(QObject):
 
     def _fast(self, text: str) -> None:
         for ch in text:
-            w.type_char(ch)
+            self._char(ch)
             time.sleep(self._gap())
+
+    def _char(self, ch: str) -> None:
+        if not self._keys_hwnd:
+            w.type_char(ch)
+            return
+        # текущая раскладка, иначе первая, где есть такая клавиша (как человек переключает Alt+Shift)
+        layouts = ([self._layout] if self._layout else []) + [x for x in w.keyboard_layouts() if x != self._layout]
+        layout = next((x for x in layouts if w.key_for(ch, x) is not None), 0)
+        if not layout:
+            w.type_char(ch)       # символа нет ни в одной раскладке — как получится
+            return
+        self._switch_layout(layout)
+        w.type_key(ch, w.key_for(ch, layout))
+
+    def _switch_layout(self, layout: int) -> None:
+        if layout != self._layout:
+            w.request_layout(self._keys_hwnd, layout)
+            time.sleep(0.15)      # окно меняет раскладку не сразу
+            self._layout = layout
+
+    def _restore_layout(self) -> None:
+        if self._keys_hwnd and self._layout and self._layout_orig and self._layout != self._layout_orig:
+            self._switch_layout(self._layout_orig)
 
     def _delay_after(self, u: Unit) -> float:
         s = self.settings

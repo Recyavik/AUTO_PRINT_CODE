@@ -9,7 +9,7 @@
 //     редактор сам дописал справа (автоскобки, автокавычки), и закрывает подсказки;
 //   * после Enter — Shift+Home, пробел, Backspace: убирает автоотступ, затем отступ печатается как в образце.
 import { type MessagePort, receiveMessageOnPort, workerData } from "node:worker_threads";
-import { type EngineState, PROFILE_IDE, type Settings } from "../shared/model.ts";
+import { type EngineState, PROFILE_IDE, PROFILE_TERMINAL, type Settings } from "../shared/model.ts";
 import { buildUnits, delayAfter, gapSeconds, normalize, type Unit } from "./units.ts";
 import * as win32 from "./win32.ts";
 
@@ -53,6 +53,13 @@ let gen = 0;            // меняется при отмене (load/stop/resta
 let run = false;        // как threading.Event _run: false — пауза
 let inRun = false;      // идёт ли прогон (runJob)
 let preparing = false;  // идёт подготовка к печати (её тоже можно поставить на паузу)
+// окно — терминал: печать без приёмов профиля IDE (Shift+Home/End дали бы в строке «H» и «F»)
+let terminal = false;
+// печать настоящими клавишами (Windows PowerShell 5.1 в консоли): раскладку задаём сами и помним —
+// консоль не сообщает её честно
+let keysHwnd = 0;
+let layout = 0;        // какую раскладку мы последней попросили
+let layoutOrig = 0;    // вернуть по окончании
 let pendingStart: { delay: number; countdown: number } | null = null;
 let resumeParams = { delay: 0, countdown: 0 };
 
@@ -272,6 +279,22 @@ function prepareTarget(myGen: number, delay: number, countdown: number): number 
       "Запустите помощник AutoPrintCode тоже от имени администратора." });
     return null;
   }
+  terminal = s.profile === PROFILE_TERMINAL || (s.profile === PROFILE_IDE && w.isTerminalWindow(hwnd));
+  if (terminal && w.needsRealKeys(hwnd)) {
+    if (keysHwnd !== hwnd) {
+      keysHwnd = hwnd;
+      layout = 0;
+      layoutOrig = w.windowLayout(hwnd);
+    }
+    log("Windows PowerShell в консоли — печать клавишами раскладки");
+  } else keysHwnd = 0;
+  if (terminal && s.profile === PROFILE_IDE) {
+    log("Окно — терминал: приёмы профиля IDE отключены");
+    if (!pos) {
+      emit({ e: "message", text: "Печать в терминал: приёмы профиля IDE отключены (иначе в строке появились бы " +
+        "«F» и «H»). Для терминала есть свой профиль «Терминал»." });
+    }
+  }
   log(`Печать ${pos ? "продолжена" : "начата"} с ${pos}/${units.length} → ${w.describeWindow(hwnd)} · ` +
     `профиль=${s.profile} · ${s.cpm} симв/мин`);
   return hwnd;
@@ -334,6 +357,7 @@ function runJob(myGen: number, delay: number, countdown: number): void {
     emit({ e: "progress", pos: u.srcEnd, total });
     if (!sleep(myGen, delayAfter(u, s))) return;
   }
+  restoreLayout();
   if (gen === myGen) {
     setState("finished");
     log(`Набор завершён: ${units.length} единиц`);
@@ -342,11 +366,11 @@ function runJob(myGen: number, delay: number, countdown: number): void {
 }
 
 function execute(u: Unit): void {
-  const ide = s.profile === PROFILE_IDE;
+  const ide = s.profile === PROFILE_IDE && !terminal;
   switch (u.kind) {
     case "char":
       if (ide && CLEAR_BEFORE.has(u.text)) clearRight();
-      if ([...u.text].length === 1) w.typeChar(u.text);
+      if ([...u.text].length === 1) char(u.text);
       else fast(u.text);
       emit({ e: "sound", kind: u.text === " " ? "space" : "key" });
       break;
@@ -355,7 +379,8 @@ function execute(u: Unit): void {
       fast(u.text);
       break;
     case "tab":
-      w.tap(w.VK_TAB);
+      if (terminal) fast(" ".repeat(Math.max(1, s.tab_width)));   // Tab в терминале — автодополнение
+      else w.tap(w.VK_TAB);
       emit({ e: "sound", kind: "key" });
       break;
     case "back":
@@ -383,7 +408,7 @@ function execute(u: Unit): void {
       }
       break;
     case "cleanup":
-      clearRight();
+      if (ide) clearRight();
       break;
   }
 }
@@ -399,9 +424,30 @@ function clearRight(): void {
 
 function fast(t: string): void {
   for (const ch of t) {
-    w.typeChar(ch);
+    char(ch);
     gapSleep();
   }
+}
+
+function char(ch: string): void {
+  if (!keysHwnd) return w.typeChar(ch);
+  // текущая раскладка, иначе первая, где есть такая клавиша (как человек переключает Alt+Shift)
+  const order = [...(layout ? [layout] : []), ...w.keyboardLayouts().filter((x) => x !== layout)];
+  const found = order.find((x) => w.keyFor(ch, x) !== null);
+  if (!found) return w.typeChar(ch);   // символа нет ни в одной раскладке — как получится
+  switchLayout(found);
+  w.typeKey(ch, w.keyFor(ch, found)!);
+}
+
+function switchLayout(to: number): void {
+  if (to === layout) return;
+  w.requestLayout(keysHwnd, to);
+  Atomics.wait(ctrl, 1, 0, 150);   // окно меняет раскладку не сразу
+  layout = to;
+}
+
+function restoreLayout(): void {
+  if (keysHwnd && layout && layoutOrig && layout !== layoutOrig) switchLayout(layoutOrig);
 }
 
 // ------------------------------------------------------------ главный цикл потока

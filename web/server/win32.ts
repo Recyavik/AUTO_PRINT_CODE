@@ -47,6 +47,12 @@ const GetWindowThreadProcessId = user32.func(
 const GetWindowTextLengthW = user32.func("int __stdcall GetWindowTextLengthW(intptr_t hWnd)");
 const GetWindowTextW = user32.func("int __stdcall GetWindowTextW(intptr_t hWnd, _Out_ uint8_t *buf, int maxCount)");
 const ShowWindow = user32.func("bool __stdcall ShowWindow(intptr_t hWnd, int nCmdShow)");
+const GetClassNameW = user32.func("int __stdcall GetClassNameW(intptr_t hWnd, _Out_ uint8_t *buf, int maxCount)");
+const GetKeyboardLayout = user32.func("intptr_t __stdcall GetKeyboardLayout(uint32 threadId)");
+const GetKeyboardLayoutList = user32.func("int __stdcall GetKeyboardLayoutList(int n, intptr_t *list)");
+const VkKeyScanExW = user32.func("int16 __stdcall VkKeyScanExW(uint16 ch, intptr_t hkl)");
+const GetKeyState = user32.func("int16 __stdcall GetKeyState(int vKey)");
+const PostMessageW = user32.func("bool __stdcall PostMessageW(intptr_t hWnd, uint32 msg, uintptr_t wParam, intptr_t lParam)");
 const GetLastError = kernel32.func("uint32 __stdcall GetLastError()");
 const OpenProcess = kernel32.func("intptr_t __stdcall OpenProcess(uint32 access, bool inherit, uint32 pid)");
 const CloseHandle = kernel32.func("bool __stdcall CloseHandle(intptr_t h)");
@@ -174,10 +180,73 @@ export function windowElevated(hwnd: number): boolean {
   const h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid);
   if (!h) return true;   // доступ запрещён — скорее всего, процесс повышенный
   try {
-    return !!processElevated(h);
+    // маркер повышенного процесса обычному процессу обычно не прочитать — значит, повышенный
+    return processElevated(h) ?? true;
   } finally {
     CloseHandle(h);
   }
+}
+
+export function windowClass(hwnd: number): string {
+  if (!hwnd) return "";
+  const buf = Buffer.alloc(512);
+  const n = GetClassNameW(hwnd, buf, 256);
+  return buf.toString("utf16le", 0, n * 2);
+}
+
+// Окна терминалов: они не умеют выделять текст Shift+Home/End — превращают их в escape-последовательности,
+// и в строке команды появляются «H» и «F». Класс окна надёжнее имени процесса (консоль Windows — conhost).
+const TERMINAL_CLASSES = new Set(["consolewindowclass", "cascadia_hosting_window_class", "mintty", "virtualconsoleclass",
+  "puttyconfigbox", "putty"]);
+const TERMINAL_PROCESSES = new Set(["mintty.exe", "windowsterminal.exe", "conhost.exe", "openconsole.exe", "alacritty.exe",
+  "wezterm-gui.exe", "hyper.exe", "tabby.exe", "conemu64.exe", "conemu.exe", "putty.exe", "kitty.exe",
+  "fluentterminal.app.exe"]);
+
+export function isTerminalWindow(hwnd: number): boolean {
+  return TERMINAL_CLASSES.has(windowClass(hwnd).toLowerCase()) || TERMINAL_PROCESSES.has(windowProcessName(hwnd).toLowerCase());
+}
+
+/** Windows PowerShell 5.1 в консоли Windows: его PSReadLine 2.0 молча отбрасывает символы,
+ *  напечатанные юникод-событиями, — там печатаем настоящими клавишами раскладки. */
+export function needsRealKeys(hwnd: number): boolean {
+  return windowClass(hwnd).toLowerCase() === "consolewindowclass" && windowProcessName(hwnd).toLowerCase() === "powershell.exe";
+}
+
+// ---------------------------------------------------------------- печать настоящими клавишами
+
+const WM_INPUTLANGCHANGEREQUEST = 0x0050;
+
+export function windowLayout(hwnd: number): number {
+  return Number(GetKeyboardLayout(GetWindowThreadProcessId(hwnd, [0])));
+}
+
+export function keyboardLayouts(): number[] {
+  const n = GetKeyboardLayoutList(0, null);
+  const list = new BigInt64Array(n);   // koffi записывает выходной массив в типизированный буфер
+  GetKeyboardLayoutList(n, list);
+  return Array.from(list, Number);
+}
+
+/** Клавиша символа в раскладке: код VK + 0x100, если нужен Shift; null — такой клавиши нет
+ *  (или нужны Ctrl/Alt — AltGr не нажимаем, чтобы не задеть чужие сочетания). */
+export function keyFor(ch: string, layout: number): number | null {
+  if (ch.length !== 1) return null;
+  const r = VkKeyScanExW(ch.charCodeAt(0), layout);
+  if (r === -1 || r & 0x0600) return null;
+  return r & 0x1ff;
+}
+
+/** Попросить окно сменить раскладку (как Alt+Shift). Применяется не сразу и окно об этом не сообщает. */
+export function requestLayout(hwnd: number, layout: number): void {
+  PostMessageW(hwnd, WM_INPUTLANGCHANGEREQUEST, 0, layout);
+}
+
+/** Нажать клавишу символа ch (code — из keyFor): VK с Shift, если нужен.
+ *  При включённом Caps Lock регистр букв меняется — тогда Shift наоборот. */
+export function typeKey(ch: string, code: number): void {
+  let shift = (code & 0x100) !== 0;
+  if (ch.toLowerCase() !== ch.toUpperCase() && GetKeyState(0x14) & 1) shift = !shift;
+  tap(code & 0xff, ...(shift ? [VK_SHIFT] : []));
 }
 
 export function minimizeWindow(hwnd: number): void {
