@@ -263,6 +263,19 @@ class EngineTest(unittest.TestCase):
         self.run_engine('git commit -m "x"\n', fast(profile=PROFILE_IDE), ed)
         self.assertIn("F", ed.text)
 
+    def test_block_window_terminal_overrides_ide_setting(self):
+        """Терминал на сайте: окно — браузер, не распознаётся; у блока выбрано «Терминал» — «F» нет."""
+        ed = FakeTerminal()
+        EngineHarness(self, ed, terminal=False)
+        engine = TypingEngine(fast(profile=PROFILE_IDE, indent_with_tab=True))
+        engine.load('git commit -m "Первый (v1)"\n\tgit log\n', PROFILE_TERMINAL)
+        self.assertEqual(engine.profile, PROFILE_TERMINAL)
+        engine.start()
+        wait_state(engine, {FINISHED})
+        self.assertEqual(ed.text, 'git commit -m "Первый (v1)"\n    git log\n')
+        engine.load("x", "")                         # блок без своего окна — снова как в настройках
+        self.assertEqual(engine.profile, PROFILE_IDE)
+
     def test_real_keys_switch_layout_like_a_human(self):
         """Windows PowerShell 5.1 в консоли: печать клавишами, раскладка переключается по ходу и возвращается."""
         ed = FakeTerminal()

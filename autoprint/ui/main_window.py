@@ -20,7 +20,7 @@ from ..guard import InputGuard
 from ..hotkeys import HotkeyManager, parse_hotkey
 from ..importers import export_ipynb, import_ipynb, import_markdown, import_python
 from ..sounds import KeySoundPlayer
-from ..storage import BLOCK_CODE, PROFILES, Block, Settings, Template, TemplateStore
+from ..storage import BLOCK_CODE, PROFILE_SHORT, PROFILES, Block, Settings, Template, TemplateStore
 from ..textprint import PRINT_COMMENT, PRINT_MARKDOWN, PRINT_MODES, PRINT_PLAIN, printable, selection_text
 from ..typer import COUNTDOWN, FINISHED, IDLE, PAUSED, RUNNING, TypingEngine
 from .blocks import BlockWidget, typing_slice
@@ -769,6 +769,8 @@ class MainWindow(QMainWindow):
             return
         v, block = a
         text, _, part = self._typing_text(v.template, block)
+        if block.profile in PROFILE_SHORT:
+            part += f", окно: {PROFILE_SHORT[block.profile]}"
         lines = text.count("\n") + 1 if text else 0
         self.armed_lbl.setText(f"Печатать: <b>{v.template.title}</b> · "
                                f"{block.display_title(v.template.code_number(block))} · {part} "
@@ -782,15 +784,16 @@ class MainWindow(QMainWindow):
         text, base, _ = self._typing_text(v.template, block)
         if not text.strip():
             return None
-        return {"tid": v.template.id, "bid": block.id, "base": base, "text": text}
+        profile = block.profile if block.profile in PROFILES else ""
+        return {"tid": v.template.id, "bid": block.id, "base": base, "text": text, "profile": profile}
 
     def _same_job(self, job: dict | None) -> bool:
-        return bool(job and self.job and all(job[k] == self.job[k] for k in ("tid", "bid", "base", "text")))
+        return bool(job and self.job and all(job[k] == self.job[k] for k in ("tid", "bid", "base", "text", "profile")))
 
     def _load_job(self, job: dict) -> None:
         self._reset_progress()
         self.job = job
-        self.engine.load(job["text"])
+        self.engine.load(job["text"], job["profile"])
 
     def _invalidate_job_if_idle(self) -> None:
         if self.engine.state in (IDLE, FINISHED):

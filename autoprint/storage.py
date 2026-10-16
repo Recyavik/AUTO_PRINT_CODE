@@ -65,6 +65,7 @@ PROFILES = {
     PROFILE_IDE: "IDE: VS Code, веб-IDE, Jupyter",
     PROFILE_TERMINAL: "Терминал: Git Bash, PowerShell, cmd",
 }
+PROFILE_SHORT = {PROFILE_PLAIN: "Блокнот", PROFILE_IDE: "IDE", PROFILE_TERMINAL: "Терминал"}
 
 
 # звуки до v0.3.8 были синтезированы; теперь — записи настоящих клавиатур
@@ -171,6 +172,7 @@ class Block:
     title: str = ""      # свой заголовок блока; пусто → название по типу
     zoom: int = 100      # масштаб содержимого блока, % (Ctrl/Shift + колёсико)
     print_as: str = "markdown"   # как печатать Markdown-блок: markdown | plain | comment (см. textprint)
+    profile: str = ""            # окно для этого блока: plain | ide | terminal; пусто — как в настройках
 
     def display_title(self, code_number: int = 0) -> str:
         if self.title.strip():

@@ -9,6 +9,9 @@ export const PROFILES: Record<string, string> = {
   [PROFILE_IDE]: "IDE: VS Code, веб-IDE, Jupyter",
   [PROFILE_TERMINAL]: "Терминал: Git Bash, PowerShell, cmd",
 };
+export const PROFILE_SHORT: Record<string, string> = {
+  [PROFILE_PLAIN]: "Блокнот", [PROFILE_IDE]: "IDE", [PROFILE_TERMINAL]: "Терминал",
+};
 
 export const SOUND_STYLES: Record<string, string> = {
   office: "Обычная офисная клавиатура",
@@ -144,6 +147,7 @@ export interface Block {
   title: string;
   zoom: number;
   print_as: string;      // как печатать Markdown-блок: markdown | plain | comment (см. textprint.ts)
+  profile: string;       // окно для этого блока: plain | ide | terminal; пусто — как в настройках
 }
 
 export interface Template {
@@ -161,7 +165,7 @@ export function newId(): string {
 }
 
 export function makeBlock(type: string, text = "", extra: Partial<Block> = {}): Block {
-  return { type, text, lang: "python", sel: [], id: newId(), role: "text", title: "", zoom: 100, print_as: "markdown", ...extra };
+  return { type, text, lang: "python", sel: [], id: newId(), role: "text", title: "", zoom: 100, print_as: "markdown", profile: "", ...extra };
 }
 
 export function makeTemplate(title: string, blocks: Block[] = []): Template {

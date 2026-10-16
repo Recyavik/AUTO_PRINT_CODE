@@ -7,7 +7,7 @@ from PySide6.QtWidgets import (QApplication, QComboBox, QFrame, QHBoxLayout, QLa
                                QMenu, QSizePolicy, QStackedWidget, QTextBrowser, QToolButton, QVBoxLayout)
 
 from ..highlighter import LANGUAGES
-from ..storage import BLOCK_CODE, BLOCK_MARKDOWN, ROLES, Block
+from ..storage import BLOCK_CODE, BLOCK_MARKDOWN, PROFILE_SHORT, PROFILES, ROLES, Block
 from ..textprint import PRINT_MODES, find_selection
 from .code_editor import CodeEditor, code_font
 
@@ -79,6 +79,18 @@ class BlockWidget(QFrame):
         self.header.addStretch(1)
         self.right_slot = QHBoxLayout()
         self.header.addLayout(self.right_slot)
+        # окно для этого блока: терминал на сайте Windows не отличит от редактора — выбирают здесь
+        self.window = QComboBox()
+        self.window.addItem("🖥 по настройкам", "")
+        for key, name in PROFILE_SHORT.items():
+            self.window.addItem(f"🖥 {name}", key)
+        self.window.setCurrentIndex(max(0, self.window.findData(block.profile)))
+        self.window.setToolTip("Куда печатается этот блок:\n"
+                               + "\n".join(f"• {PROFILE_SHORT[k]} — {v}" for k, v in PROFILES.items())
+                               + "\nПо настройкам — как выбрано в главном окне («Окно:»).\n"
+                                 "Терминал на сайте (git в браузере) — выберите «Терминал»: иначе в строке появятся «F».")
+        self.window.activated.connect(self._on_window)
+        self.right_slot.addWidget(self.window)
 
         for text, tip, after in (("＋↑", "Вставить блок выше", 0), ("＋↓", "Вставить блок ниже", 1)):
             b = _tool(text, tip)
@@ -125,6 +137,11 @@ class BlockWidget(QFrame):
     def _on_title(self, text: str) -> None:
         self.block.title = text
         self.changed.emit()
+
+    def _on_window(self, _i: int) -> None:
+        self.block.profile = self.window.currentData()
+        self.changed.emit()
+        self.arm_requested.emit(self)
 
     def _on_kind(self, _i: int) -> None:
         key = self.kind.currentData()

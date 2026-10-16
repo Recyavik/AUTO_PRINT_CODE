@@ -16,7 +16,7 @@ import logging
 import random
 import threading
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from PySide6.QtCore import QObject, Signal
 
@@ -120,13 +120,23 @@ class TypingEngine(QObject):
         self._keys_hwnd = 0
         self._layout = 0          # какую раскладку мы последней попросили
         self._layout_orig = 0     # вернуть по окончании
+        self._profile = ""        # окно, выбранное у блока; пусто — как в настройках
 
     # ------------------------------------------------------------ API (GUI-поток)
-    def load(self, text: str) -> None:
-        """Загружает новый текст. Текущая печать прерывается."""
+    @property
+    def profile(self) -> str:
+        """Профиль окна этой печати: выбранный у блока или общий из настроек."""
+        return self._profile or self.settings.profile
+
+    def _build(self) -> list[Unit]:
+        return build_units(self._text, replace(self.settings, profile=self.profile))
+
+    def load(self, text: str, profile: str = "") -> None:
+        """Загружает новый текст. Текущая печать прерывается. profile — окно, выбранное у блока."""
         self._cancel()
         self._text = normalize(text)
-        self._units = build_units(self._text, self.settings)
+        self._profile = profile
+        self._units = self._build()
         self._pos = 0
         self._set_state(IDLE)
         self.progress.emit(0, len(self._text))
@@ -192,7 +202,7 @@ class TypingEngine(QObject):
     def rebuild(self) -> None:
         """Пересобрать единицы после смены настроек (только если печать не идёт)."""
         if self.state in (IDLE, FINISHED) and self._text:
-            self._units = build_units(self._text, self.settings)
+            self._units = self._build()
             self._pos = 0
 
     # ------------------------------------------------------------ внутреннее
@@ -297,22 +307,22 @@ class TypingEngine(QObject):
             self.message.emit("Окно запущено от имени администратора — Windows не пропустит в него ввод. "
                               "Запустите AutoPrintCode тоже от имени администратора.")
             return None
-        s = self.settings
-        self._terminal = s.profile == PROFILE_TERMINAL or (s.profile == PROFILE_IDE and w.is_terminal_window(hwnd))
+        profile = self.profile
+        self._terminal = profile == PROFILE_TERMINAL or (profile == PROFILE_IDE and w.is_terminal_window(hwnd))
         if self._terminal and w.needs_real_keys(hwnd):
             if self._keys_hwnd != hwnd:
                 self._keys_hwnd, self._layout, self._layout_orig = hwnd, 0, w.window_layout(hwnd)
             log.info("Windows PowerShell в консоли — печать клавишами раскладки")
         else:
             self._keys_hwnd = 0
-        if self._terminal and s.profile == PROFILE_IDE:
+        if self._terminal and profile == PROFILE_IDE:
             log.info("Окно — терминал: приёмы профиля IDE отключены")
             if not self._pos:
                 self.message.emit("Печать в терминал: приёмы профиля IDE отключены (иначе в строке появились бы "
                                   "«F» и «H»). Для терминала есть свой профиль «Терминал».")
         log.info("Печать %s с %d/%d → %s · профиль=%s · %d симв/мин",
                  "продолжена" if self._pos else "начата", self._pos, len(self._units),
-                 w.describe_window(hwnd), self.settings.profile, self.settings.cpm)
+                 w.describe_window(hwnd), profile, self.settings.cpm)
         return hwnd
 
     def _worker(self, gen: int, delay: float, countdown: int) -> None:
@@ -371,7 +381,7 @@ class TypingEngine(QObject):
 
     def _execute(self, u: Unit) -> None:
         s = self.settings
-        ide = s.profile == PROFILE_IDE and not self._terminal
+        ide = self.profile == PROFILE_IDE and not self._terminal
         if u.kind == "char":
             if ide and u.text in CLEAR_BEFORE:
                 # не полагаемся на «перепечатывание» автоскобок — оно у редакторов разное

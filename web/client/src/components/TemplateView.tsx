@@ -4,7 +4,8 @@ import { marked } from "marked";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { stripComments } from "../../../shared/comments.ts";
 import {
-  BLOCK_CODE, BLOCK_MARKDOWN, type Block, blockTitle, makeBlock, ROLES, type Settings, type Template, typingSlice,
+  BLOCK_CODE, BLOCK_MARKDOWN, type Block, blockTitle, makeBlock, PROFILE_SHORT, PROFILES, ROLES, type Settings,
+  type Template, typingSlice,
 } from "../../../shared/model.ts";
 import { findSelection, PRINT_MODES } from "../../../shared/textprint.ts";
 import { getState, updateBlock, updateTemplate, useApp } from "../api.ts";
@@ -23,6 +24,11 @@ const PRINT_AS_TIP = "Как печатать этот блок:\n" +
   "• как Markdown — исходник с ## и `…` (markdown-ячейка Jupyter, .md-файл);\n" +
   "• простым текстом — без разметки (Блокнот, Word, чат);\n" +
   "• комментарием в коде — каждая строка с # или // по языку блока кода рядом";
+
+const WINDOW_TIP = ["Куда печатается этот блок:",
+  ...Object.entries(PROFILES).map(([k, v]) => `• ${PROFILE_SHORT[k]} — ${v}`),
+  "По настройкам — как выбрано вверху («Окно:»).",
+  "Терминал на сайте (git в браузере) — выберите «Терминал»: иначе в строке появятся «F»."].join("\n");
 
 const LANGS = ["python", "javascript", "typescript", "java", "c", "cpp", "csharp", "go", "rust", "php", "kotlin",
   "swift", "sql", "html", "css", "json", "yaml", "bash", "text"];
@@ -171,6 +177,11 @@ function BlockView({ block: b, codeNumber, armed, settings, typed, onChange, onA
           </>
         )}
         <span className="grow" />
+        <select value={b.profile in PROFILE_SHORT ? b.profile : ""} title={WINDOW_TIP}
+          onChange={(e) => { onChange({ profile: e.target.value }, 0); onArm(); }}>
+          <option value="">🖥 по настройкам</option>
+          {Object.entries(PROFILE_SHORT).map(([k, name]) => <option key={k} value={k}>🖥 {name}</option>)}
+        </select>
         {b.zoom !== 100 && (
           <button className="btn small ghost" title="Обычный размер" onClick={() => onChange({ zoom: 100 })}>{b.zoom}%</button>
         )}

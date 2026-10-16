@@ -6,7 +6,7 @@
 //   comment  — простой текст, каждая строка закомментирована по языку ближайшего блока кода
 //              (условие в начале файла с решением).
 import { langSpec, stripComments } from "./comments.ts";
-import { BLOCK_CODE, type Block, langNear, type Settings, type Template, typingSlice } from "./model.ts";
+import { BLOCK_CODE, type Block, langNear, PROFILE_SHORT, type Settings, type Template, typingSlice } from "./model.ts";
 
 export const PRINT_MARKDOWN = "markdown";
 export const PRINT_PLAIN = "plain";
@@ -253,6 +253,11 @@ export function findSelection(source: string, selected: string, hint = 0): numbe
 
 /** Что печатать из блока → [текст, смещение в блоке, описание для строки состояния]. */
 export function typingText(t: Template, b: Block, s: Settings): [string, number, string] {
+  const [text, base, part] = typingTextOf(t, b, s);
+  return [text, base, b.profile in PROFILE_SHORT ? `${part}, окно: ${PROFILE_SHORT[b.profile]}` : part];
+}
+
+function typingTextOf(t: Template, b: Block, s: Settings): [string, number, string] {
   if (b.type !== BLOCK_CODE) {
     const mode = b.print_as in PRINT_MODES ? b.print_as : PRINT_MARKDOWN;
     const lang = langNear(t, b);

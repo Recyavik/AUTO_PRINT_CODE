@@ -144,3 +144,13 @@ test("кривой адрес не роняет помощника", { skip }, a
   assert.equal(bad.status, 400);
   assert.ok((await fetch(`${URL_SELF}/api/version`)).ok, "помощник жив");
 });
+
+test("окно у блока: «Терминал» сохраняется и видно в строке состояния", { skip }, async () => {
+  const select = await page.waitForSelector('[data-bid="code1"] .block-head select[title^="Куда печатается"]');
+  await select!.select("terminal");
+  const label = await waitFor(() => page.$eval(".status .armed", (e) => e.textContent ?? ""), (t) => t.includes("окно: Терминал"));
+  assert.match(label, /Код 1 · .*окно: Терминал/);
+  const block = await waitFor(() => saved().templates.find((t: { id: string }) => t.id === "aaa").blocks[1],
+    (b) => b.profile === "terminal");
+  assert.equal(block.profile, "terminal");
+});

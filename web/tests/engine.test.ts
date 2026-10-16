@@ -88,3 +88,21 @@ test("пауза во время отсчёта и задержки хоткея
     await e.close();
   }
 });
+
+test("окно «Терминал» у блока: ни Shift+End/Home, ни Tab, даже если в настройках IDE", async () => {
+  const SHIFT_END = "<16+35>", SHIFT_HOME = "<16+36>", TAB = "<9>";
+  const keysFor = async (profile: string) => {
+    const { e, events, waitState } = make({ ...S, profile: "ide", cpm: 3000, indent_with_tab: true });
+    e.load('git commit -m "Первый (v1)"\n\tgit log', profile);
+    e.start(0, 0);
+    await waitState("finished");
+    await e.close();
+    return events.filter((x) => x.e === "dry").map((x) => (x as { key: string }).key);
+  };
+  const ide = await keysFor("");
+  assert.ok(ide.includes(SHIFT_END) && ide.includes(SHIFT_HOME) && ide.includes(TAB), "IDE: приёмы на месте");
+  const term = await keysFor("terminal");
+  assert.ok(!term.some((k) => k === SHIFT_END || k === SHIFT_HOME || k === TAB), term.join(" "));
+  assert.equal(term.filter((k) => !k.startsWith("<")).join(""), 'git commit -m "Первый (v1)"    git log');
+  assert.deepEqual(term.filter((k) => k.startsWith("<")), ["<13>"], "из служебных — только Enter");
+});

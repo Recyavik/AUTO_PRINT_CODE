@@ -11,7 +11,7 @@ import http from "node:http";
 import path from "node:path";
 import { type WebSocket, WebSocketServer } from "ws";
 import {
-  blockTitle, type ClientMsg, codeBlocks, codeNumber, type EngineStatus, HOTKEYS, mergeSettings, navBlocks,
+  blockTitle, type ClientMsg, codeBlocks, codeNumber, type EngineStatus, HOTKEYS, mergeSettings, navBlocks, PROFILES,
   type ServerMsg, type Template, templateFrom,
 } from "../shared/model.ts";
 import { typingText } from "../shared/textprint.ts";
@@ -71,7 +71,7 @@ let engine!: Engine;
 let input!: InputHooks;
 const clients = new Set<WebSocket>();
 let hotkeysFailed = "";
-type Job = { tid: string; bid: string; base: number; text: string };
+type Job = { tid: string; bid: string; base: number; text: string; profile: string };
 let job: Job | null = null;
 
 function send(ws: WebSocket, msg: ServerMsg): void {
@@ -120,14 +120,15 @@ function jobForArmed(): Job | null {
   const block = a.t.blocks.find((b) => b.id === a.bid)!;
   const [text, base] = typingText(a.t, block, s);
   if (!text.trim()) return null;
-  return { tid: a.t.id, bid: block.id, base, text };
+  return { tid: a.t.id, bid: block.id, base, text, profile: block.profile in PROFILES ? block.profile : "" };
 }
 
-const sameJob = (a: Job | null) => !!(a && job && a.tid === job.tid && a.bid === job.bid && a.base === job.base && a.text === job.text);
+const sameJob = (a: Job | null) => !!(a && job && a.tid === job.tid && a.bid === job.bid && a.base === job.base &&
+  a.text === job.text && a.profile === job.profile);
 
 function loadJob(j: Job): void {
   job = j;
-  engine.load(j.text);
+  engine.load(j.text, j.profile);
 }
 
 function invalidateJobIfIdle(): void {

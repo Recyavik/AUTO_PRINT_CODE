@@ -41,7 +41,7 @@ export class Engine extends EventEmitter<{ event: [EngineEvent] }> {
   }
 
   setSettings(settings: Settings): void { this.send({ c: "settings", settings }); }
-  load(text: string): void { this.state = "idle"; this.send({ c: "load", text }); }
+  load(text: string, profile = ""): void { this.state = "idle"; this.send({ c: "load", text, profile }); }
   start(delay: number, countdown: number): void { this.send({ c: "start", delay, countdown }); }
   resume(delay: number, countdown: number): void { this.send({ c: "resume", delay, countdown }); }
   restart(delay: number, countdown: number): void { this.send({ c: "restart", delay, countdown }); }

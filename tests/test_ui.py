@@ -84,6 +84,15 @@ class MarkdownSelectionTest(unittest.TestCase):
         self.view._change_type(self.md, "hint")
         self.assertEqual((self.block.role, self.selected(), self.t.active_block), ("hint", "строка два", self.block.id))
 
+    def test_block_window_choice(self):
+        code = self.view.widgets[1]
+        code.window.setCurrentIndex(code.window.findData("terminal"))
+        code.window.activated.emit(code.window.currentIndex())
+        self.assertEqual(self.t.blocks[1].profile, "terminal")
+        self.assertEqual(self.t.active_block, self.t.blocks[1].id, "выбор окна делает блок активным")
+        self.view._rebuild()
+        self.assertEqual(self.view.widgets[1].window.currentData(), "terminal", "выбор сохраняется")
+
     def test_arming_other_block_clears_selection(self):
         self.view.arm(self.block.id)
         select_in_view(self.md, "строка два")

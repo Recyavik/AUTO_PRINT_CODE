@@ -19,7 +19,7 @@ const CLEAR_BEFORE = new Set(")]}\"'`");
 
 export type EngineCmd =
   | { c: "settings"; settings: Settings }
-  | { c: "load"; text: string }
+  | { c: "load"; text: string; profile: string }   // profile — окно, выбранное у блока ("" — из настроек)
   | { c: "start" | "resume" | "restart"; delay: number; countdown: number }
   | { c: "pause"; reason: string }
   | { c: "stop" };
@@ -31,16 +31,22 @@ export type EngineEvent =
   | { e: "message"; text: string }
   | { e: "sound"; kind: "key" | "space" | "enter" }
   | { e: "finished" }
-  | { e: "preparing"; on: boolean }   // отсчёт, задержка хоткея, ожидание отпускания Ctrl/Alt/Shift
+  | { e: "preparing"; on: boolean }
+  | { e: "dry"; key: string }          // только в «сухом» режиме тестов: что было бы нажато   // отсчёт, задержка хоткея, ожидание отпускания Ctrl/Alt/Shift
   | { e: "log"; level: "info" | "warn" | "error"; text: string };
 
 const { port, ctrl: ctrlBuf, ownTitleMark, requireTitle, dryRun } = workerData as {
   port: MessagePort; ctrl: SharedArrayBuffer; ownTitleMark: string; requireTitle?: string; dryRun?: boolean;
 };
-// «сухой» режим для тестов: всё как при печати, но ни одного нажатия и ни одного обращения к окнам
+// «сухой» режим для тестов: всё как при печати, но ни одного нажатия и ни одного обращения к окнам;
+// нажатия приходят событиями «dry»: символ или <код клавиши+модификаторы>
 const w: typeof win32 = dryRun ? {
-  ...win32, typeChar() {}, tap() {}, modifiersDown: () => false, foregroundWindow: () => 1, windowTitle: () => "dry run",
+  ...win32,
+  typeChar(ch: string) { emit({ e: "dry", key: ch }); },
+  tap(vk: number, ...mods: number[]) { emit({ e: "dry", key: `<${[...mods, vk].join("+")}>` }); },
+  modifiersDown: () => false, foregroundWindow: () => 1, windowTitle: () => "dry run",
   describeWindow: () => "dry run", selfElevated: () => false, windowElevated: () => false,
+  isTerminalWindow: () => false, needsRealKeys: () => false,
 } : win32;
 const ctrl = new Int32Array(ctrlBuf);
 
@@ -55,6 +61,9 @@ let inRun = false;      // идёт ли прогон (runJob)
 let preparing = false;  // идёт подготовка к печати (её тоже можно поставить на паузу)
 // окно — терминал: печать без приёмов профиля IDE (Shift+Home/End дали бы в строке «H» и «F»)
 let terminal = false;
+let blockProfile = "";   // окно, выбранное у блока; пусто — как в настройках
+/** Профиль окна этой печати: выбранный у блока или общий из настроек. */
+const profile = () => blockProfile || s.profile;
 // печать настоящими клавишами (Windows PowerShell 5.1 в консоли): раскладку задаём сами и помним —
 // консоль не сообщает её честно
 let keysHwnd = 0;
@@ -111,14 +120,15 @@ function handle(cmd: EngineCmd): void {
       s = cmd.settings;
       // пересобрать единицы после смены настроек (только если печать не идёт)
       if ((state === "idle" || state === "finished") && text) {
-        units = buildUnits(text, s);
+        units = buildUnits(text, { ...s, profile: profile() });
         pos = 0;
       }
       break;
     case "load":
       cancel();
       text = normalize(cmd.text);
-      units = buildUnits(text, s);
+      blockProfile = cmd.profile;
+      units = buildUnits(text, { ...s, profile: profile() });
       pos = 0;
       setState("idle");
       emit({ e: "progress", pos: 0, total: text.length });
@@ -279,7 +289,8 @@ function prepareTarget(myGen: number, delay: number, countdown: number): number 
       "Запустите помощник AutoPrintCode тоже от имени администратора." });
     return null;
   }
-  terminal = s.profile === PROFILE_TERMINAL || (s.profile === PROFILE_IDE && w.isTerminalWindow(hwnd));
+  const p = profile();
+  terminal = p === PROFILE_TERMINAL || (p === PROFILE_IDE && w.isTerminalWindow(hwnd));
   if (terminal && w.needsRealKeys(hwnd)) {
     if (keysHwnd !== hwnd) {
       keysHwnd = hwnd;
@@ -288,7 +299,7 @@ function prepareTarget(myGen: number, delay: number, countdown: number): number 
     }
     log("Windows PowerShell в консоли — печать клавишами раскладки");
   } else keysHwnd = 0;
-  if (terminal && s.profile === PROFILE_IDE) {
+  if (terminal && p === PROFILE_IDE) {
     log("Окно — терминал: приёмы профиля IDE отключены");
     if (!pos) {
       emit({ e: "message", text: "Печать в терминал: приёмы профиля IDE отключены (иначе в строке появились бы " +
@@ -296,7 +307,7 @@ function prepareTarget(myGen: number, delay: number, countdown: number): number 
     }
   }
   log(`Печать ${pos ? "продолжена" : "начата"} с ${pos}/${units.length} → ${w.describeWindow(hwnd)} · ` +
-    `профиль=${s.profile} · ${s.cpm} симв/мин`);
+    `профиль=${p} · ${s.cpm} симв/мин`);
   return hwnd;
 }
 
@@ -366,7 +377,7 @@ function runJob(myGen: number, delay: number, countdown: number): void {
 }
 
 function execute(u: Unit): void {
-  const ide = s.profile === PROFILE_IDE && !terminal;
+  const ide = profile() === PROFILE_IDE && !terminal;
   switch (u.kind) {
     case "char":
       if (ide && CLEAR_BEFORE.has(u.text)) clearRight();
