@@ -6,6 +6,7 @@
 // Безопасность: слушаем только 127.0.0.1; WebSocket принимает лишь страницы с нашего адреса
 // (проверка Origin и Host) — иначе любой открытый сайт мог бы подключиться и «печатать» вашими руками.
 import { execFileSync, spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import http from "node:http";
 import path from "node:path";
@@ -24,7 +25,9 @@ import * as w from "./win32.ts";
 const PORT = Number(process.env.AUTOPRINT_PORT || 8790);
 const DEV = process.argv.includes("--dev");
 const NO_OPEN = DEV || process.argv.includes("--no-open");
-const VERSION = JSON.parse(fs.readFileSync(path.join(WEB_DIR, "package.json"), "utf-8")).version as string;
+// AUTOPRINT_VERSION — только для тестов: изобразить помощника другой версии (tests/helper.test.ts)
+const VERSION = process.env.AUTOPRINT_VERSION
+  || JSON.parse(fs.readFileSync(path.join(WEB_DIR, "package.json"), "utf-8")).version as string;
 // заголовок страницы начинается с этой метки — так помощник узнаёт окно браузера со страницей
 const OWN_TITLE_MARK = "⌨ AutoPrintCode";
 const DIST = path.join(WEB_DIR, "dist");
@@ -354,6 +357,15 @@ const server = http.createServer((req, res) => {
     res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" }).end(`AutoPrintCode ${VERSION}`);
     return;
   }
+  // новая версия просит эту завершиться. Ключ лежит в папке данных — сторонний сайт его не знает,
+  // а свой заголовок из браузера с чужого сайта без разрешения CORS и не отправить
+  if (p === "/api/shutdown" && req.method === "POST") {
+    if (req.headers["x-autoprint-token"] !== HELPER_TOKEN) return void res.writeHead(403).end("Forbidden");
+    res.writeHead(200).end("ok");
+    log("info", "Завершаюсь: запускается другая версия помощника");
+    void shutdown();
+    return;
+  }
   if (p.startsWith("/sounds/") && serveFile(res, SOUNDS, p.slice("/sounds/".length))) return;
   if (p === "/api/log") {
     res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
@@ -452,21 +464,94 @@ function openBrowser(): void {
   p.unref();
 }
 
-server.on("error", (e: NodeJS.ErrnoException) => {
-  if (e.code === "EADDRINUSE") {
-    // порт занят: если это наш помощник — только открыть страницу, иначе сказать, что порт чужой
-    http.get(`${URL_SELF}/api/version`, (res) => {
+// ---------------------------------------------------------------- второй запуск
+// Порт занят. Наш помощник той же или более новой версии — только открыть страницу. Более старой —
+// заменить его (иначе после обновления продолжал бы работать старый код). Чужая программа — сообщить.
+const TOKEN_FILE = path.join(DATA_DIR, ".helper-token");
+const HELPER_TOKEN = randomUUID();
+let tookOver = false;
+let listenRetries = 0;
+
+function httpText(method: string, urlPath: string, headers: Record<string, string> = {}): Promise<string | null> {
+  return new Promise((resolve) => {
+    const req = http.request(`${URL_SELF}${urlPath}`, { method, headers, timeout: 3000 }, (res) => {
       let body = "";
-      res.setEncoding("utf-8").on("data", (c) => (body += c)).on("end", () => {
-        if (!body.startsWith("AutoPrintCode")) return portBusy();
-        log("info", "Помощник уже запущен — только открываю страницу");
-        if (!NO_OPEN) openBrowser();
-        setTimeout(() => process.exit(0), 500);   // дать explorer.exe стартовать (службы ещё не запущены)
-      });
-    }).on("error", portBusy);
+      res.setEncoding("utf-8").on("data", (c) => (body += c)).on("end", () => resolve(res.statusCode === 200 ? body : null));
+    });
+    req.on("error", () => resolve(null)).on("timeout", () => { req.destroy(); resolve(null); });
+    req.end();
+  });
+}
+
+const versionKey = (v: string) => v.split(/[.-]/).map((x) => Number.parseInt(x, 10) || 0);
+function olderThanMe(v: string): boolean {
+  const [a, b] = [versionKey(v), versionKey(VERSION)];
+  for (let i = 0; i < Math.max(a.length, b.length); i++) if ((a[i] ?? 0) !== (b[i] ?? 0)) return (a[i] ?? 0) < (b[i] ?? 0);
+  return false;
+}
+
+/** Помощник, у которого ещё нет /api/shutdown: найти процесс на порту и завершить, если это node server/main.ts. */
+function killOldHelper(): boolean {
+  try {
+    const line = execFileSync("netstat", ["-ano", "-p", "TCP"], { encoding: "utf-8", windowsHide: true })
+      .split(/\r?\n/).find((l) => l.includes(`127.0.0.1:${PORT} `) && /LISTENING/.test(l));
+    const pid = Number(line?.trim().split(/\s+/).pop());
+    if (!pid || pid === process.pid) return false;
+    const cmd = execFileSync("powershell.exe", ["-NoProfile", "-Command",
+      `(Get-CimInstance Win32_Process -Filter "ProcessId=${pid}").CommandLine`], { encoding: "utf-8", windowsHide: true });
+    if (!/node(\.exe)?"?\s.*server[\\/]main\.ts/i.test(cmd)) return false;   // не наш помощник — не трогаем
+    process.kill(pid);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function onPortBusy(): Promise<void> {
+  if (tookOver && listenRetries++ < 20) {   // прежний помощник уже завершается — порт освободится вот-вот
+    setTimeout(() => server.listen(PORT, "127.0.0.1"), 300);
     return;
   }
+  const body = await httpText("GET", "/api/version");
+  if (!body?.startsWith("AutoPrintCode")) return portBusy();
+  const running = body.slice("AutoPrintCode".length).trim();
+  if (tookOver || !olderThanMe(running)) {
+    log("info", `Помощник ${running} уже запущен — только открываю страницу`);
+    if (!NO_OPEN) openBrowser();
+    setTimeout(() => process.exit(0), 500);   // дать explorer.exe стартовать (службы ещё не запущены)
+    return;
+  }
+  tookOver = true;
+  log("info", `Работает помощник ${running}, запускается ${VERSION} — заменяю`);
+  let token = "";
+  try {
+    token = fs.readFileSync(TOKEN_FILE, "utf-8").trim();
+  } catch {
+    // старый помощник ключ не писал
+  }
+  const asked = token !== "" && (await httpText("POST", "/api/shutdown", { "X-AutoPrint-Token": token })) !== null;
+  if (!asked && !killOldHelper()) {
+    log("warn", `Не удалось завершить помощника ${running} — открываю его страницу`);
+    if (!NO_OPEN) openBrowser();
+    setTimeout(() => process.exit(0), 500);
+    return;
+  }
+  for (let i = 0; i < 50 && (await httpText("GET", "/api/version")) !== null; i++) await new Promise((r) => setTimeout(r, 200));
+  store.reload();   // прежний помощник, уходя, сохранил несохранённое
+  server.listen(PORT, "127.0.0.1");
+}
+
+server.on("error", (e: NodeJS.ErrnoException) => {
+  if (e.code === "EADDRINUSE") return void onPortBusy();
   throw e;
+});
+
+server.on("listening", () => {
+  try {
+    fs.writeFileSync(TOKEN_FILE, HELPER_TOKEN);
+  } catch (err) {
+    log("warn", `Не записан ключ для замены помощника: ${(err as Error).message}`);
+  }
 });
 
 server.listen(PORT, "127.0.0.1", () => {

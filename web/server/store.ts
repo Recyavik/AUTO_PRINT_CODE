@@ -102,13 +102,21 @@ export class Store {
 
   constructor() {
     this.adoptedFrom = adoptPythonData();
-    let settings: Record<string, unknown> = {};
+    this.settings = this.readSettings();
+    this.templates = this.loadTemplates();
+  }
+
+  private readSettings(): Settings {
     try {
-      settings = readJson(SETTINGS_FILE) ?? {};
+      return mergeSettings(readJson(SETTINGS_FILE) ?? {});
     } catch {
-      // испорченные настройки — по умолчанию; файл перезапишется при первом изменении
+      return mergeSettings({});   // испорченные настройки — по умолчанию; файл перезапишется при первом изменении
     }
-    this.settings = mergeSettings(settings);
+  }
+
+  /** Перечитать файлы: прежний помощник, уходя, мог дописать несохранённое. Объект настроек — тот же. */
+  reload(): void {
+    Object.assign(this.settings, this.readSettings());
     this.templates = this.loadTemplates();
   }
 
