@@ -57,10 +57,12 @@ class KeySounds {
       const [nd, nu] = COUNTS[style] ?? COUNTS.office;
       const fetchAll = (prefix: string, n: number) => Promise.all(Array.from({ length: n }, async (_, i) => {
         const r = await fetch(`/sounds/${style}/${prefix}_${String(i).padStart(2, "0")}.wav`);
+        if (!r.ok) throw new Error(`звук ${r.url}: ${r.status}`);
         return this.ctx!.decodeAudioData(await r.arrayBuffer());
       }));
       p = Promise.all([fetchAll("down", nd), fetchAll("up", nu)]).then(([downs, ups]) => ({ downs, ups }));
-      p.catch(() => this.packs.delete(style));
+      // не загрузился — повторить не раньше чем через 30 с, а не на каждом нажатии
+      p.catch(() => setTimeout(() => this.packs.delete(style), 30_000));
       this.packs.set(style, p);
     }
     return p;
@@ -86,7 +88,7 @@ class KeySounds {
       const t = this.ctx!.currentTime;
       this.hit(pick(downs), t, pitch, gain);
       if (ups.length) this.hit(pick(ups), t + rand(lo, hi) / 1000, pitch * rand(0.98, 1.02), gain * rand(0.75, 1.0));
-    });
+    }).catch(() => {});   // без звука — не беда, печать идёт
   }
 
   /** Проба звука: несколько нажатий подряд. */

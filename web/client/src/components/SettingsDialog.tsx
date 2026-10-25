@@ -4,6 +4,7 @@ import { hotkeyFromEvent, parseHotkey } from "../../../shared/hotkeys.ts";
 import { HOTKEYS, PROFILES, type Settings, SOUND_STYLES } from "../../../shared/model.ts";
 import { setAutostart, useApp } from "../api.ts";
 import { sounds } from "../sound.ts";
+import { NumberField } from "./NumberField.tsx";
 
 type Tab = "hotkeys" | "typing" | "human" | "sound" | "behavior";
 const TABS: [Tab, string][] = [["hotkeys", "Хоткеи"], ["typing", "Печать"], ["human", "Как человек"], ["sound", "Звук"], ["behavior", "Поведение"]];
@@ -18,8 +19,7 @@ export function SettingsDialog({ settings, onSave, onClose }: {
   const set = <K extends keyof Settings>(k: K, v: Settings[K]) => setS((x) => ({ ...x, [k]: v }));
 
   const num = (k: keyof Settings, min: number, max: number, step = 1, suffix = "") => (
-    <span><input type="number" min={min} max={max} step={step} value={s[k] as number}
-      onChange={(e) => set(k, Math.max(min, Math.min(max, Number(e.target.value))) as never)} /> {suffix}</span>
+    <span><NumberField value={s[k] as number} min={min} max={max} step={step} onCommit={(v) => set(k, v as never)} /> {suffix}</span>
   );
   const check = (k: keyof Settings, label: string, title?: string, disabled = false) => (
     <label className="check full" title={title}>
@@ -157,6 +157,7 @@ function HotkeyRow({ label, value, onChange }: { label: string; value: string; o
         onKeyDown={(e) => {
           if (e.key === "Tab") return;
           e.preventDefault();
+          e.stopPropagation();   // Esc здесь отменяет ввод сочетания, а не закрывает окно настроек
           if (e.key === "Escape") return (e.target as HTMLInputElement).blur();
           const hk = hotkeyFromEvent(e);
           if (hk) {

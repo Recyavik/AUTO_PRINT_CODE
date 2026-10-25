@@ -42,7 +42,7 @@ def _guess_lang(nb: dict) -> str:
 
 
 def import_ipynb(path: str) -> Template:
-    return notebook(json.loads(Path(path).read_text(encoding="utf-8")), Path(path).stem)
+    return notebook(json.loads(Path(path).read_text(encoding="utf-8-sig")), Path(path).stem)   # -sig: с BOM
 
 
 def notebook(nb: dict, title: str) -> Template:
@@ -63,7 +63,7 @@ _FENCE = re.compile(r"^```[ \t]*([\w+#.-]*)[^\n]*\n(.*?)^```[ \t]*$", re.M | re.
 
 
 def import_markdown(path: str) -> Template:
-    return markdown_text(Path(path).read_text(encoding="utf-8").replace("\r\n", "\n"), Path(path).stem)
+    return markdown_text(Path(path).read_text(encoding="utf-8-sig").replace("\r\n", "\n"), Path(path).stem)
 
 
 def markdown_text(text: str, title: str) -> Template:

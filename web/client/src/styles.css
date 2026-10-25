@@ -111,6 +111,9 @@ input[type="range"] { accent-color: var(--accent); }
 }
 .tab span { overflow: hidden; text-overflow: ellipsis; }
 .tab.current { background: var(--panel); color: var(--text); }
+.tab.dragging { opacity: 0.5; }
+.tab.drop-before { box-shadow: inset 3px 0 0 var(--accent); }
+.tab.drop-after { box-shadow: inset -3px 0 0 var(--accent); }
 .tab .x { opacity: 0.6; padding: 0 2px; border: none; background: none; cursor: pointer; }
 .tab .x:hover { opacity: 1; color: var(--danger); }
 
@@ -133,6 +136,7 @@ input[type="range"] { accent-color: var(--accent); }
 }
 .block-head .title-edit:hover, .block-head .title-edit:focus { border-color: var(--border); background: var(--panel-2); }
 .block-head .info { color: var(--muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.block-head .info.sel-info { color: #d29922; font-weight: 600; }
 .block-head .grow { flex: 1; }
 .block-head select { padding: 1px 4px; font-size: 12.5px; }
 .block-head .tools { display: flex; gap: 2px; opacity: 0.55; transition: opacity 0.15s; }

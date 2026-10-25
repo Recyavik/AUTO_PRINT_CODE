@@ -9,6 +9,8 @@ export class Engine extends EventEmitter<{ event: [EngineEvent] }> {
   pos = 0;
   total = 0;
   countdown = 0;
+  /** Идёт подготовка (отсчёт, задержка хоткея, ожидание отпускания Ctrl/Alt/Shift) — её тоже ставят на паузу. */
+  preparing = false;
   private readonly worker: Worker;
   private readonly port;
   private readonly ctrl = new Int32Array(new SharedArrayBuffer(8));
@@ -27,6 +29,7 @@ export class Engine extends EventEmitter<{ event: [EngineEvent] }> {
       if (ev.e === "state") this.state = ev.state;
       else if (ev.e === "progress") { this.pos = ev.pos; this.total = ev.total; }
       else if (ev.e === "countdown") this.countdown = ev.n;
+      else if (ev.e === "preparing") this.preparing = ev.on;
       this.emit("event", ev);
     });
   }
@@ -38,12 +41,17 @@ export class Engine extends EventEmitter<{ event: [EngineEvent] }> {
   }
 
   setSettings(settings: Settings): void { this.send({ c: "settings", settings }); }
-  load(text: string): void { this.state = "idle"; this.send({ c: "load", text }); }
+  load(text: string, profile = ""): void { this.state = "idle"; this.send({ c: "load", text, profile }); }
   start(delay: number, countdown: number): void { this.send({ c: "start", delay, countdown }); }
   resume(delay: number, countdown: number): void { this.send({ c: "resume", delay, countdown }); }
   restart(delay: number, countdown: number): void { this.send({ c: "restart", delay, countdown }); }
   pause(reason = "хоткей/кнопка"): void { this.send({ c: "pause", reason }); }
   stop(): void { this.send({ c: "stop" }); }
+
+  /** Печать идёт или готовится: «старт/пауза» в этот момент ставит на паузу. */
+  get active(): boolean {
+    return this.state === "running" || this.state === "countdown" || this.preparing;
+  }
 
   get busy(): boolean {
     return this.state === "running" || this.state === "countdown" || this.state === "paused";

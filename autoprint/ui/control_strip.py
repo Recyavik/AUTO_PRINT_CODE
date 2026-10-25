@@ -141,7 +141,8 @@ class ControlStrip(QFrame):
         self.vol.valueChanged.connect(self._on_volume)
         self.vol.sliderReleased.connect(self.volume_released)
         self.profile = combo(PROFILES, "ide")
-        self.profile.setToolTip("Куда печатаем: IDE убирает автоскобки и автоотступы, Блокнот — печать как есть")
+        self.profile.setToolTip("Куда печатаем: IDE убирает автоскобки и автоотступы (VS Code, Jupyter, Colab, веб-IDE), "
+                                "Блокнот — печать как есть, Терминал — только символы и Enter (Git Bash, PowerShell)")
         # в узком окне список может сжаться: иначе минимальная ширина пульта больше доступной, и перенос
         # кнопок верхней строки считается для этой (несуществующей) ширины — третья строка обрезается
         self.profile.setMinimumWidth(130)

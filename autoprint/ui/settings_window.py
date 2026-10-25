@@ -288,10 +288,18 @@ class SettingsWindow(FramelessWindow):
         self._loaders.append(lambda: _quiet(w, lambda: w.setValue(getattr(self.s, key))))
         return w
 
-    def _combo(self, key: str, items: dict, width: int = 0):
+    def _combo(self, key: str, items: dict, width: int = 0, other=None):
+        """other(значение) → подпись для значения из settings.json, которого нет в списке: его не теряем."""
         w = combo(items, getattr(self.s, key), width)
+
+        def load() -> None:
+            v = getattr(self.s, key)
+            if other is not None and w.findData(v) < 0:
+                w.addItem(other(v), v)
+            w.setCurrentIndex(max(0, w.findData(v)))
+        _quiet(w, load)
         w.currentIndexChanged.connect(lambda _i: self._set(key, w.currentData()))
-        self._loaders.append(lambda: _quiet(w, lambda: w.setCurrentIndex(max(0, w.findData(getattr(self.s, key))))))
+        self._loaders.append(lambda: _quiet(w, load))
         return w
 
     # ------------------------------------------------------------ страницы
@@ -596,7 +604,7 @@ class SettingsWindow(FramelessWindow):
         auto = self._switch("update_auto_check")
         c.add(Row("refresh", "Проверять автоматически", "Во время печати программа не обновляется и "
                   "не отвлекает уведомлениями", [auto]))
-        interval = Row("clock", "Как часто", "", [self._combo("update_interval_h", INTERVALS, 220)])
+        interval = Row("clock", "Как часто", "", [self._combo("update_interval_h", INTERVALS, 220, other=lambda h: f"Каждые {h} ч")])
         # сборка, которая не может заменить свои файлы (нет _internal, папка без права записи), — только сообщает
         modes = UPDATE_MODES if updater.can_self_update() else {MODE_NOTIFY: UPDATE_MODES[MODE_NOTIFY]}
         mode = Row("bell", "Найдя новую версию", "", [self._combo("update_mode", modes, 300)])

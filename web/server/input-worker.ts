@@ -24,7 +24,8 @@ const user32 = koffi.load("user32.dll");
 const kernel32 = koffi.load("kernel32.dll");
 
 const POINT = koffi.struct("POINT", { x: "int32", y: "int32" });
-const MSG = koffi.struct("MSG", {
+// MSG в коде не упоминается: koffi регистрирует структуру по имени, на неё ссылаются сигнатуры "MSG *"
+koffi.struct("MSG", {
   hwnd: "intptr_t", message: "uint32", wParam: "uintptr_t", lParam: "intptr_t", time: "uint32", pt: POINT, lPrivate: "uint32",
 });
 const KBDLLHOOKSTRUCT = koffi.struct("KBDLLHOOKSTRUCT", {

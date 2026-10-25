@@ -128,12 +128,12 @@ class TemplateView(QWidget):
             self.widgets.append(wdg)
         # если в образце ещё нет активного блока — делаем активным первый блок кода
         codes = [w for w in self.widgets if isinstance(w, CodeBlockWidget)]
-        if codes and not any(w.block.id == self.template.active_block for w in codes):
-            self.arm(codes[0].block.id)
+        if codes and not self.template.find_block(self.template.active_block):
+            self.arm(codes[0].block.id)   # активный блок — код или текст; нет никакого — первый блок кода
         self._apply_armed()
         self.refresh_header()
         if keep_scroll:
-            QTimer.singleShot(0, lambda: self.scroll.verticalScrollBar().setValue(scroll_pos))
+            QTimer.singleShot(0, self, lambda: self.scroll.verticalScrollBar().setValue(scroll_pos))
         else:
             self.scroll.verticalScrollBar().setValue(0)
 
@@ -148,8 +148,8 @@ class TemplateView(QWidget):
         wdg.type_requested.connect(self._change_type)
         wdg.insert_requested.connect(self._insert_near)
         wdg.zoom_changed.connect(self.zoom_changed)
+        wdg.arm_requested.connect(lambda w: self.arm(w.block.id))   # и текст печатается
         if isinstance(wdg, CodeBlockWidget):
-            wdg.arm_requested.connect(lambda w: self.arm(w.block.id))
             wdg.steps_changed.connect(lambda w: self.steps_changed.emit(w.block.id))
             wdg.step_pointer_requested.connect(lambda w, k: self.step_pointer_requested.emit(w.block.id, k))
             wdg.set_step_mode(self.step_mode, self.step_pointer(wdg.block.id))
@@ -162,7 +162,7 @@ class TemplateView(QWidget):
                 w.set_number(n)
 
     def add_block(self, kind: str) -> None:
-        """Кнопки внизу: новый блок встаёт сразу после активного блока кода, а если активного нет — в конец."""
+        """Кнопки внизу: новый блок встаёт сразу после активного блока, а если активного нет — в конец."""
         bl = self.template.blocks
         active = self.template.find_block(self.template.active_block)
         self._insert_block(bl.index(active) + 1 if active else len(bl), kind)
@@ -206,7 +206,7 @@ class TemplateView(QWidget):
         self.changed.emit()
 
     def _change_type(self, wdg: BlockWidget, key: str) -> None:
-        """Смена типа: роль Markdown-блока или превращение текст ⇄ код (текст сохраняется)."""
+        """Смена типа: роль Markdown-блока или превращение текст ⇄ код (текст, выделение и «активный» сохраняются)."""
         b = wdg.block
         if key == "code":
             if b.type != BLOCK_CODE:
@@ -214,10 +214,6 @@ class TemplateView(QWidget):
                 b.lang = last.lang if last else b.lang
             b.type = BLOCK_CODE
         else:
-            if b.type == BLOCK_CODE:
-                b.sel = []
-                if b.id == self.template.active_block:
-                    self.template.active_block = ""
             b.type = BLOCK_MARKDOWN
             b.role = key
         self._rebuild(keep_scroll=True)
@@ -246,14 +242,16 @@ class TemplateView(QWidget):
 
     def _apply_armed(self) -> None:
         for w in self.widgets:
-            if isinstance(w, CodeBlockWidget):
-                on = w.block.id == self.template.active_block
-                w.set_armed(on)
-                if not on and w.block.sel:
-                    w.clear_selection()   # выделение — только у активного блока
+            on = w.block.id == self.template.active_block
+            w.set_armed(on)
+            if not on and w.block.sel:
+                w.clear_selection()   # выделение — только у активного блока
 
     def code_widget(self, block_id: str) -> CodeBlockWidget | None:
         return next((w for w in self.widgets if isinstance(w, CodeBlockWidget) and w.block.id == block_id), None)
+
+    def block_widget(self, block_id: str) -> BlockWidget | None:
+        return next((w for w in self.widgets if w.block.id == block_id), None)
 
     def clear_progress(self) -> None:
         for w in self.widgets:
@@ -271,6 +269,6 @@ class TemplateView(QWidget):
         if not self.template.find_block(block_id):
             return
         self.arm(block_id)
-        w = self.code_widget(block_id)
+        w = self.block_widget(block_id)
         if w:
             QTimer.singleShot(30, w, lambda: self.scroll.ensureWidgetVisible(w, 0, 40))

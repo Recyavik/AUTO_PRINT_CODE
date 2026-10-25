@@ -4,11 +4,31 @@ import { marked } from "marked";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { stripComments } from "../../../shared/comments.ts";
 import {
-  BLOCK_CODE, BLOCK_MARKDOWN, type Block, blockTitle, makeBlock, ROLES, type Settings, type Template, typingSlice,
+  BLOCK_CODE, BLOCK_MARKDOWN, type Block, blockTitle, makeBlock, PROFILE_SHORT, PROFILES, ROLES, type Settings,
+  type Template, typingSlice,
 } from "../../../shared/model.ts";
-import { getState, updateTemplate, useApp } from "../api.ts";
+import { findSelection, PRINT_MODES } from "../../../shared/textprint.ts";
+import { getState, updateBlock, updateTemplate, useApp } from "../api.ts";
 import { CodeEditor } from "./CodeEditor.tsx";
 import { Menu, type MenuItem } from "./Menu.tsx";
+
+// ссылки из текста блока — в новой вкладке, а не вместо страницы приложения
+DOMPurify.addHook("afterSanitizeAttributes", (node) => {
+  if (node.tagName === "A") {
+    node.setAttribute("target", "_blank");
+    node.setAttribute("rel", "noopener noreferrer");
+  }
+});
+
+const PRINT_AS_TIP = "Как печатать этот блок:\n" +
+  "• как Markdown — исходник с ## и `…` (markdown-ячейка Jupyter, .md-файл);\n" +
+  "• простым текстом — без разметки (Блокнот, Word, чат);\n" +
+  "• комментарием в коде — каждая строка с # или // по языку блока кода рядом";
+
+const WINDOW_TIP = ["Куда печатается этот блок:",
+  ...Object.entries(PROFILES).map(([k, v]) => `• ${PROFILE_SHORT[k]} — ${v}`),
+  "По настройкам — как выбрано вверху («Окно:»).",
+  "Терминал на сайте (git в браузере) — выберите «Терминал»: иначе в строке появятся «F»."].join("\n");
 
 const LANGS = ["python", "javascript", "typescript", "java", "c", "cpp", "csharp", "go", "rust", "php", "kotlin",
   "swift", "sql", "html", "css", "json", "yaml", "bash", "text"];
@@ -27,10 +47,6 @@ export function TemplateView({ template }: { template: Template }) {
   }, [focus?.n]);
 
   const save = (t: Template, delay?: number) => updateTemplate(t, delay);
-  const setBlock = (b: Block, delay?: number) => {
-    const t = getState().templates.find((x) => x.id === template.id) ?? template;
-    save({ ...t, blocks: t.blocks.map((x) => (x.id === b.id ? b : x)) }, delay);
-  };
   const arm = (bid: string) => {
     const t = getState().templates.find((x) => x.id === template.id) ?? template;
     if (t.active_block === bid) return;
@@ -66,7 +82,7 @@ export function TemplateView({ template }: { template: Template }) {
           && engine.state !== "idle" ? [job.base, job.base + engine.pos] : null;
         return (
           <BlockView key={b.id} block={b} codeNumber={n} armed={template.active_block === b.id} settings={settings}
-            typed={typed} onChange={setBlock} onArm={() => arm(b.id)} onMove={(d) => move(i, d)}
+            typed={typed} onChange={(patch, delay) => updateBlock(template.id, b.id, patch, delay)} onArm={() => arm(b.id)} onMove={(d) => move(i, d)}
             onInsert={(after, type) => insertAt(after ? i + 1 : i, type)} onDelete={() => remove(b)} />
         );
       })}
@@ -89,7 +105,7 @@ interface BlockProps {
   armed: boolean;
   settings: Settings;
   typed: [number, number] | null;
-  onChange: (b: Block, delay?: number) => void;
+  onChange: (patch: Partial<Block>, delay?: number) => void;   // правка поверх последней версии блока
   onArm: () => void;
   onMove: (d: number) => void;
   onInsert: (after: boolean, type: string) => void;
@@ -109,7 +125,7 @@ function BlockView({ block: b, codeNumber, armed, settings, typed, onChange, onA
       if (!e.ctrlKey && !e.shiftKey) return;
       e.preventDefault();
       const zoom = Math.max(50, Math.min(300, b.zoom + (e.deltaY < 0 ? 10 : -10)));
-      if (zoom !== b.zoom) onChange({ ...b, zoom });
+      if (zoom !== b.zoom) onChange({ zoom });
     };
     node.addEventListener("wheel", onWheel, { passive: false });
     return () => node.removeEventListener("wheel", onWheel);
@@ -117,8 +133,8 @@ function BlockView({ block: b, codeNumber, armed, settings, typed, onChange, onA
 
   const kindValue = isCode ? "code" : b.role;
   const setKind = (v: string) => {
-    if (v === "code") onChange({ ...b, type: BLOCK_CODE }, 0);
-    else onChange({ ...b, type: BLOCK_MARKDOWN, role: v, sel: [] }, 0);
+    if (v === "code") onChange({ type: BLOCK_CODE }, 0);
+    else onChange({ type: BLOCK_MARKDOWN, role: v }, 0);
   };
 
   const insertMenu = (e: React.MouseEvent) => {
@@ -140,20 +156,34 @@ function BlockView({ block: b, codeNumber, armed, settings, typed, onChange, onA
           <option value="code">💻 Код</option>
         </select>
         <input className="title-edit" value={b.title} placeholder={blockTitle({ ...b, title: "" }, codeNumber)}
-          title="Заголовок блока" onChange={(e) => onChange({ ...b, title: e.target.value })} />
+          title="Заголовок блока" onChange={(e) => onChange({ title: e.target.value })} />
+        <button className={`btn small arm-btn${armed ? " on" : ""}`} onClick={onArm}
+          title="Блок, который напечатается по хоткею">{armed ? "● Активный" : "▶ Печатать этот"}</button>
+        {!isCode && (
+          <select value={b.print_as in PRINT_MODES ? b.print_as : "markdown"} title={PRINT_AS_TIP}
+            onChange={(e) => { onChange({ print_as: e.target.value }, 0); onArm(); }}>
+            {Object.entries(PRINT_MODES).map(([k, name]) => <option key={k} value={k}>Печатать {name}</option>)}
+          </select>
+        )}
+        {!isCode && b.sel.length === 2 && (
+          <span className="info sel-info">· выделено строк: {b.text.slice(b.sel[0], b.sel[1]).replace(/\n+$/, "").split("\n").length}</span>
+        )}
         {isCode && (
           <>
-            <button className={`btn small arm-btn${armed ? " on" : ""}`} onClick={onArm}
-              title="Блок, который напечатается по хоткею">{armed ? "● Активный" : "▶ Печатать этот"}</button>
-            <select value={b.lang} onChange={(e) => onChange({ ...b, lang: e.target.value }, 0)} title="Язык подсветки и комментариев">
+            <select value={b.lang} onChange={(e) => onChange({ lang: e.target.value }, 0)} title="Язык подсветки и комментариев">
               {[...new Set([b.lang, ...LANGS])].map((l) => <option key={l}>{l}</option>)}
             </select>
             <CodeInfo block={b} settings={settings} />
           </>
         )}
         <span className="grow" />
+        <select value={b.profile in PROFILE_SHORT ? b.profile : ""} title={WINDOW_TIP}
+          onChange={(e) => { onChange({ profile: e.target.value }, 0); onArm(); }}>
+          <option value="">🖥 по настройкам</option>
+          {Object.entries(PROFILE_SHORT).map(([k, name]) => <option key={k} value={k}>🖥 {name}</option>)}
+        </select>
         {b.zoom !== 100 && (
-          <button className="btn small ghost" title="Обычный размер" onClick={() => onChange({ ...b, zoom: 100 })}>{b.zoom}%</button>
+          <button className="btn small ghost" title="Обычный размер" onClick={() => onChange({ zoom: 100 })}>{b.zoom}%</button>
         )}
         <span className="tools">
           <button className="btn small ghost" title="Выше" onClick={() => onMove(-1)}>▲</button>
@@ -166,13 +196,13 @@ function BlockView({ block: b, codeNumber, armed, settings, typed, onChange, onA
         <div className="code-wrap">
           <CodeEditor value={b.text} lang={b.lang} sel={armed ? b.sel : []} zoom={b.zoom} typed={typed}
             onFocus={onArm}
-            onChange={(text) => onChange({ ...b, text, sel: b.sel.length === 2 && b.sel[1] > text.length ? [] : b.sel })}
+            onChange={(text) => onChange({ text })}
             onSelection={(sel) => {
-              if (sel.join() !== b.sel.join()) onChange({ ...b, sel }, 250);
+              if (sel.join() !== b.sel.join()) onChange({ sel }, 250);
             }} />
         </div>
       ) : (
-        <MarkdownBlock block={b} onChange={onChange} />
+        <MarkdownBlock block={b} onChange={onChange} onArm={onArm} />
       )}
       {menu && <Menu {...menu} onClose={() => setMenu(null)} />}
     </div>
@@ -190,10 +220,11 @@ function CodeInfo({ block: b, settings }: { block: Block; settings: Settings }) 
   return <span className="info">· {part}: {lines} стр., {text.length} симв.{settings.strip_comments ? " без комм." : ""}</span>;
 }
 
-function MarkdownBlock({ block: b, onChange }: { block: Block; onChange: (b: Block, delay?: number) => void }) {
+function MarkdownBlock({ block: b, onChange, onArm }: { block: Block; onChange: (patch: Partial<Block>, delay?: number) => void; onArm: () => void }) {
   const [editing, setEditing] = useState(!b.text.trim());
   const html = useMemo(() => DOMPurify.sanitize(marked.parse(b.text, { async: false, gfm: true, breaks: false })), [b.text]);
   const ta = useRef<HTMLTextAreaElement>(null);
+  const view = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (editing && ta.current) {
       ta.current.style.height = "auto";
@@ -201,17 +232,40 @@ function MarkdownBlock({ block: b, onChange }: { block: Block; onChange: (b: Blo
     }
   }, [editing, b.text]);
 
+  // выделение: печатаются только выделенные строки (как в блоке кода)
+  const setSel = (sel: number[]) => {
+    if (sel.join() !== b.sel.join()) onChange({ sel }, 250);
+  };
+  const selectionFromView = () => {
+    const el = view.current;
+    const s = window.getSelection();
+    if (!el || !s || !s.rangeCount) return;
+    if (s.isCollapsed) return setSel([]);
+    const r = s.getRangeAt(0);
+    if (!el.contains(r.commonAncestorContainer)) return;
+    const pre = document.createRange();   // где началось выделение — если кусок встречается несколько раз
+    pre.selectNodeContents(el);
+    pre.setEnd(r.startContainer, r.startOffset);
+    setSel(findSelection(b.text, s.toString(), pre.toString().length / Math.max(1, el.textContent?.length ?? 0)));
+  };
+
   if (editing) {
     return (
       <textarea ref={ta} className="md-edit" value={b.text} autoFocus={!!b.text} spellCheck
         style={{ fontSize: `${(13.5 * b.zoom) / 100}px` }} placeholder="Текст в формате Markdown"
-        onChange={(e) => onChange({ ...b, text: e.target.value })}
+        onChange={(e) => onChange({ text: e.target.value })}
+        onSelect={(e) => {
+          const { selectionStart: a, selectionEnd: z } = e.currentTarget;
+          setSel(z > a ? [a, z] : []);
+        }}
         onBlur={() => b.text.trim() && setEditing(false)}
         onKeyDown={(e) => { if (e.key === "Escape") (e.target as HTMLTextAreaElement).blur(); }} />
     );
   }
   return (
-    <div className="md-view" style={{ fontSize: `${(14 * b.zoom) / 100}px` }} title="Щёлкните дважды, чтобы изменить"
-      onDoubleClick={() => setEditing(true)} dangerouslySetInnerHTML={{ __html: html }} />
+    <div ref={view} className="md-view" style={{ fontSize: `${(14 * b.zoom) / 100}px` }} title="Щёлкните дважды, чтобы изменить"
+      onMouseUp={selectionFromView} onKeyUp={selectionFromView}
+      onClick={(e) => !(e.target as HTMLElement).closest("a") && onArm()}
+      onDoubleClick={() => { setSel([]); setEditing(true); }} dangerouslySetInnerHTML={{ __html: html }} />
   );
 }

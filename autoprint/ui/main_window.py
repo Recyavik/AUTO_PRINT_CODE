@@ -17,7 +17,9 @@ from ..guard import InputGuard
 from ..hotkeys import HotkeyManager, parse_hotkey
 from ..importers import export_ipynb
 from ..sounds import KeySoundPlayer
-from ..storage import Block, Settings, Template, TemplateStore, steps_sample_template
+from ..storage import (BLOCK_CODE, PROFILE_SHORT, PROFILES, Block, Settings, Template, TemplateStore,
+                       steps_sample_template)
+from ..textprint import PRINT_COMMENT, PRINT_MARKDOWN, PRINT_MODES, PRINT_PLAIN, printable, selection_text
 from ..typer import COUNTDOWN, FINISHED, IDLE, LINE_WAIT, PAUSED, RUNNING, TypingEngine, build_units
 from .. import highlighter
 from . import icons, logo
@@ -590,7 +592,7 @@ class MainWindow(FramelessWindow):
 
     # ---- масштаб блока (у каждого блока свой)
     def _target_block(self) -> BlockWidget | None:
-        """Блок под мышью, иначе блок с курсором ввода, иначе активный блок кода."""
+        """Блок под мышью, иначе блок с курсором ввода, иначе активный блок (кода или текста)."""
         v = self.current_view()
         if not v:
             return None
@@ -599,7 +601,7 @@ class MainWindow(FramelessWindow):
                 w = w.parentWidget()
             if w is not None and w in v.widgets:
                 return w
-        return v.code_widget(v.template.active_block)
+        return v.block_widget(v.template.active_block)
 
     def _zoom_block(self, steps: int) -> None:
         w = self._target_block()
@@ -822,6 +824,33 @@ class MainWindow(FramelessWindow):
         block = v.template.find_block(v.template.active_block)
         return (v, block) if block else None
 
+    def _mode_for(self, block: Block) -> str:
+        """Режим печати блока: текст (условие, пояснение) печатается целиком — шагов и строк у него нет."""
+        return self.settings.print_mode if block.type == BLOCK_CODE else MODE_BLOCK
+
+    def _typing_text(self, t: Template, block: Block) -> tuple[str, int, list | None, int, str]:
+        """Что печатать из блока «целиком» или «по строкам» → (текст, смещение в блоке, карта позиций
+        без комментариев, длина куска в блоке, описание для пульта)."""
+        whole = self.settings.selection_whole_lines
+        if block.type != BLOCK_CODE:
+            mode = block.print_as if block.print_as in PRINT_MODES else PRINT_MARKDOWN
+            lang = t.lang_near(block)
+            part = {PRINT_MARKDOWN: "текст как Markdown", PRINT_PLAIN: "простой текст",
+                    PRINT_COMMENT: f"текст комментарием ({lang})"}[mode]
+            if not block.sel:
+                text = printable(block.text, mode, lang)
+                return text, 0, None, len(text), part
+            raw, base = typing_slice(block.text, block.sel, whole)
+            text = selection_text(block.text, raw, base, mode, lang)
+            return text, base, None, len(raw), part + ", выделенные строки"
+        text, base = typing_slice(block.text, block.sel, whole)
+        src_len, omap = len(text), None
+        part = "выделенные строки" if block.sel else "весь блок"
+        if self.settings.strip_comments:
+            text, omap = strip_comments(text, block.lang)
+            part += ", без комментариев"
+        return text, base, omap, src_len, part
+
     def _find_block(self, bid: str) -> tuple[Template | None, Block | None]:
         for t in self.store.templates:
             b = t.find_block(bid)
@@ -894,10 +923,10 @@ class MainWindow(FramelessWindow):
 
     def cmd_step_back(self) -> None:
         """Шаг назад без печати: следующим снова будет предыдущий шаг (чтобы переснять его)."""
-        if self.settings.print_mode != MODE_STEPS:
-            self._notify("«Шаг назад» работает в режиме «По шагам».")
-            return
         a = self._armed()
+        if self.settings.print_mode != MODE_STEPS or (a and a[1].type != BLOCK_CODE):
+            self._notify("«Шаг назад» работает в режиме «По шагам» у блока кода.")
+            return
         if not a:
             return
         _v, block = a
@@ -930,14 +959,15 @@ class MainWindow(FramelessWindow):
             return   # во время печати на пульте — ход печати
         a = self._armed()
         if not a:
-            self.strip.set_info("Нет активного блока кода — щёлкните по блоку кода")
+            self.strip.set_info("Нет активного блока — щёлкните по блоку кода или текста")
             self.strip.set_progress(0, 0, 0)
             self._set_title_status()
             self._refresh_prompter()
             return
         v, block = a
         title = f"<b style='color:{theme.c('text').name()}'>{block.display_title(self._code_number(v.template, block))}</b>"
-        mode = self.settings.print_mode
+        mode = self._mode_for(block)
+        window = f" · окно: {PROFILE_SHORT[block.profile]}" if block.profile in PROFILE_SHORT else ""
         if mode == MODE_STEPS:
             k = self._step_pointer(block.id)
             nums = self._block_steps(block)
@@ -949,19 +979,14 @@ class MainWindow(FramelessWindow):
                 i, n = self._step_index(block, k)
                 lines = self._lines_of(block)
                 count = sum(1 for sl in lines if sl.step == k and sl.typed is not None)
-                self.strip.set_info(f"Дальше: шаг {i} из {n} · {title} · строк: {count}")
+                self.strip.set_info(f"Дальше: шаг {i} из {n} · {title} · строк: {count}{window}")
                 self.strip.set_progress(i - 1, n, (i - 1) / max(1, n), "шаг.")
         else:
-            text, _ = typing_slice(block.text, block.sel, self.settings.selection_whole_lines)
-            if self.settings.strip_comments:
-                text, _ = strip_comments(text, block.lang)
-            part = "выделенные строки" if block.sel else "весь блок"
-            if self.settings.strip_comments:
-                part += ", без комментариев"
+            text, _base, _omap, _n, part = self._typing_text(v.template, block)
             if mode == MODE_LINES:
                 part = "по строкам, " + part
             lines = text.count("\n") + 1 if text else 0
-            self.strip.set_info(f"Печатать: {title} · {part} · {len(text)} симв.")
+            self.strip.set_info(f"Печатать: {title} · {part} · {len(text)} симв.{window}")
             self.strip.set_progress(0, lines, 0)
         self._set_title_status()
         self._refresh_prompter()
@@ -975,13 +1000,14 @@ class MainWindow(FramelessWindow):
             self.prompter_ctl.refresh()
             return
         a = self._armed()
-        if not s.show_prompter or s.print_mode == MODE_BLOCK or not a:
+        mode = self._mode_for(a[1]) if a else MODE_BLOCK
+        if not s.show_prompter or mode == MODE_BLOCK or not a:
             self.prompter.hide()
             return
         v, block = a
         name = block.display_title(self._code_number(v.template, block))
         busy = self.engine.state in BUSY and self.job and self.job["bid"] == block.id
-        if s.print_mode == MODE_STEPS:
+        if mode == MODE_STEPS:
             k = self.job["step"] if busy and self.job.get("kind") == MODE_STEPS else self._step_pointer(block.id)
             if k is None:
                 self.prompter.show_content(f"{name} · все шаги напечатаны", f"{s.hotkey_restart} — сначала",
@@ -1058,7 +1084,8 @@ class MainWindow(FramelessWindow):
         if not a:
             return None
         v, block = a
-        mode = self.settings.print_mode
+        mode = self._mode_for(block)
+        profile = block.profile if block.profile in PROFILES else ""   # окно, выбранное у блока
         if mode == MODE_STEPS:
             k = self._step_pointer(block.id)
             if k is None or not block.text.strip():   # пустой блок — «нечего печатать», а не «шаг без кода»
@@ -1068,16 +1095,12 @@ class MainWindow(FramelessWindow):
             def build(s: Settings, text=text, st=st, lang=lang, k=k):
                 return S.build_step_units(S.analyze(text, st, lang, s.strip_comments), k, s, s.step_nav)
             job = {"kind": MODE_STEPS, "tid": v.template.id, "bid": block.id, "step": k, "base": 0, "text": text,
-                   "omap": None, "src_len": len(text), "builder": build,
+                   "omap": None, "src_len": len(text), "builder": build, "profile": profile,
                    "key": (tuple(st), k, self.settings.strip_comments, self.settings.step_nav)}
             if not build(self.settings):
                 job["empty"] = True   # в шаге только комментарии — печатать нечего, это «слова»
             return job
-        text, base = typing_slice(block.text, block.sel, self.settings.selection_whole_lines)
-        src_len = len(text)
-        omap = None
-        if self.settings.strip_comments:
-            text, omap = strip_comments(text, block.lang)
+        text, base, omap, src_len, _part = self._typing_text(v.template, block)
         if not text.strip():
             return None
         builder = None
@@ -1085,16 +1108,16 @@ class MainWindow(FramelessWindow):
             def builder(s: Settings, text=text):
                 return build_units(text, s, line_wait=True)
         return {"kind": mode, "tid": v.template.id, "bid": block.id, "base": base, "text": text, "omap": omap,
-                "src_len": src_len, "builder": builder, "key": None}
+                "src_len": src_len, "builder": builder, "key": None, "profile": profile}
 
     def _same_job(self, job: dict | None) -> bool:
         return bool(job and self.job and all(job.get(k) == self.job.get(k)
-                                             for k in ("kind", "tid", "bid", "base", "text", "key")))
+                                             for k in ("kind", "tid", "bid", "base", "text", "key", "profile")))
 
     def _load_job(self, job: dict) -> None:
         self._clear_progress()
         self.job = job
-        self.engine.load(job["text"], job["bid"], job.get("builder"))
+        self.engine.load(job["text"], job.get("profile", ""), job_key=job["bid"], builder=job.get("builder"))
 
     def _invalidate_job_if_idle(self) -> None:
         if self.engine.state in (IDLE, FINISHED):
@@ -1144,11 +1167,11 @@ class MainWindow(FramelessWindow):
             # (задержка хоткея, с кнопки — отсчёт и сворачивание окна, чтобы фокус вернулся в редактор)
             self.engine.continue_line(False, *self._start_params(from_button, countdown))
             return
-        if st in (RUNNING, COUNTDOWN):
+        if self.engine.active:   # печать идёт или готовится — пауза
             self.engine.pause()
             return
         a = self._armed()
-        if self.settings.print_mode == MODE_STEPS and a and self._step_pointer(a[1].id) is None \
+        if a and self._mode_for(a[1]) == MODE_STEPS and self._step_pointer(a[1].id) is None \
                 and st != PAUSED:
             self._notify(f"Все шаги блока напечатаны. {self.settings.hotkey_restart or 'Кнопка ⟲'} — сначала, "
                          f"{self.settings.hotkey_next_block or 'выбор блока'} — следующий блок.",
@@ -1156,7 +1179,7 @@ class MainWindow(FramelessWindow):
             return
         job = self._job_for_armed()
         if job is None:
-            self._notify("Нечего печатать: выберите (щёлкните) непустой блок кода.", warn=True)
+            self._notify("Нечего печатать: выберите (щёлкните) непустой блок кода или текста.", warn=True)
             return
         if st == PAUSED and self._same_job(job):
             self.engine.resume(*self._start_params(from_button, countdown))
@@ -1168,18 +1191,19 @@ class MainWindow(FramelessWindow):
             return
         if not self._same_job(job) or st == FINISHED or st == PAUSED:
             if st == PAUSED:
-                self._notify("Занятие или выделение изменились — печать начнётся с начала.")
+                self._notify("Текст для печати изменился (занятие, выделение или настройки) — "
+                             "печать начнётся с начала.")
             self._load_job(job)
         self.engine.start(*self._start_params(from_button, countdown))
 
     def cmd_restart(self, from_button: bool = False) -> None:
         a = self._armed()
-        if self.settings.print_mode == MODE_STEPS and a:
+        if a and self._mode_for(a[1]) == MODE_STEPS:
             self.step_next[a[1].id] = self._block_steps(a[1])[0]   # по шагам «сначала» — с первого шага
             self._refresh_step_views()
         job = self._job_for_armed()
         if job is None:
-            self._notify("Нечего печатать: выберите (щёлкните) непустой блок кода.", warn=True)
+            self._notify("Нечего печатать: выберите (щёлкните) непустой блок кода или текста.", warn=True)
             return
         if job.get("empty"):
             self.cmd_stop()
@@ -1198,25 +1222,28 @@ class MainWindow(FramelessWindow):
         v = self.current_view()
         if not v:
             return
-        ids = [b.id for b in v.template.code_blocks()]
-        if not ids:
+        t = v.template
+        nav = t.nav_blocks()
+        if not nav:
             return
-        cur = v.template.active_block
-        i = ids.index(cur) if cur in ids else -1
+        ids = [b.id for b in nav]
+        i = ids.index(t.active_block) if t.active_block in ids else -1
         j = max(0, min(len(ids) - 1, i + d))
-        if self.engine.state in BUSY:
-            self.cmd_stop()
-        v.go_to_block(ids[j])
-        self._notify(f"Активный блок: {v.template.find_block(ids[j]).display_title(j + 1)}"
-                     f" ({j + 1} из {len(ids)})", tray=not self.isActiveWindow())
+        b = nav[j]
+        if j != i:   # на краю ленты переходить некуда — печать на паузе не сбрасываем
+            if self.engine.state in BUSY:
+                self.cmd_stop()
+            v.go_to_block(b.id)
+        n = t.code_number(b)
+        where = f" ({n} из {len(t.code_blocks())})" if n else ""
+        self._notify(f"Активный блок: {b.display_title(n)}{where}", tray=not self.isActiveWindow())
 
     def cmd_next_tab(self, d: int = 1) -> None:
         lib = self.library.list
         rows = [k for k in range(lib.count()) if not lib.item(k).isHidden()]
         if not rows:
             return
-        if self.engine.state in (RUNNING, COUNTDOWN):
-            self.engine.pause()
+        self.engine.pause()   # идёт или готовится — пауза (иначе ничего)
         cur = lib.currentRow()
         i = rows.index(cur) if cur in rows else -1
         it = lib.item(rows[(i + d) % len(rows)])
@@ -1378,7 +1405,7 @@ class MainWindow(FramelessWindow):
         if self.settings.auto_advance and job:
             v = self.views.get(job["tid"])
             if v and v is self.current_view():
-                ids = [b.id for b in v.template.code_blocks()]
+                ids = [b.id for b in v.template.nav_blocks()]
                 if job["bid"] in ids and ids.index(job["bid"]) + 1 < len(ids):
                     QTimer.singleShot(400, lambda: self.cmd_block(+1))
 

@@ -16,7 +16,16 @@ self.addEventListener("fetch", (e) => {
       .then((res) => {
         if (res.ok) {
           const copy = res.clone();
-          caches.open(CACHE).then((c) => c.put(req, copy)).catch(() => {});
+          caches.open(CACHE).then(async (c) => {
+            await c.put(req, copy);
+            // новая сборка: старые версии того же файла (index-<хеш>.js) больше не нужны
+            const m = url.pathname.match(/^(\/assets\/.+)-[\w-]+(\.\w+)$/);
+            if (!m) return;
+            for (const k of await c.keys()) {
+              const p = new URL(k.url).pathname;
+              if (p !== url.pathname && p.startsWith(m[1] + "-") && p.endsWith(m[2])) await c.delete(k);
+            }
+          }).catch(() => {});
         }
         return res;
       })

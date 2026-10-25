@@ -174,14 +174,14 @@ W.foreground_window = lambda: TARGET
 W.is_own_window = lambda h: False
 W.self_elevated = lambda: False
 W.window_elevated = lambda h: False
-W.window_process_name = lambda h: "code.exe"
-W.describe_window = lambda h: "code.exe «тест»"
+W.window_process_name = lambda h: "notepad.exe"   # «Блокнот»-профиль здесь уместен (без подсказки про IDE)
+W.describe_window = lambda h: "notepad.exe «тест»"
 
 
-def _wait_mods(timeout: float = 5.0) -> bool:
+def _wait_mods(timeout: float = 5.0, cancelled=lambda: False) -> bool:
     end = time.monotonic() + timeout
     while ED.held:
-        if time.monotonic() > end:
+        if time.monotonic() > end or cancelled():
             return False
         time.sleep(0.01)
     return True
@@ -589,6 +589,99 @@ def prompter_window() -> None:
     pump()
 
 
+def text_blocks() -> None:
+    """Текст тоже печатается (v0.4.1–0.4.2): как Markdown, простым текстом, комментарием по языку кода рядом;
+    выделенные строки — только они; в режиме «По шагам» текст — целиком. Окно у блока (v0.5.2). «Следующий
+    блок» — код и активный текст; на краю ленты печать на паузе не сбрасывается."""
+    from autoprint.storage import BLOCK_MARKDOWN, PROFILE_TERMINAL
+    ED.reset()
+    win, s, store = make_window(PROFILE_PLAIN)
+    task = Block(BLOCK_MARKDOWN, "## Задача\nПосчитать **сумму** списка.\nБез `sum()`.", role="task")
+    code = Block(BLOCK_CODE, "total = 0\nfor n in nums:\n    total += n", lang="python")
+    t = Template("текст и код", [task, code])
+    store.insert(t)
+    win._fill_library(t.id)
+    win.open_template(t.id)
+    v = win.views[t.id]
+    v.go_to_block(task.id)
+    pump(0.1)
+
+    def print_active() -> str:
+        ED.reset()
+        win.cmd_toggle()
+        wait_for(lambda: win.engine.state == FINISHED and win.job is not None, 10)
+        pump(0.05)
+        return ED.text
+    got = {}
+    for mode in ("markdown", "plain", "comment"):
+        task.print_as = mode
+        got[mode] = print_active()
+    check("текст как Markdown — исходник", got["markdown"] == task.text, repr(got["markdown"]))
+    check("текст простым текстом — без разметки", got["plain"] == "Задача\nПосчитать сумму списка.\nБез sum().",
+          repr(got["plain"]))
+    check("текст комментарием — по языку кода рядом (# для python)",
+          got["comment"] == "# Задача\n# Посчитать сумму списка.\n# Без sum().", repr(got["comment"]))
+    task.print_as = "plain"
+    task.sel = [task.text.index("Посчитать"), task.text.index("Без")]
+    check("выделенная строка текста — только она", print_active() == "Посчитать сумму списка.", repr(ED.text))
+    task.sel = []
+    win._on_mode("steps")
+    check("«По шагам», активный текст — печатается целиком", print_active() == "Задача\nПосчитать сумму списка.\n"
+          "Без sum()." and win.job["kind"] == "block", repr(ED.text))
+    win._on_mode("block")
+    # окно у блока: «Терминал» при общем «Блокнот»
+    code.profile = PROFILE_TERMINAL
+    v.go_to_block(code.id)
+    win._update_armed_label()
+    label = win.strip.info.text()
+    print_active()
+    check("окно у блока: «Терминал» — на пульте, в задании и у движка", "окно: Терминал" in label
+          and win.job["profile"] == PROFILE_TERMINAL and win.engine.profile == PROFILE_TERMINAL, label[-80:])
+    code.profile = ""
+    # «следующий блок»: из текста — в код под ним; на краю — печать на паузе не сбрасывается
+    v.go_to_block(task.id)
+    win.cmd_block(+1)
+    check("«следующий блок» из условия — в код под ним", t.active_block == code.id)
+    DELAY["s"] = 0.02
+    ED.reset()
+    win.cmd_toggle()
+    wait_for(lambda: win.engine.state == RUNNING, 5)
+    win.engine.pause()
+    wait_for(lambda: win.engine.state == "paused", 5)
+    win.cmd_block(+1)
+    check("на краю ленты «следующий блок» не сбрасывает печать на паузе",
+          win.engine.state == "paused" and t.active_block == code.id, win.engine.state)
+    DELAY["s"] = 0.0
+    win.cmd_stop()
+    win.close()
+    pump()
+
+
+def plain_in_editor_hint() -> None:
+    """Профиль «Блокнот», а окно — редактор кода или браузер: подсказка про IDE, один раз за запуск;
+    в Блокноте — без подсказок (там «Блокнот» и нужен)."""
+    s = Settings()
+    s.profile = PROFILE_PLAIN
+    s.hotkey_start_delay_ms = 0
+    e = TypingEngine(s)
+    msgs: list[str] = []
+    e.message.connect(msgs.append)
+    real = W.window_process_name
+    try:
+        for exe in ("msedge.exe", "msedge.exe", "notepad.exe"):
+            W.window_process_name = lambda h, exe=exe: exe
+            ED.reset()
+            e.load("x = 1")
+            e.start()
+            wait_for(lambda: e.state == FINISHED, 5)
+            pump(0.05)
+    finally:
+        W.window_process_name = real
+    hints = [m for m in msgs if "«Блокнот»" in m]
+    check("«Блокнот» в браузере: подсказка про IDE — один раз за запуск, в Блокноте — нет",
+          len(hints) == 1 and "IDE" in hints[0], repr(msgs))
+
+
 def comments_speed() -> None:
     rows = []
     for i in range(500):
@@ -756,6 +849,8 @@ def main() -> int:
     races()
     prompter_lines()
     prompter_window()
+    text_blocks()
+    plain_in_editor_hint()
     comments_speed()
     check("без исключений", not errors, errors[0].splitlines()[-1] if errors else "")
     print("ГОТОВО" if not failed else f"ОШИБКИ: {failed}")

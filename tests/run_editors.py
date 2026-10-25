@@ -21,7 +21,7 @@ os.makedirs(SP, exist_ok=True)
 os.environ.setdefault("AUTOPRINT_DATA", os.path.join(SP, "data"))  # не трогать рабочую data/
 from PySide6.QtCore import QCoreApplication
 from autoprint.storage import Settings
-from autoprint.typer import TypingEngine
+from autoprint.typer import FINISHED, IDLE, PAUSED, TypingEngine
 from autoprint import winapi as w
 app = QCoreApplication([])
 
@@ -76,8 +76,7 @@ def run(name, cmd, fname, code, profile, cpm=1500, settle=1.5, close_keys=None):
     e = TypingEngine(s); msgs = []
     e.message.connect(msgs.append)
     e.load(code); e.start(0.05)
-    while e._thread.is_alive():
-        app.processEvents(); time.sleep(0.01)
+    wait_engine(e, app)
     app.processEvents()
     time.sleep(0.5)
     w.tap(ord("S"), w.VK_CONTROL); time.sleep(1.0)
@@ -88,6 +87,18 @@ def run(name, cmd, fname, code, profile, cpm=1500, settle=1.5, close_keys=None):
         print("  GOT:", repr(got)); print("  EXP:", repr(code))
     if close_keys:
         close_keys()
+
+def wait_engine(e, app, timeout=180.0):
+    """Ждёт конца печати. Пауза (сменилось окно) или зависание — не ждём вечно."""
+    end = time.time() + timeout
+    while e.active or e.state not in (FINISHED, IDLE, PAUSED):
+        if time.time() > end:
+            print("  ! печать не закончилась за", timeout, "с — останавливаю"); e.stop(); break
+        app.processEvents(); time.sleep(0.01)
+    if e.state == PAUSED:
+        print("  ! печать встала на паузу (сменилось окно?)"); e.stop()
+    app.processEvents()
+
 
 PY = '''import os
 
@@ -155,8 +166,7 @@ def run_browser(name, page, lang, code, cpm=1500):
     e = TypingEngine(s); msgs = []
     e.message.connect(msgs.append)
     e.load(code); e.start(0.05)
-    while e._thread.is_alive():
-        app.processEvents(); time.sleep(0.01)
+    wait_engine(e, app)
     app.processEvents()
     got = None
     end = time.time() + 15

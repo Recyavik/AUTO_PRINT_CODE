@@ -9,7 +9,7 @@
 //     редактор сам дописал справа (автоскобки, автокавычки), и закрывает подсказки;
 //   * после Enter — Shift+Home, пробел, Backspace: убирает автоотступ, затем отступ печатается как в образце.
 import { type MessagePort, receiveMessageOnPort, workerData } from "node:worker_threads";
-import { type EngineState, PROFILE_IDE, type Settings } from "../shared/model.ts";
+import { type EngineState, PROFILE_IDE, PROFILE_TERMINAL, type Settings } from "../shared/model.ts";
 import { buildUnits, delayAfter, gapSeconds, normalize, type Unit } from "./units.ts";
 import * as win32 from "./win32.ts";
 
@@ -19,7 +19,7 @@ const CLEAR_BEFORE = new Set(")]}\"'`");
 
 export type EngineCmd =
   | { c: "settings"; settings: Settings }
-  | { c: "load"; text: string }
+  | { c: "load"; text: string; profile: string }   // profile — окно, выбранное у блока ("" — из настроек)
   | { c: "start" | "resume" | "restart"; delay: number; countdown: number }
   | { c: "pause"; reason: string }
   | { c: "stop" };
@@ -31,16 +31,22 @@ export type EngineEvent =
   | { e: "message"; text: string }
   | { e: "sound"; kind: "key" | "space" | "enter" }
   | { e: "finished" }
-  | { e: "target"; hwnd: number }
+  | { e: "preparing"; on: boolean }
+  | { e: "dry"; key: string }          // только в «сухом» режиме тестов: что было бы нажато   // отсчёт, задержка хоткея, ожидание отпускания Ctrl/Alt/Shift
   | { e: "log"; level: "info" | "warn" | "error"; text: string };
 
 const { port, ctrl: ctrlBuf, ownTitleMark, requireTitle, dryRun } = workerData as {
   port: MessagePort; ctrl: SharedArrayBuffer; ownTitleMark: string; requireTitle?: string; dryRun?: boolean;
 };
-// «сухой» режим для тестов: всё как при печати, но ни одного нажатия и ни одного обращения к окнам
+// «сухой» режим для тестов: всё как при печати, но ни одного нажатия и ни одного обращения к окнам;
+// нажатия приходят событиями «dry»: символ или <код клавиши+модификаторы>
 const w: typeof win32 = dryRun ? {
-  ...win32, typeChar() {}, tap() {}, modifiersDown: () => false, foregroundWindow: () => 1, windowTitle: () => "dry run",
+  ...win32,
+  typeChar(ch: string) { emit({ e: "dry", key: ch }); },
+  tap(vk: number, ...mods: number[]) { emit({ e: "dry", key: `<${[...mods, vk].join("+")}>` }); },
+  modifiersDown: () => false, foregroundWindow: () => 1, windowTitle: () => "dry run",
   describeWindow: () => "dry run", selfElevated: () => false, windowElevated: () => false,
+  isTerminalWindow: () => false, needsRealKeys: () => false,
 } : win32;
 const ctrl = new Int32Array(ctrlBuf);
 
@@ -52,6 +58,17 @@ let pos = 0;
 let gen = 0;            // меняется при отмене (load/stop/restart) — текущий прогон должен завершиться
 let run = false;        // как threading.Event _run: false — пауза
 let inRun = false;      // идёт ли прогон (runJob)
+let preparing = false;  // идёт подготовка к печати (её тоже можно поставить на паузу)
+// окно — терминал: печать без приёмов профиля IDE (Shift+Home/End дали бы в строке «H» и «F»)
+let terminal = false;
+let blockProfile = "";   // окно, выбранное у блока; пусто — как в настройках
+/** Профиль окна этой печати: выбранный у блока или общий из настроек. */
+const profile = () => blockProfile || s.profile;
+// печать настоящими клавишами (Windows PowerShell 5.1 в консоли): раскладку задаём сами и помним —
+// консоль не сообщает её честно
+let keysHwnd = 0;
+let layout = 0;        // какую раскладку мы последней попросили
+let layoutOrig = 0;    // вернуть по окончании
 let pendingStart: { delay: number; countdown: number } | null = null;
 let resumeParams = { delay: 0, countdown: 0 };
 
@@ -103,14 +120,15 @@ function handle(cmd: EngineCmd): void {
       s = cmd.settings;
       // пересобрать единицы после смены настроек (только если печать не идёт)
       if ((state === "idle" || state === "finished") && text) {
-        units = buildUnits(text, s);
+        units = buildUnits(text, { ...s, profile: profile() });
         pos = 0;
       }
       break;
     case "load":
       cancel();
       text = normalize(cmd.text);
-      units = buildUnits(text, s);
+      blockProfile = cmd.profile;
+      units = buildUnits(text, { ...s, profile: profile() });
       pos = 0;
       setState("idle");
       emit({ e: "progress", pos: 0, total: text.length });
@@ -122,7 +140,7 @@ function handle(cmd: EngineCmd): void {
       resume(cmd.delay, cmd.countdown);
       break;
     case "pause":
-      if (state === "running" || state === "countdown") {
+      if (state === "running" || state === "countdown" || (preparing && run)) {
         run = false;
         setState("paused");
         log(`Пауза (${cmd.reason}) на ${pos}/${units.length}`);
@@ -203,34 +221,56 @@ function think(myGen: number, seconds: number): boolean {
 
 // ------------------------------------------------------------ печать
 
-function waitModifiersReleased(myGen: number): boolean {
-  // иначе напечатанное «а» после Ctrl+F9 превратится в Ctrl+A
-  const deadline = now() + 5;
-  while (w.modifiersDown()) {
-    if (now() > deadline || !sleep(myGen, 0.01)) return false;
-  }
-  return sleep(myGen, 0.03);
+/** Ожидание, которое обрывают и пауза, и остановка. false — оборвали. */
+function waitRun(myGen: number, seconds: number): boolean {
+  return sleep(myGen, seconds) && run;
 }
 
-/** Отсчёт, ожидание отпускания модификаторов, захват целевого окна. */
-function prepare(myGen: number, delay: number, countdown: number): number | null {
+/** Ждёт, пока отпустят Ctrl/Alt/Shift/Win после хоткея (иначе «а» превратится в Ctrl+A).
+ *  false — не отпустили за 5 с или ожидание прервали (пауза, стоп). */
+function waitModifiersReleased(myGen: number): boolean {
+  const deadline = now() + 5;
+  while (w.modifiersDown()) {
+    if (now() > deadline || !waitRun(myGen, 0.01)) return false;
+  }
+  return waitRun(myGen, 0.03);
+}
+
+const PAUSED = "paused";   // prepare: пока шёл отсчёт или ждали окно, поставили на паузу (или остановили)
+
+/** Отсчёт, ожидание отпускания модификаторов, захват целевого окна.
+ *  → hwnd; null — не начато (сообщение показано); PAUSED — пауза или стоп. */
+function prepare(myGen: number, delay: number, countdown: number): number | null | typeof PAUSED {
+  preparing = true;
+  emit({ e: "preparing", on: true });
+  try {
+    return prepareTarget(myGen, delay, countdown);
+  } finally {
+    preparing = false;
+    emit({ e: "preparing", on: false });
+  }
+}
+
+function prepareTarget(myGen: number, delay: number, countdown: number): number | null | typeof PAUSED {
   if (countdown > 0) {
+    if (!run) return PAUSED;
     setState("countdown");
     for (let n = countdown; n > 0; n--) {
       emit({ e: "countdown", n });
-      if (!sleep(myGen, 1)) return null;
-      if (!run) return null;   // пауза во время отсчёта
+      if (!waitRun(myGen, 1)) {
+        emit({ e: "countdown", n: 0 });
+        return PAUSED;
+      }
     }
     emit({ e: "countdown", n: 0 });
   }
   if (!waitModifiersReleased(myGen)) {
-    if (gen === myGen) {
-      log("Не начато: модификаторы удерживаются дольше 5 с", "warn");
-      emit({ e: "message", text: "Отпустите Ctrl/Alt/Shift — печать не начата." });
-    }
+    if (gen !== myGen || !run) return PAUSED;
+    log("Не начато: модификаторы удерживаются дольше 5 с", "warn");
+    emit({ e: "message", text: "Отпустите Ctrl/Alt/Shift — печать не начата." });
     return null;
   }
-  if (delay && !sleep(myGen, delay)) return null;
+  if (delay && !waitRun(myGen, delay)) return PAUSED;
   const hwnd = w.foregroundWindow();
   if (w.windowTitle(hwnd).includes(ownTitleMark)) {
     log("Не начато: в фокусе страница AutoPrintCode");
@@ -249,36 +289,56 @@ function prepare(myGen: number, delay: number, countdown: number): number | null
       "Запустите помощник AutoPrintCode тоже от имени администратора." });
     return null;
   }
+  const p = profile();
+  terminal = p === PROFILE_TERMINAL || (p === PROFILE_IDE && w.isTerminalWindow(hwnd));
+  if (terminal && w.needsRealKeys(hwnd)) {
+    if (keysHwnd !== hwnd) {
+      keysHwnd = hwnd;
+      layout = 0;
+      layoutOrig = w.windowLayout(hwnd);
+    }
+    log("Windows PowerShell в консоли — печать клавишами раскладки");
+  } else keysHwnd = 0;
+  if (terminal && p === PROFILE_IDE) {
+    log("Окно — терминал: приёмы профиля IDE отключены");
+    if (!pos) {
+      emit({ e: "message", text: "Печать в терминал: приёмы профиля IDE отключены (иначе в строке появились бы " +
+        "«F» и «H»). Для терминала есть свой профиль «Терминал»." });
+    }
+  }
   log(`Печать ${pos ? "продолжена" : "начата"} с ${pos}/${units.length} → ${w.describeWindow(hwnd)} · ` +
-    `профиль=${s.profile} · ${s.cpm} симв/мин`);
-  emit({ e: "target", hwnd });
+    `профиль=${p} · ${s.cpm} симв/мин`);
   return hwnd;
 }
 
 function runJob(myGen: number, delay: number, countdown: number): void {
-  let target = prepare(myGen, delay, countdown);
-  if (target === null) {
+  const first = prepare(myGen, delay, countdown);
+  if (first === null) {
     if (gen === myGen) {
       setState(pos ? "paused" : "idle");
       run = false;
     }
     return;
   }
-  setState("running");
+  let target = first === PAUSED ? 0 : first;
+  // пауза во время подготовки: состояние уже «пауза», цикл ниже дождётся «продолжить»
+  if (first !== PAUSED && run) setState("running");
   const total = text.length;
   let thought = -1;   // для какой единицы пауза-обдумывание уже выдержана
   while (gen === myGen && pos < units.length) {
-    if (!run) {
+    if (!run || state !== "running") {
       while (!run && gen === myGen) waitSignal(1000);
       if (gen !== myGen) return;
-      target = prepare(myGen, resumeParams.delay, resumeParams.countdown);
-      if (target === null) {
+      const next = prepare(myGen, resumeParams.delay, resumeParams.countdown);
+      if (next === null) {
         if (gen === myGen) {
           run = false;
           setState("paused");
         }
         continue;
       }
+      if (next === PAUSED || !run) continue;
+      target = next;
       setState("running");
     }
     const u = units[pos];
@@ -308,6 +368,7 @@ function runJob(myGen: number, delay: number, countdown: number): void {
     emit({ e: "progress", pos: u.srcEnd, total });
     if (!sleep(myGen, delayAfter(u, s))) return;
   }
+  restoreLayout();
   if (gen === myGen) {
     setState("finished");
     log(`Набор завершён: ${units.length} единиц`);
@@ -316,11 +377,11 @@ function runJob(myGen: number, delay: number, countdown: number): void {
 }
 
 function execute(u: Unit): void {
-  const ide = s.profile === PROFILE_IDE;
+  const ide = profile() === PROFILE_IDE && !terminal;
   switch (u.kind) {
     case "char":
       if (ide && CLEAR_BEFORE.has(u.text)) clearRight();
-      if ([...u.text].length === 1) w.typeChar(u.text);
+      if ([...u.text].length === 1) char(u.text);
       else fast(u.text);
       emit({ e: "sound", kind: u.text === " " ? "space" : "key" });
       break;
@@ -329,7 +390,8 @@ function execute(u: Unit): void {
       fast(u.text);
       break;
     case "tab":
-      w.tap(w.VK_TAB);
+      if (terminal) fast(" ".repeat(Math.max(1, s.tab_width)));   // Tab в терминале — автодополнение
+      else w.tap(w.VK_TAB);
       emit({ e: "sound", kind: "key" });
       break;
     case "back":
@@ -357,7 +419,7 @@ function execute(u: Unit): void {
       }
       break;
     case "cleanup":
-      clearRight();
+      if (ide) clearRight();
       break;
   }
 }
@@ -373,9 +435,30 @@ function clearRight(): void {
 
 function fast(t: string): void {
   for (const ch of t) {
-    w.typeChar(ch);
+    char(ch);
     gapSleep();
   }
+}
+
+function char(ch: string): void {
+  if (!keysHwnd) return w.typeChar(ch);
+  // текущая раскладка, иначе первая, где есть такая клавиша (как человек переключает Alt+Shift)
+  const order = [...(layout ? [layout] : []), ...w.keyboardLayouts().filter((x) => x !== layout)];
+  const found = order.find((x) => w.keyFor(ch, x) !== null);
+  if (!found) return w.typeChar(ch);   // символа нет ни в одной раскладке — как получится
+  switchLayout(found);
+  w.typeKey(ch, w.keyFor(ch, found)!);
+}
+
+function switchLayout(to: number): void {
+  if (to === layout) return;
+  w.requestLayout(keysHwnd, to);
+  Atomics.wait(ctrl, 1, 0, 150);   // окно меняет раскладку не сразу
+  layout = to;
+}
+
+function restoreLayout(): void {
+  if (keysHwnd && layout && layoutOrig && layout !== layoutOrig) switchLayout(layoutOrig);
 }
 
 // ------------------------------------------------------------ главный цикл потока

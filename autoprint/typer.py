@@ -16,13 +16,13 @@ import logging
 import random
 import threading
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from PySide6.QtCore import QObject, Signal
 
 from . import winapi as w
 from .human import humanize
-from .storage import PROFILE_IDE, Settings
+from .storage import PROFILE_IDE, PROFILE_PLAIN, PROFILE_TERMINAL, Settings
 
 # Минимальный интервал между нажатиями задаётся настройкой key_gap_ms.
 # Замер на Блокноте Windows 11: при 8–12 мс символы теряются и переставляются,
@@ -43,6 +43,11 @@ def _ident_char(ch: str) -> bool:
 log = logging.getLogger(__name__)
 
 IDLE, COUNTDOWN, RUNNING, PAUSED, FINISHED = "idle", "countdown", "running", "paused", "finished"
+
+# окна, где почти всегда редактор кода с автоотступами: профиль «Блокнот» там удвоит отступы и скобки
+CODE_EDITOR_EXES = {"code.exe", "code - insiders.exe", "cursor.exe", "windsurf.exe", "msedge.exe", "chrome.exe",
+                    "firefox.exe", "brave.exe", "opera.exe", "yandex.exe", "browser.exe", "pycharm64.exe",
+                    "idea64.exe", "webstorm64.exe", "sublime_text.exe", "notepad++.exe"}
 LINE_WAIT = "line_wait"   # печать по строкам: строка готова, ждём Enter пользователя (или хоткей)
 
 # клавиши перемещения (единицы «nav», печать по шагам) → (vk, модификаторы)
@@ -73,7 +78,8 @@ def build_units(text: str, settings: Settings, line_wait: bool = False, cleanup:
             src += 1
             units.append(Unit("newline", "\n", src, wait=line_wait and bool(lines[li - 1].strip())))
         m = len(line) - len(line.lstrip(" \t"))
-        if m and settings.indent_with_tab:
+        # в терминале Tab — автодополнение, отступ только пробелами
+        if m and settings.indent_with_tab and settings.profile != PROFILE_TERMINAL:
             # как человек: Tab на каждый уровень отступа, остаток — пробелами
             col, cols = 0, []      # cols[i] — ширина отступа после i+1 исходных символов
             for ch in line[:m]:
@@ -124,7 +130,10 @@ class TypingEngine(QObject):
         self._units: list[Unit] = []
         self._pos = 0
         self._gen = 0
-        self._run = threading.Event()
+        self._run = threading.Event()    # снят — пауза: поток печати ждёт
+        # пауза (GUI-поток) и переход в «печать» (поток печати) — под одной блокировкой,
+        # иначе пауза во время отсчёта терялась бы, а состояние показывало «печать»
+        self._lock = threading.RLock()
         self._resume_delay = 0.0
         self._resume_countdown = 0
         self._thread: threading.Thread | None = None
@@ -145,23 +154,39 @@ class TypingEngine(QObject):
         self.click_count = lambda: 0
         self._clicks_seen = 0
         self.auto_paused_at = float("-inf")   # когда печать сама встала на паузу (клик, смена окна)
+        # окно — терминал: печать без приёмов профиля IDE (Shift+Home/End дали бы в строке «H» и «F»)
+        self._terminal = False
+        # печать настоящими клавишами (Windows PowerShell 5.1 в консоли): раскладку задаём сами и помним —
+        # консоль не сообщает её честно
+        self._keys_hwnd = 0
+        self._layout = 0          # какую раскладку мы последней попросили
+        self._layout_orig = 0     # вернуть по окончании
+        self._profile = ""        # окно, выбранное у блока; пусто — как в настройках
+        self._plain_warned: set[str] = set()   # где уже подсказали про профиль «Блокнот» (раз за запуск)
 
     # ------------------------------------------------------------ API (GUI-поток)
-    def load(self, text: str, job_key=None, builder=None) -> None:
+    @property
+    def profile(self) -> str:
+        """Профиль окна этой печати: выбранный у блока или общий из настроек."""
+        return self._profile or self.settings.profile
+
+    def load(self, text: str, profile: str = "", job_key=None, builder=None) -> None:
         """Загружает новый текст. Текущая печать прерывается.
         builder(settings) → единицы — если печатать нужно не «как есть» (по строкам, по шагам);
-        тогда text задаёт только длину для шкалы прогресса (позиции src_end — в нём)."""
+        тогда text задаёт только длину для шкалы прогресса (позиции src_end — в нём).
+        profile — окно, выбранное у блока (пусто — как в настройках)."""
         self._cancel()
         self._text = normalize(text)
         self._builder = builder
+        self._profile = profile
         self._units = self._build()
         self._pos = 0
-        self.job_key = job_key
         self._set_state(IDLE)
         self.progress.emit(0, len(self._text))
 
     def _build(self) -> list[Unit]:
-        return self._builder(self.settings) if self._builder else build_units(self._text, self.settings)
+        s = replace(self.settings, profile=self.profile) if self._profile else self.settings   # окно блока
+        return self._builder(s) if self._builder else build_units(self._text, s)
 
     def continue_line(self, by_enter: bool, delay: float = 0.0, countdown: int = 0) -> bool:
         """Печать по строкам: продолжить со следующей строки. by_enter — пользователь сам нажал Enter
@@ -177,13 +202,16 @@ class TypingEngine(QObject):
         return True
 
     @property
-    def has_job(self) -> bool:
-        return bool(self._units)
+    def active(self) -> bool:
+        """Печать идёт или готовится (отсчёт, задержка хоткея, ожидание отпускания Ctrl/Alt/Shift).
+        Ожидание Enter по строкам — не «идёт»: там «дальше», а не пауза."""
+        return self.state in (RUNNING, COUNTDOWN) or (self.state != LINE_WAIT and bool(
+            self._thread and self._thread.is_alive() and self._run.is_set()))
 
     def start(self, delay: float = 0.0, countdown: int = 0) -> None:
         """Старт с текущей позиции (с начала, если закончили)."""
         if not self._units:
-            self.message.emit("Нечего печатать: выберите блок кода с текстом.")
+            self.message.emit("Нечего печатать: выберите непустой блок.")
             return
         if self.state == PAUSED:
             self.resume(delay, countdown)
@@ -199,10 +227,12 @@ class TypingEngine(QObject):
         self._thread.start()
 
     def pause(self, reason: str = "хоткей/кнопка") -> None:
-        if self.state in (RUNNING, COUNTDOWN):
+        with self._lock:
+            if not self.active:
+                return
             self._run.clear()
             self._set_state(PAUSED)
-            log.info("Пауза (%s) на %d/%d", reason, self._pos, len(self._units))
+        log.info("Пауза (%s) на %d/%d", reason, self._pos, len(self._units))
 
     def resume(self, delay: float = 0.0, countdown: int = 0) -> None:
         if self.state != PAUSED:
@@ -263,15 +293,15 @@ class TypingEngine(QObject):
     def _wset(self, gen: int, st: str) -> bool:
         """Смена состояния из рабочего потока — только пока его печать не отменена. Поток, который
         «Стоп» не дождался (ждал отпускания Ctrl), иначе вернул бы «Печатает» уже остановленной печати —
-        и защита от нажатий глотала бы клавиши. RUNNING с учётом паузы, поставленной в это же время."""
-        if not self._alive(gen):
-            return False
-        if st == RUNNING and not self._run.is_set():
-            st = PAUSED
-        self._set_state(st)
-        if st == RUNNING and not self._run.is_set():   # pause() успела между проверкой и записью
-            self._set_state(PAUSED)
-        return True
+        и защита от нажатий глотала бы клавиши. RUNNING с учётом паузы, поставленной в это же время
+        (под той же блокировкой, что и pause(): пауза во время подготовки не теряется)."""
+        with self._lock:
+            if not self._alive(gen):
+                return False
+            if st == RUNNING and not self._run.is_set():
+                st = PAUSED
+            self._set_state(st)
+            return True
 
     def _alive(self, gen: int) -> bool:
         return gen == self._gen
@@ -337,7 +367,9 @@ class TypingEngine(QObject):
                     log.info("Отсчёт прерван паузой")
                     return None
             self.countdown.emit(0)
-        if not w.wait_modifiers_released():
+        if not w.wait_modifiers_released(cancelled=lambda: not self._alive(gen) or not self._run.is_set()):
+            if not self._alive(gen) or not self._run.is_set():
+                return None      # «Стоп» или пауза, пока ждали отпускания клавиш
             log.warning("Не начато: модификаторы удерживаются дольше 5 с")
             self.message.emit("Отпустите Ctrl/Alt/Shift — печать не начата.")
             return None
@@ -357,10 +389,34 @@ class TypingEngine(QObject):
                               "Запустите AutoPrintCode тоже от имени администратора.")
             return None
         self._forget_clicks()
+        profile = self.profile
+        self._terminal = profile == PROFILE_TERMINAL or (profile == PROFILE_IDE and w.is_terminal_window(hwnd))
+        if self._terminal and w.needs_real_keys(hwnd):
+            if self._keys_hwnd != hwnd:
+                self._keys_hwnd, self._layout, self._layout_orig = hwnd, 0, w.window_layout(hwnd)
+            if not next_line:
+                log.info("Windows PowerShell в консоли — печать клавишами раскладки")
+        else:
+            self._keys_hwnd = 0
+        if self._terminal and profile == PROFILE_IDE and not next_line:
+            log.info("Окно — терминал: приёмы профиля IDE отключены")
+            if not self._pos:
+                self.message.emit("Печать в терминал: приёмы профиля IDE отключены (иначе в строке появились бы "
+                                  "«F» и «H»). Для терминала есть свой профиль «Терминал».")
+        if profile == PROFILE_PLAIN and not self._pos and not next_line:
+            exe = w.window_process_name(hwnd).lower()
+            if exe in CODE_EDITOR_EXES and exe not in self._plain_warned:
+                # «Блокнот» печатает как есть, а редактор кода сам ставит отступы и скобки — они удвоятся.
+                # Сам не переключаем: в браузере бывает и простое поле (чат, форма) — подсказываем раз за запуск
+                self._plain_warned.add(exe)
+                log.info("Профиль «Блокнот», а окно — %s: подсказка про профиль IDE", exe)
+                self.message.emit("Профиль «Блокнот», а печать идёт в редактор кода или браузер. Если там редактор "
+                                  "с автоотступами (VS Code, Jupyter, Colab, веб-IDE), отступы и скобки удвоятся — "
+                                  "выберите на пульте «IDE».")
         if not next_line:
             log.info("Печать %s с %d/%d → %s · профиль=%s · %d симв/мин",
                      "продолжена" if self._pos else "начата", self._pos, len(self._units),
-                     w.describe_window(hwnd), self.settings.profile, self.settings.cpm)
+                     w.describe_window(hwnd), profile, self.settings.cpm)
         self.target.emit(w.window_process_name(hwnd))
         self._target_hwnd = hwnd
         return hwnd
@@ -375,12 +431,15 @@ class TypingEngine(QObject):
         self._line_text = False
         target = self._prepare(gen, delay, countdown)
         if target is None:
-            if self._wset(gen, PAUSED if self._pos else IDLE):
-                self._run.clear()
-            return
+            if not (self._alive(gen) and not self._run.is_set() and self.state == PAUSED):
+                if self._wset(gen, PAUSED if self._pos else IDLE):
+                    self._run.clear()
+                return
+            # пауза во время отсчёта или ожидания отпускания клавиш: остаёмся на паузе, «продолжить»
+            # пройдёт подготовку заново (цикл ниже), — а не сбрасываемся в «Готов»
         # паузу могли поставить, пока ждали отпускания клавиш: тогда не «Печатает», а «Пауза» —
         # иначе включится защита от нажатий и проглотит следующую клавишу пользователя (это делает _wset)
-        if not self._wset(gen, RUNNING):
+        elif not self._wset(gen, RUNNING):
             return
         total = len(self._text)
         thought = -1    # для какой единицы пауза-обдумывание уже выдержана
@@ -446,13 +505,14 @@ class TypingEngine(QObject):
             self.progress.emit(unit.src_end, total)
             if not self._sleep(gen, self._delay_after(unit)):
                 return
+        self._restore_layout()
         if self._wset(gen, FINISHED):
             log.info("Набор завершён: %d единиц", len(self._units))
             self.finished.emit()
 
     def _wait_line(self, gen: int) -> bool:
         """Печать по строкам: строка набрана — ждём «дальше». False — если печать отменена."""
-        if self.settings.profile == PROFILE_IDE:
+        if self.profile == PROFILE_IDE and not self._terminal:
             # убрать дописанное редактором справа (автоскобки, закрывающий тег после «>», « */» после «/**»)
             # и закрыть подсказки — иначе Enter пользователя примет автодополнение вместо новой строки
             if self._indent_pending:
@@ -475,8 +535,8 @@ class TypingEngine(QObject):
         здесь — иначе во время паузы «на обдумывание» строка стояла бы без отступа, а потом он впрыгивал
         (рывок). Автоотступ выделяется (Shift+Home), и первый набранный символ его заменяет."""
         self._indent_pending = False
-        replace = u.kind == "fast" or (u.kind == "char" and u.text not in OPENERS and u.text not in CLEAR_BEFORE)
-        if replace:
+        swap = u.kind == "fast" or (u.kind == "char" and u.text not in OPENERS and u.text not in CLEAR_BEFORE)
+        if swap:
             w.tap(w.VK_HOME, w.VK_SHIFT)
             time.sleep(self._gap())
         else:   # Tab с выделением сдвинул бы строки, а скобка/кавычка — «обернула» бы выделение
@@ -484,7 +544,7 @@ class TypingEngine(QObject):
 
     def _execute(self, u: Unit, gen: int | None = None, enter_done: bool = False) -> None:
         s = self.settings
-        ide = s.profile == PROFILE_IDE
+        ide = self.profile == PROFILE_IDE and not self._terminal
         if ide and self._indent_pending and u.kind not in ("newline", "cleanup", "nav"):
             self._start_line_text(u)
         if u.kind in ("char", "fast", "tab", "back"):
@@ -508,7 +568,7 @@ class TypingEngine(QObject):
                     else:
                         self._clear_right()  # кавычка с выделением «обернула» бы его
                 self._dirty = False
-            w.type_char(u.text) if len(u.text) == 1 else self._fast(u.text, gen)
+            self._char(u.text) if len(u.text) == 1 else self._fast(u.text, gen)
             self.sound.emit("space" if u.text == " " else "key")
             if u.text.strip():
                 self._line_text = True
@@ -527,7 +587,10 @@ class TypingEngine(QObject):
             self._fast(u.text, gen)
             self._last_ident = self._in_word = False
         elif u.kind == "tab":
-            w.tap(w.VK_TAB)
+            if self._terminal:   # Tab в терминале — автодополнение
+                self._fast(" " * max(1, s.tab_width))
+            else:
+                w.tap(w.VK_TAB)
             self.sound.emit("key")
             self._last_ident = self._in_word = False
         elif u.kind == "back":
@@ -567,10 +630,11 @@ class TypingEngine(QObject):
                 time.sleep(self._gap() * 2)  # дать редактору вставить автоотступ
                 self._indent_pending = True   # уберём его перед первым символом новой строки
         elif u.kind == "cleanup":
-            if self._indent_pending:
-                self._clear_indent()
-            else:
-                self._clear_right()   # конец печати: хвост, дописанный редактором, и подсказки — убрать
+            if ide:
+                if self._indent_pending:
+                    self._clear_indent()
+                else:
+                    self._clear_right()   # конец печати: хвост, дописанный редактором, и подсказки — убрать
             self._indent_pending = self._dirty = self._last_ident = False
 
     def _clear_right(self) -> None:
@@ -601,8 +665,31 @@ class TypingEngine(QObject):
         for ch in text:
             if gen is not None and not self._alive(gen):
                 return   # стоп посреди длинного отступа — дальше не печатаем
-            w.type_char(ch)
+            self._char(ch)
             time.sleep(self._gap())
+
+    def _char(self, ch: str) -> None:
+        if not self._keys_hwnd:
+            w.type_char(ch)
+            return
+        # текущая раскладка, иначе первая, где есть такая клавиша (как человек переключает Alt+Shift)
+        layouts = ([self._layout] if self._layout else []) + [x for x in w.keyboard_layouts() if x != self._layout]
+        layout = next((x for x in layouts if w.key_for(ch, x) is not None), 0)
+        if not layout:
+            w.type_char(ch)       # символа нет ни в одной раскладке — как получится
+            return
+        self._switch_layout(layout)
+        w.type_key(ch, w.key_for(ch, layout))
+
+    def _switch_layout(self, layout: int) -> None:
+        if layout != self._layout:
+            w.request_layout(self._keys_hwnd, layout)
+            time.sleep(0.15)      # окно меняет раскладку не сразу
+            self._layout = layout
+
+    def _restore_layout(self) -> None:
+        if self._keys_hwnd and self._layout and self._layout_orig and self._layout != self._layout_orig:
+            self._switch_layout(self._layout_orig)
 
     def _delay_after(self, u: Unit) -> float:
         s = self.settings

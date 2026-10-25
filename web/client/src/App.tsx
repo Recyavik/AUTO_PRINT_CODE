@@ -1,13 +1,16 @@
 import { useEffect, useRef, useState } from "react";
-import { stripComments } from "../../shared/comments.ts";
-import { blockTitle, codeBlocks, type EngineState, PROFILES, typingSlice } from "../../shared/model.ts";
+import { blockTitle, codeNumber, type EngineState, PROFILES } from "../../shared/model.ts";
+import { typingText } from "../../shared/textprint.ts";
 import {
-  closeTab, command, moveBlock, openTab, pauseHotkeys, shutdownHelper, updateSettings, useApp,
+  closeTab, command, moveBlock, moveTab, openTab, pauseHotkeys, shutdownHelper, updateSettings, useApp,
 } from "./api.ts";
 import { importFiles, Library, newTemplate } from "./components/Library.tsx";
+import { NumberField } from "./components/NumberField.tsx";
 import { SettingsDialog } from "./components/SettingsDialog.tsx";
 import { TemplateView } from "./components/TemplateView.tsx";
 import { sounds } from "./sound.ts";
+
+const TAB_MIME = "application/x-autoprintcode-tab";
 
 const STATE: Record<EngineState, [string, string]> = {
   idle: ["Готов", "#3b82f6"],
@@ -51,6 +54,7 @@ export function App() {
   const toasts = useApp((s) => s.toasts);
   const version = useApp((s) => s.version);
   const [showSettings, setShowSettings] = useState(false);
+  const [drag, setDrag] = useState<{ id: string; over: string; after: boolean } | null>(null);   // перетаскивание вкладки
   const [soundLocked, setSoundLocked] = useState(true);
   const fileInput = useRef<HTMLInputElement>(null);
   const [canInstall, setCanInstall] = useState(!!installEvent);
@@ -79,6 +83,9 @@ export function App() {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      // Alt+↑/↓ в редакторе кода — перенос строки (CodeMirror), в полях ввода — их собственные клавиши
+      const inEditor = (e.target as HTMLElement).closest?.(".cm-editor, textarea, input, select");
+      if (e.defaultPrevented || (e.altKey && inEditor)) return;
       if (e.altKey && e.key === "ArrowDown") { e.preventDefault(); moveBlock(+1); }
       else if (e.altKey && e.key === "ArrowUp") { e.preventDefault(); moveBlock(-1); }
       else if (e.ctrlKey && e.key === ",") { e.preventDefault(); setShowSettings(true); }
@@ -108,13 +115,10 @@ export function App() {
   const current = templates.find((t) => t.id === settings.current_tab);
   const armedBlock = current?.blocks.find((b) => b.id === current.active_block);
 
-  let armedLabel: React.ReactNode = <span style={{ color: "var(--muted)" }}>Нет активного блока кода — щёлкните по блоку кода</span>;
+  let armedLabel: React.ReactNode = <span style={{ color: "var(--muted)" }}>Нет активного блока — щёлкните по блоку кода или текста</span>;
   if (current && armedBlock) {
-    let [text] = typingSlice(armedBlock.text, armedBlock.sel, settings.selection_whole_lines);
-    if (settings.strip_comments) text = stripComments(text, armedBlock.lang)[0];
-    const n = codeBlocks(current).findIndex((b) => b.id === armedBlock.id) + 1;
-    const part = (armedBlock.sel.length === 2 ? "выделенные строки" : "весь блок") + (settings.strip_comments ? ", без комментариев" : "");
-    armedLabel = <>Печатать: <b>{current.title}</b> · {blockTitle(armedBlock, n)} · {part} ({text ? text.split("\n").length : 0} стр., {text.length} симв.)</>;
+    const [text, , part] = typingText(current, armedBlock, settings);
+    armedLabel = <>Печатать: <b>{current.title}</b> · {blockTitle(armedBlock, codeNumber(current, armedBlock))} · {part} ({text ? text.split("\n").length : 0} стр., {text.length} симв.)</>;
   }
 
   return (
@@ -123,6 +127,11 @@ export function App() {
         <div className="banner">{stopped
           ? <>Помощник выключен. Чтобы печатать, запустите <code>web\start.bat</code> — страница подключится сама.</>
           : "Связь с помощником потеряна — переподключаюсь… Печать и сохранение недоступны."}</div>
+      )}
+      {connected && version && version !== __APP_VERSION__ && (
+        // страницу помощник берёт с диска, а сам работает в памяти: после обновления он мог остаться старым
+        <div className="banner">Помощник печати — версии {version}, а страница — {__APP_VERSION__}. Перезапустите
+          помощника: нажмите ⏻ справа вверху и запустите <code>web\start.bat</code> (он и сам заменяет устаревшего).</div>
       )}
       {connected && settings.sound_enabled && soundLocked && (
         <div className="banner info">Щёлкните в любом месте страницы, чтобы браузер разрешил звук клавиш.</div>
@@ -139,8 +148,8 @@ export function App() {
           {Object.entries(PROFILES).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
         </select>
         <label htmlFor="cpm">Скорость:</label>
-        <input id="cpm" type="number" min={30} max={3000} step={20} value={settings.cpm}
-          onChange={(e) => updateSettings({ cpm: Math.max(30, Math.min(3000, Number(e.target.value))) })} /> <span className="unit">симв/мин</span>
+        <NumberField id="cpm" min={30} max={3000} step={20} value={settings.cpm}
+          onCommit={(cpm) => updateSettings({ cpm })} /> <span className="unit">симв/мин</span>
         <button className="btn toggle" aria-pressed={settings.strip_comments} title="Не печатать комментарии"
           onClick={() => updateSettings({ strip_comments: !settings.strip_comments })}>Без комментариев</button>
         <button className="btn toggle" aria-pressed={settings.human_typing} title="Имитация ручного ввода: ритм, паузы, опечатки"
@@ -177,8 +186,28 @@ export function App() {
         <section className="workspace">
           <nav className="tabs">
             {openTemplates.map((t) => (
-              <div key={t.id} className={`tab${t.id === settings.current_tab ? " current" : ""}`} onClick={() => openTab(t.id)}
-                onAuxClick={(e) => e.button === 1 && closeTab(t.id)} title={t.title}>
+              <div key={t.id} title={t.title} draggable
+                className={`tab${t.id === settings.current_tab ? " current" : ""}${drag?.id === t.id ? " dragging" : ""}` +
+                  (drag && drag.over === t.id && drag.id !== t.id ? (drag.after ? " drop-after" : " drop-before") : "")}
+                onClick={() => openTab(t.id)} onAuxClick={(e) => e.button === 1 && closeTab(t.id)}
+                onDragStart={(e) => {
+                  e.dataTransfer.effectAllowed = "move";
+                  e.dataTransfer.setData(TAB_MIME, t.id);   // не text/plain: иначе вкладку можно «уронить» в редактор как текст
+                  setDrag({ id: t.id, over: t.id, after: false });
+                }}
+                onDragOver={(e) => {
+                  if (!drag) return;
+                  e.preventDefault();
+                  const r = e.currentTarget.getBoundingClientRect();
+                  const after = e.clientX > r.left + r.width / 2;
+                  if (drag.over !== t.id || drag.after !== after) setDrag({ ...drag, over: t.id, after });
+                }}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  if (drag) moveTab(drag.id, drag.over, drag.after);
+                  setDrag(null);
+                }}
+                onDragEnd={() => setDrag(null)}>
                 <span>{t.title}</span>
                 <button className="x" title="Закрыть вкладку" onClick={(e) => { e.stopPropagation(); closeTab(t.id); }}>✕</button>
               </div>
@@ -191,7 +220,7 @@ export function App() {
                 <button className="btn" onClick={newTemplate}>＋ Новый образец</button>{" "}
                 <button className="btn" onClick={() => fileInput.current?.click()}>⇪ Импорт .ipynb / .md / .py</button>
               </p>
-              <p className="hint">Щёлкните по блоку кода — он станет активным. Поставьте курсор в нужном окне
+              <p className="hint">Щёлкните по блоку кода или текста — он станет активным. Поставьте курсор в нужном окне
                 (Блокнот, VS Code, Jupyter) и нажмите <b>{settings.hotkey_toggle}</b>.</p>
               <p style={{ fontSize: 12 }}>AutoPrintCode {version}</p>
             </div>

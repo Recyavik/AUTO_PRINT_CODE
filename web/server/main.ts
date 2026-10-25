@@ -6,15 +6,16 @@
 // Безопасность: слушаем только 127.0.0.1; WebSocket принимает лишь страницы с нашего адреса
 // (проверка Origin и Host) — иначе любой открытый сайт мог бы подключиться и «печатать» вашими руками.
 import { execFileSync, spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import http from "node:http";
 import path from "node:path";
 import { type WebSocket, WebSocketServer } from "ws";
-import { stripComments } from "../shared/comments.ts";
 import {
-  blockTitle, type ClientMsg, codeBlocks, type EngineStatus, HOTKEYS, mergeSettings, type ServerMsg, type Settings,
-  type Template, templateFrom, typingSlice,
+  blockTitle, type ClientMsg, codeBlocks, codeNumber, type EngineStatus, HOTKEYS, mergeSettings, navBlocks, PROFILES,
+  type ServerMsg, type Template, templateFrom,
 } from "../shared/model.ts";
+import { typingText } from "../shared/textprint.ts";
 import { Engine } from "./engine.ts";
 import { InputHooks } from "./input.ts";
 import { log, LOG_FILE } from "./log.ts";
@@ -24,9 +25,11 @@ import * as w from "./win32.ts";
 const PORT = Number(process.env.AUTOPRINT_PORT || 8790);
 const DEV = process.argv.includes("--dev");
 const NO_OPEN = DEV || process.argv.includes("--no-open");
-const VERSION = JSON.parse(fs.readFileSync(path.join(WEB_DIR, "package.json"), "utf-8")).version as string;
+// AUTOPRINT_VERSION — только для тестов: изобразить помощника другой версии (tests/helper.test.ts)
+const VERSION = process.env.AUTOPRINT_VERSION
+  || JSON.parse(fs.readFileSync(path.join(WEB_DIR, "package.json"), "utf-8")).version as string;
 // заголовок страницы начинается с этой метки — так помощник узнаёт окно браузера со страницей
-export const OWN_TITLE_MARK = "⌨ AutoPrintCode";
+const OWN_TITLE_MARK = "⌨ AutoPrintCode";
 const DIST = path.join(WEB_DIR, "dist");
 const SOUNDS = path.resolve(WEB_DIR, "..", "autoprint", "sounds");
 const URL_SELF = `http://127.0.0.1:${PORT}`;
@@ -37,6 +40,11 @@ const ALLOWED_HOSTS = new Set([`127.0.0.1:${PORT}`, `localhost:${PORT}`]);
 // помощник работает без окна — непредвиденная ошибка должна остаться хотя бы в журнале
 process.on("uncaughtException", (e) => {
   log("error", `Непредвиденная ошибка: ${e.stack ?? e}`);
+  try {
+    store?.flush();   // несохранённые правки (до 0,7 с) — на диск
+  } catch {
+    // выходим в любом случае
+  }
   hardExit();
 });
 
@@ -55,6 +63,10 @@ if (process.platform !== "win32") {
 // ---------------------------------------------------------------- состояние
 
 const store = new Store();
+store.onSaveError = (text) => {
+  log("error", text);
+  notify(text, "warn");
+};
 const s = store.settings;
 // движок и хоткеи запускаются только после того, как помощник занял порт (startServices):
 // второй экземпляр не должен трогать хоткеи — он лишь открывает страницу и выходит
@@ -62,7 +74,7 @@ let engine!: Engine;
 let input!: InputHooks;
 const clients = new Set<WebSocket>();
 let hotkeysFailed = "";
-type Job = { tid: string; bid: string; base: number; text: string };
+type Job = { tid: string; bid: string; base: number; text: string; profile: string };
 let job: Job | null = null;
 
 function send(ws: WebSocket, msg: ServerMsg): void {
@@ -84,10 +96,17 @@ function engineStatus(): EngineStatus {
 const notify = (text: string, level: "info" | "warn" = "info") => broadcast({ t: "notify", text, level });
 
 let hotkeysPaused = false;
+let appliedBindings = "";
 
 function applySettings(): void {
   engine.setSettings(s);
-  input.setBindings(hotkeysPaused ? {} : Object.fromEntries(HOTKEYS.map(([k]) => [k, String(s[k] ?? "")])));
+  // хоткеи перерегистрируются, только если они изменились (ползунок громкости шлёт настройки на каждом шаге)
+  const bindings = hotkeysPaused ? {} : Object.fromEntries(HOTKEYS.map(([k]) => [k, String(s[k] ?? "")]));
+  const key = JSON.stringify(bindings);
+  if (key === appliedBindings) return;
+  appliedBindings = key;
+  hotkeysFailed = "";   // новая попытка — прошлая ошибка больше не актуальна
+  input.setBindings(bindings);
 }
 
 // ---------------------------------------------------------------- команды (как в главном окне Python-версии)
@@ -102,17 +121,17 @@ function jobForArmed(): Job | null {
   const a = armed();
   if (!a) return null;
   const block = a.t.blocks.find((b) => b.id === a.bid)!;
-  let [text, base] = typingSlice(block.text, block.sel, s.selection_whole_lines);
-  if (s.strip_comments) text = stripComments(text, block.lang)[0];
+  const [text, base] = typingText(a.t, block, s);
   if (!text.trim()) return null;
-  return { tid: a.t.id, bid: block.id, base, text };
+  return { tid: a.t.id, bid: block.id, base, text, profile: block.profile in PROFILES ? block.profile : "" };
 }
 
-const sameJob = (a: Job | null) => !!(a && job && a.tid === job.tid && a.bid === job.bid && a.base === job.base && a.text === job.text);
+const sameJob = (a: Job | null) => !!(a && job && a.tid === job.tid && a.bid === job.bid && a.base === job.base &&
+  a.text === job.text && a.profile === job.profile);
 
 function loadJob(j: Job): void {
   job = j;
-  engine.load(j.text);
+  engine.load(j.text, j.profile);
 }
 
 function invalidateJobIfIdle(): void {
@@ -133,12 +152,12 @@ function startParams(fromButton: boolean, countdown?: number): [number, number] 
 
 function cmdToggle(fromButton = false): void {
   const st = engine.state;
-  if (st === "running" || st === "countdown") return engine.pause();
+  if (engine.active) return engine.pause();   // идёт или готовится (отсчёт, задержка хоткея)
   const j = jobForArmed();
-  if (!j) return notify("Нечего печатать: выберите (щёлкните) непустой блок кода.", "warn");
+  if (!j) return notify("Нечего печатать: выберите (щёлкните) непустой блок кода или текста.", "warn");
   if (st === "paused" && sameJob(j)) return engine.resume(...startParams(fromButton));
-  if (!sameJob(j) || st === "finished" || st === "paused") {
-    if (st === "paused") notify("Образец или выделение изменились — печать начнётся с начала.");
+  if (st === "paused" || st === "finished" || !sameJob(j)) {
+    if (st === "paused") notify("Текст для печати изменился (образец, выделение или настройки) — печать начнётся с начала.");
     loadJob(j);
   }
   engine.start(...startParams(fromButton));
@@ -146,7 +165,7 @@ function cmdToggle(fromButton = false): void {
 
 function cmdRestart(fromButton = false): void {
   const j = jobForArmed();
-  if (!j) return notify("Нечего печатать: выберите (щёлкните) непустой блок кода.", "warn");
+  if (!j) return notify("Нечего печатать: выберите (щёлкните) непустой блок кода или текста.", "warn");
   loadJob(j);
   engine.restart(...startParams(fromButton));
 }
@@ -159,22 +178,26 @@ function cmdStop(): void {
 function cmdBlock(d: number): void {
   const t = store.get(s.current_tab);
   if (!t) return;
-  const ids = codeBlocks(t).map((b) => b.id);
+  const ids = navBlocks(t).map((b) => b.id);
   if (!ids.length) return;
   const i = ids.indexOf(t.active_block);
   const j = Math.max(0, Math.min(ids.length - 1, i + d));
-  if (engine.busy) cmdStop();
-  t.active_block = ids[j];
-  store.put(t);
-  broadcast({ t: "template", template: t });
+  if (j !== i) {   // на краю ленты переходить некуда — печать на паузе не сбрасываем
+    if (engine.busy) cmdStop();
+    t.active_block = ids[j];
+    store.put(t);
+    broadcast({ t: "template", template: t });
+  }
   broadcast({ t: "focusBlock", tid: t.id, bid: ids[j] });
-  notify(`Активный блок: ${blockTitle(t.blocks.find((b) => b.id === ids[j])!, j + 1)} (${j + 1} из ${ids.length})`);
+  const b = t.blocks.find((x) => x.id === ids[j])!;
+  const n = codeNumber(t, b);
+  notify(`Активный блок: ${blockTitle(b, n)}${n ? ` (${n} из ${codeBlocks(t).length})` : ""}`);
 }
 
 function cmdNextTab(d: number): void {
   const tabs = s.open_tabs.filter((id) => store.get(id));
   if (!tabs.length) return;
-  if (engine.state === "running" || engine.state === "countdown") engine.pause();
+  engine.pause();   // движок сам решит: на паузу ставится только идущая или готовящаяся печать
   const i = tabs.indexOf(s.current_tab);
   s.current_tab = tabs[(i + d + tabs.length) % tabs.length];
   store.saveSettings();
@@ -201,6 +224,7 @@ function startServices(): void {
     log("warn", `Не удалось занять хоткеи: ${text}`);
     notify(`Не удалось занять хоткеи: ${text} (заняты другой программой?). Смените их в настройках.`, "warn");
   });
+  input.on("error", (err: Error) => log("error", `Поток хоткеев упал: ${err.stack ?? err}`));
   input.on("tripped", (kind) => {
     if (engine.state === "running") {
       engine.pause(kind === "key" ? "нажата клавиша" : "клик мышью");
@@ -232,7 +256,7 @@ function startServices(): void {
         notify("Набор завершён.");
         if (s.auto_advance && job && job.tid === s.current_tab) {
           const t = store.get(job.tid);
-          const ids = t ? codeBlocks(t).map((b) => b.id) : [];
+          const ids = t ? navBlocks(t).map((b) => b.id) : [];
           const i = ids.indexOf(job.bid);
           if (i >= 0 && i + 1 < ids.length) setTimeout(() => cmdBlock(+1), 400);
         }
@@ -322,7 +346,26 @@ const server = http.createServer((req, res) => {
     return;
   }
   const url = new URL(req.url ?? "/", URL_SELF);
-  const p = decodeURIComponent(url.pathname);
+  let p: string;
+  try {
+    p = decodeURIComponent(url.pathname);
+  } catch {
+    res.writeHead(400).end("Bad Request");   // «/%» и т. п. — иначе исключение уронило бы помощника
+    return;
+  }
+  if (p === "/api/version") {   // по нему второй запуск узнаёт, что порт занят именно помощником
+    res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" }).end(`AutoPrintCode ${VERSION}`);
+    return;
+  }
+  // новая версия просит эту завершиться. Ключ лежит в папке данных — сторонний сайт его не знает,
+  // а свой заголовок из браузера с чужого сайта без разрешения CORS и не отправить
+  if (p === "/api/shutdown" && req.method === "POST") {
+    if (req.headers["x-autoprint-token"] !== HELPER_TOKEN) return void res.writeHead(403).end("Forbidden");
+    res.writeHead(200).end("ok");
+    log("info", "Завершаюсь: запускается другая версия помощника");
+    void shutdown();
+    return;
+  }
   if (p.startsWith("/sounds/") && serveFile(res, SOUNDS, p.slice("/sounds/".length))) return;
   if (p === "/api/log") {
     res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
@@ -346,6 +389,8 @@ wss.on("connection", (ws) => {
   clients.add(ws);
   send(ws, { t: "hello", version: VERSION, settings: s, templates: store.templates, engine: engineStatus(), hotkeysFailed,
     autostart: getAutostart() });
+  if (store.warning) send(ws, { t: "notify", text: store.warning, level: "warn" });
+  ws.on("error", (e) => log("warn", `Соединение со страницей: ${e.message}`));
   ws.on("message", (data) => {
     try {
       onClient(ws, JSON.parse(String(data)) as ClientMsg);
@@ -419,14 +464,94 @@ function openBrowser(): void {
   p.unref();
 }
 
-server.on("error", (e: NodeJS.ErrnoException) => {
-  if (e.code === "EADDRINUSE") {
-    log("info", "Помощник уже запущен — только открываю страницу");
+// ---------------------------------------------------------------- второй запуск
+// Порт занят. Наш помощник той же или более новой версии — только открыть страницу. Более старой —
+// заменить его (иначе после обновления продолжал бы работать старый код). Чужая программа — сообщить.
+const TOKEN_FILE = path.join(DATA_DIR, ".helper-token");
+const HELPER_TOKEN = randomUUID();
+let tookOver = false;
+let listenRetries = 0;
+
+function httpText(method: string, urlPath: string, headers: Record<string, string> = {}): Promise<string | null> {
+  return new Promise((resolve) => {
+    const req = http.request(`${URL_SELF}${urlPath}`, { method, headers, timeout: 3000 }, (res) => {
+      let body = "";
+      res.setEncoding("utf-8").on("data", (c) => (body += c)).on("end", () => resolve(res.statusCode === 200 ? body : null));
+    });
+    req.on("error", () => resolve(null)).on("timeout", () => { req.destroy(); resolve(null); });
+    req.end();
+  });
+}
+
+const versionKey = (v: string) => v.split(/[.-]/).map((x) => Number.parseInt(x, 10) || 0);
+function olderThanMe(v: string): boolean {
+  const [a, b] = [versionKey(v), versionKey(VERSION)];
+  for (let i = 0; i < Math.max(a.length, b.length); i++) if ((a[i] ?? 0) !== (b[i] ?? 0)) return (a[i] ?? 0) < (b[i] ?? 0);
+  return false;
+}
+
+/** Помощник, у которого ещё нет /api/shutdown: найти процесс на порту и завершить, если это node server/main.ts. */
+function killOldHelper(): boolean {
+  try {
+    const line = execFileSync("netstat", ["-ano", "-p", "TCP"], { encoding: "utf-8", windowsHide: true })
+      .split(/\r?\n/).find((l) => l.includes(`127.0.0.1:${PORT} `) && /LISTENING/.test(l));
+    const pid = Number(line?.trim().split(/\s+/).pop());
+    if (!pid || pid === process.pid) return false;
+    const cmd = execFileSync("powershell.exe", ["-NoProfile", "-Command",
+      `(Get-CimInstance Win32_Process -Filter "ProcessId=${pid}").CommandLine`], { encoding: "utf-8", windowsHide: true });
+    if (!/node(\.exe)?"?\s.*server[\\/]main\.ts/i.test(cmd)) return false;   // не наш помощник — не трогаем
+    process.kill(pid);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function onPortBusy(): Promise<void> {
+  if (tookOver && listenRetries++ < 20) {   // прежний помощник уже завершается — порт освободится вот-вот
+    setTimeout(() => server.listen(PORT, "127.0.0.1"), 300);
+    return;
+  }
+  const body = await httpText("GET", "/api/version");
+  if (!body?.startsWith("AutoPrintCode")) return portBusy();
+  const running = body.slice("AutoPrintCode".length).trim();
+  if (tookOver || !olderThanMe(running)) {
+    log("info", `Помощник ${running} уже запущен — только открываю страницу`);
     if (!NO_OPEN) openBrowser();
     setTimeout(() => process.exit(0), 500);   // дать explorer.exe стартовать (службы ещё не запущены)
     return;
   }
+  tookOver = true;
+  log("info", `Работает помощник ${running}, запускается ${VERSION} — заменяю`);
+  let token = "";
+  try {
+    token = fs.readFileSync(TOKEN_FILE, "utf-8").trim();
+  } catch {
+    // старый помощник ключ не писал
+  }
+  const asked = token !== "" && (await httpText("POST", "/api/shutdown", { "X-AutoPrint-Token": token })) !== null;
+  if (!asked && !killOldHelper()) {
+    log("warn", `Не удалось завершить помощника ${running} — открываю его страницу`);
+    if (!NO_OPEN) openBrowser();
+    setTimeout(() => process.exit(0), 500);
+    return;
+  }
+  for (let i = 0; i < 50 && (await httpText("GET", "/api/version")) !== null; i++) await new Promise((r) => setTimeout(r, 200));
+  store.reload();   // прежний помощник, уходя, сохранил несохранённое
+  server.listen(PORT, "127.0.0.1");
+}
+
+server.on("error", (e: NodeJS.ErrnoException) => {
+  if (e.code === "EADDRINUSE") return void onPortBusy();
   throw e;
+});
+
+server.on("listening", () => {
+  try {
+    fs.writeFileSync(TOKEN_FILE, HELPER_TOKEN);
+  } catch (err) {
+    log("warn", `Не записан ключ для замены помощника: ${(err as Error).message}`);
+  }
 });
 
 server.listen(PORT, "127.0.0.1", () => {
@@ -438,9 +563,16 @@ server.listen(PORT, "127.0.0.1", () => {
   if (!NO_OPEN) openBrowser();
 });
 
+function portBusy(): void {
+  const text = `Порт ${PORT} занят другой программой. Освободите его или задайте другой: set AUTOPRINT_PORT=8791`;
+  log("error", text);
+  console.error(text);
+  process.exit(1);
+}
+
 async function shutdown(): Promise<void> {
   wss.close();
-  store.saveTemplatesNow();
+  store.flush();
   await Promise.allSettled([engine?.close(), input?.close()]);
   process.exit(0);
 }

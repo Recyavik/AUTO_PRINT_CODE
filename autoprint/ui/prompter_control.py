@@ -163,19 +163,22 @@ class PrompterController(QObject):
             return PromptCard(title="", empty="Щёлкните блок кода в занятии — здесь появится, что сказать "
                                               "и что набрать.", can_next=False, can_back=False)
         v, block = a
+        if block.type != BLOCK_CODE:
+            return self._block_card(v, block)     # текст (условие, пояснение) — целиком, в обоих режимах
         if self.s.prompter_mode == MODE_SELF:
             return self._self_card(v, block)
-        if self.s.print_mode == MODE_STEPS:
+        mode = self.win._mode_for(block)
+        if mode == MODE_STEPS:
             return self._steps_card(v, block)
-        if self.s.print_mode == MODE_LINES:
+        if mode == MODE_LINES:
             return self._lines_card(v, block)
         return self._block_card(v, block)
 
     def _sub(self, v, block: Block) -> str:
-        codes = [b.id for b in v.template.code_blocks()]
-        j = codes.index(block.id) + 1 if block.id in codes else 1
-        name = block.display_title(j)
-        return f"{v.template.title} · {name}" + (f" · блок {j} из {len(codes)}" if len(codes) > 1 else "")
+        t = v.template
+        j = t.code_number(block)
+        n = len(t.code_blocks())
+        return f"{t.title} · {block.display_title(j)}" + (f" · блок {j} из {n}" if j and n > 1 else "")
 
     @staticmethod
     def _intro(v, block: Block) -> list[str]:
@@ -191,10 +194,13 @@ class PrompterController(QObject):
         return []
 
     def _neighbor(self, v, block: Block, d: int) -> Block | None:
-        codes = v.template.code_blocks()
-        ids = [b.id for b in codes]
-        i = ids.index(block.id) + d if block.id in ids else -1
-        return codes[i] if 0 <= i < len(codes) else None
+        """Следующий (d=+1) или предыдущий блок кода по ленте занятия — и от текстового блока тоже."""
+        bl = v.template.blocks
+        i = bl.index(block) if block in bl else -1
+        if i < 0:
+            return None
+        rng = range(i + 1, len(bl)) if d > 0 else range(i - 1, -1, -1)
+        return next((bl[j] for j in rng if bl[j].type == BLOCK_CODE), None)
 
     def _busy_buttons(self, c: PromptCard, hk: str) -> PromptCard:
         st = self.win.engine.state
@@ -253,17 +259,20 @@ class PrompterController(QObject):
 
     def _block_card(self, v, block: Block) -> PromptCard:
         hk = self.s.hotkey_toggle
-        text = block.text
-        if self.s.strip_comments:
-            from ..comments import strip_comments
-            text = strip_comments(text, block.lang)[0]
-        rows = text.split("\n")
+        text, *_rest, part = self.win._typing_text(v.template, block)   # как напечатается: без комментариев,
+        rows = text.split("\n")                                          # текст — в выбранном виде
         shown = rows[:CODE_LIMIT]
         busy = self.win.engine.state in BUSY and self.win.job and self.win.job["bid"] == block.id
-        c = PromptCard(title="блок целиком", sub=self._sub(v, block), say=self._intro(v, block),
+        is_code = block.type == BLOCK_CODE
+        c = PromptCard(title="блок целиком" if is_code else part, sub=self._sub(v, block),
+                       say=self._intro(v, block) if is_code else [],
                        chunks=[("", shown)] if text.strip() else [], hidden=max(0, len(rows) - len(shown)),
                        hint=f"{hk} — напечатать блок" if hk else "", next_text="Напечатать", next_icon="play",
                        can_back=self._neighbor(v, block, -1) is not None)
+        if self.s.prompter_mode == MODE_SELF:
+            nxt = self._neighbor(v, block, +1)
+            c.hint = (f"{hk} — дальше" if hk else "") + " · программа не печатает"
+            c.next_text, c.next_icon, c.can_next = "Следующий блок", "next", nxt is not None
         return self._busy_buttons(c, hk) if busy else c
 
     # ---- «Печатаю сам»
@@ -311,6 +320,14 @@ class PrompterController(QObject):
         if not a:
             return
         v, block = a
+        if self.s.prompter_mode == MODE_SELF and block.type != BLOCK_CODE:
+            self.win._press_state = None
+            nxt = self._neighbor(v, block, +1)
+            if nxt is not None:
+                self.walk[nxt.id] = 0
+                self._goto(v, nxt)
+            self.refresh()
+            return
         if self.s.prompter_mode == MODE_SELF:
             self.win._press_state = None
             _steps, nums, _lines = self._walk_of(block)
@@ -324,7 +341,7 @@ class PrompterController(QObject):
             self.refresh()
             return
         st = self.win.engine.state
-        if self.s.print_mode == MODE_STEPS and st not in BUSY and self.win._step_pointer(block.id) is None:
+        if self.win._mode_for(block) == MODE_STEPS and st not in BUSY and self.win._step_pointer(block.id) is None:
             self.win._press_state = None
             nxt = self._neighbor(v, block, +1)
             if nxt is not None:
@@ -345,7 +362,7 @@ class PrompterController(QObject):
         v, block = a
         prev = self._neighbor(v, block, -1)
         if self.s.prompter_mode == MODE_SELF:
-            idx = self.walk.get(block.id, 0)
+            idx = self.walk.get(block.id, 0) if block.type == BLOCK_CODE else 0
             if idx > 0:
                 self.walk[block.id] = idx - 1
             elif prev is not None:
@@ -353,7 +370,7 @@ class PrompterController(QObject):
                 self._goto(v, prev)
             self.refresh()
             return
-        if self.s.print_mode == MODE_STEPS:
+        if self.win._mode_for(block) == MODE_STEPS:
             if self.win._step_pointer(block.id) == self.win._block_steps(block)[0] and prev is not None:
                 # на первом шаге блока — к последнему шагу предыдущего блока
                 self._goto(v, prev)
@@ -392,7 +409,7 @@ class PrompterController(QObject):
         nxt = self._neighbor(v, block, +1)
         if nxt is None:
             return False
-        if self.s.print_mode == MODE_STEPS and self.win._step_pointer(nxt.id) is None:
+        if self.win._mode_for(nxt) == MODE_STEPS and self.win._step_pointer(nxt.id) is None:
             self.win.step_next[nxt.id] = self.win._block_steps(nxt)[0]
         QTimer.singleShot(400, lambda: self._goto(v, nxt) if self.win._armed() == (v, block) else None)
         return True

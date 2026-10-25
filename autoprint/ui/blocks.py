@@ -8,7 +8,8 @@ from PySide6.QtWidgets import (QApplication, QComboBox, QFrame, QHBoxLayout, QLa
                                QStylePainter, QTextBrowser, QToolButton, QVBoxLayout)
 
 from ..highlighter import LANGUAGES
-from ..storage import BLOCK_CODE, BLOCK_MARKDOWN, ROLES, Block
+from ..storage import BLOCK_CODE, BLOCK_MARKDOWN, PROFILE_SHORT, PROFILES, ROLES, Block
+from ..textprint import PRINT_MODES, find_selection
 from . import icons
 from .code_editor import CodeEditor, code_font
 from .theme import css, mix, theme
@@ -50,6 +51,7 @@ class IconCombo(QComboBox):
 
 class BlockWidget(QFrame):
     changed = Signal()
+    arm_requested = Signal(object)                # сделать блок активным для печати (код или текст)
     move_requested = Signal(object, int)          # (виджет, -1|+1)
     delete_requested = Signal(object)
     type_requested = Signal(object, str)          # (виджет, роль | "code")
@@ -91,10 +93,35 @@ class BlockWidget(QFrame):
         self.left_slot = QHBoxLayout()
         self.left_slot.setSpacing(8)
         self.header.addLayout(self.left_slot)
+        self.armed = False
+        self.arm_btn = QToolButton()
+        self.arm_btn.setObjectName("armBtn")
+        self.arm_btn.setCheckable(True)
+        self.arm_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.arm_btn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        self.arm_btn.setIconSize(QSize(11, 11))
+        self.arm_btn.setToolTip("Сделать этот блок активным для печати по хоткею")
+        self.arm_btn.clicked.connect(lambda: self.arm_requested.emit(self))
+        self.left_slot.addWidget(self.arm_btn)
         self.header.addStretch(1)
         self.right_slot = QHBoxLayout()
         self.right_slot.setSpacing(4)
         self.header.addLayout(self.right_slot)
+        # окно для этого блока: терминал на сайте (git в браузере) Windows не отличит от редактора — выбирают здесь
+        self.window = QComboBox()
+        self.window.setObjectName("langCombo")
+        self.window.setFixedWidth(172)
+        self.window.addItem("Как на пульте", "")
+        for key, name in PROFILE_SHORT.items():
+            self.window.addItem(name, key)
+        self.window.setCurrentIndex(max(0, self.window.findData(block.profile)))
+        self.window.setToolTip("Куда печатается этот блок:\n"
+                               + "\n".join(f"• {PROFILE_SHORT[k]} — {v}" for k, v in PROFILES.items())
+                               + "\nКак на пульте — как выбрано в «Куда печатаем» на пульте.\n"
+                                 "Терминал на сайте (git в браузере) — выберите «Терминал»: иначе в строке появятся «F».")
+        self.window.activated.connect(self._on_window)
+        self.right_slot.addWidget(self.window)
+        self._refresh_window_icons()
         self.header.addSpacing(4)
 
         self._insert_actions = []
@@ -122,7 +149,13 @@ class BlockWidget(QFrame):
         self._refresh_kind_icons()
         theme.changed.connect(self._refresh_kind_icons)
 
+    def _refresh_window_icons(self) -> None:
+        for i in range(self.window.count()):   # своё окно у блока — значок цветом акцента
+            self.window.setItemIcon(i, icons.icon("monitor", "dim" if i == 0 else "accent", 13))
+
     def _refresh_kind_icons(self) -> None:
+        if hasattr(self, "window"):
+            self._refresh_window_icons()
         for i, (_t, _k, ic, tok) in enumerate(TYPE_ITEMS):
             self.kind.setItemIcon(i, icons.icon(ic, tok, 14))
         for action, ic in self._insert_actions:
@@ -175,6 +208,23 @@ class BlockWidget(QFrame):
         if key != current:
             self.type_requested.emit(self, key)
 
+    def _on_window(self, _i: int) -> None:
+        self.block.profile = self.window.currentData()
+        self.changed.emit()
+        self.arm_requested.emit(self)
+
+    def clear_selection(self) -> None:
+        """Снять выделение (оно бывает только у активного блока) — переопределяют наследники."""
+
+    def set_armed(self, on: bool) -> None:
+        self.armed = on
+        self.arm_btn.setChecked(on)
+        self.arm_btn.setText("Активный" if on else "Печатать этот")
+        self.arm_btn.setIcon(icons.icon("play", "accent" if on else "dim", 11))
+        if self.property("armed") != on:
+            self.setProperty("armed", on)
+            repolish(self)
+
 
 # ------------------------------------------------------------------ Markdown
 
@@ -207,10 +257,27 @@ def _markdown_css() -> str:
 
 
 class MarkdownBlockWidget(BlockWidget):
-    edit_requested = Signal()
+    """Текст: условие, пояснение, подсказка. Тоже печатается — как Markdown, простым текстом или комментарием
+    в коде; выделенные строки — только они (как у блока кода)."""
 
     def __init__(self, block: Block) -> None:
         super().__init__(block)
+        self._rendering = False   # setMarkdown сбрасывает курсор просмотра — это не выбор пользователя
+        self.print_as = QComboBox()
+        self.print_as.setObjectName("langCombo")
+        self.print_as.setFixedWidth(176)
+        for key, name in PRINT_MODES.items():
+            self.print_as.addItem(name[0].upper() + name[1:], key)   # «Как Markdown», «Простым текстом»…
+        self.print_as.setCurrentIndex(max(0, self.print_as.findData(block.print_as)))
+        self.print_as.setToolTip("Как печатать этот блок:\n"
+                                 "• как Markdown — исходник с ## и `…` (markdown-ячейка Jupyter, .md-файл);\n"
+                                 "• простым текстом — без разметки (Блокнот, Word, чат);\n"
+                                 "• комментарием в коде — каждая строка с # или // по языку блока кода рядом")
+        self.print_as.activated.connect(self._on_print_as)
+        self.left_slot.addWidget(self.print_as)
+        self.info = QLabel()
+        self.info.setObjectName("dim")
+        self.left_slot.addWidget(self.info)
         self.toggle = QToolButton()
         self.toggle.setObjectName("textBtn")
         self.toggle.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
@@ -225,35 +292,112 @@ class MarkdownBlockWidget(BlockWidget):
         self.view.viewport().installEventFilter(self)
         self.edit = QPlainTextEdit(block.text)
         self.edit.setObjectName("mdEdit")
+        self.edit.installEventFilter(self)
         self.edit.setFont(code_font(10))
         self.edit.setPlaceholderText("Текст в формате Markdown: условие, пояснение к коду, подсказка…")
         self.edit.textChanged.connect(self._on_text)
+        self.view.selectionChanged.connect(self._on_view_selection)
+        self.edit.selectionChanged.connect(self._on_edit_selection)
         self.stack.addWidget(self.view)
         self.stack.addWidget(self.edit)
         self.body.addWidget(self.stack)
         self.body.setContentsMargins(6, 0, 0, 0)
         theme.changed.connect(self._on_theme)
         self._render()
-        self.set_editing(not block.text.strip())
+        self.set_editing(not block.text.strip(), focus=False)
+        self._update_info()
+        self.set_armed(False)
 
     def _on_theme(self) -> None:
         self._render()
         self._update_toggle()
+        self.set_armed(self.armed)
+
+    # ---- выделение: печатаются только выделенные строки (как в блоке кода)
+    def _on_view_selection(self) -> None:
+        if self._rendering or self.stack.currentWidget() is not self.view:
+            return   # перерисовка (выход из правки, масштаб) — выделение не трогаем
+        c = self.view.textCursor()
+        sel = []
+        if c.hasSelection():
+            hint = c.selectionStart() / max(1, self.view.document().characterCount())
+            sel = find_selection(self.block.text, c.selection().toPlainText(), hint)
+        self._set_sel(sel)
+
+    def _on_edit_selection(self) -> None:
+        if self.stack.currentWidget() is self.edit:
+            self._sel_from_edit()
+
+    def _sel_from_edit(self) -> None:
+        c = self.edit.textCursor()
+        self._set_sel([c.selectionStart(), c.selectionEnd()] if c.hasSelection() else [])
+
+    def _restore_edit_selection(self) -> None:
+        """Сохранённое выделение (из просмотра или с прошлого запуска) — видимым в редакторе."""
+        c = self.edit.textCursor()
+        if len(self.block.sel) == 2:
+            n = len(self.block.text)
+            a, b = (min(max(0, x), n) for x in self.block.sel)
+            c.setPosition(a)
+            c.setPosition(b, QTextCursor.MoveMode.KeepAnchor)
+        else:
+            c.clearSelection()
+        self.edit.setTextCursor(c)
+
+    def _set_sel(self, sel: list[int]) -> None:
+        if sel != self.block.sel:
+            self.block.sel = sel
+            self._update_info()
+            self.changed.emit()
+
+    def _update_info(self) -> None:
+        if self.block.sel:
+            a, b = self.block.sel
+            n = self.block.text[a:b].rstrip("\n").count("\n") + 1
+            self.info.setText(f"<span style='color:{css(theme.c('accent'))}'>выделено строк: {n}</span>")
+        self.info.setVisible(bool(self.block.sel))
+
+    def clear_selection(self) -> None:
+        for w in (self.view, self.edit):
+            c = w.textCursor()
+            c.clearSelection()
+            w.setTextCursor(c)
+        self._set_sel([])
 
     def eventFilter(self, obj, ev) -> bool:
-        if ev.type() == ev.Type.MouseButtonDblClick:
+        t = ev.type()
+        if obj is self.edit:
+            if t == ev.Type.FocusIn:
+                self.arm_requested.emit(self)   # правка блока — блок активный, как у блока кода
+            return False
+        if t == ev.Type.MouseButtonDblClick:
             self.set_editing(True)
             return True
+        if t == ev.Type.MouseButtonPress:
+            self.arm_requested.emit(self)       # щелчок по тексту — блок активный, как у блока кода
+        elif t == ev.Type.MouseButtonRelease and self.stack.currentWidget() is self.view \
+                and not self.view.textCursor().hasSelection():
+            self._set_sel([])                   # щелчок без выделения — печатать весь блок
         return False
+
+    def _on_print_as(self, _i: int) -> None:
+        self.block.print_as = self.print_as.currentData()
+        self.changed.emit()
+        self.arm_requested.emit(self)
 
     def _on_text(self) -> None:
         self.block.text = self.edit.toPlainText()
+        self._sel_from_edit()                   # прежние позиции выделения после правки неверны
         self._fit_edit()
         self.changed.emit()
 
     def _render(self) -> None:
         self.view.document().setDefaultStyleSheet(_markdown_css())
-        self.view.setMarkdown(self.block.text or "*Пустой блок — дважды щёлкните, чтобы написать*")
+        self._rendering = True
+        try:
+            self.view.setMarkdown(self.block.text or "*Пустой блок — дважды щёлкните, чтобы написать*")
+        finally:
+            self._rendering = False
         QTimer.singleShot(0, self, self._fit)
 
     def _fit(self) -> None:
@@ -275,10 +419,13 @@ class MarkdownBlockWidget(BlockWidget):
         self.toggle.setText("Готово" if editing else "Править")
         self.toggle.setIcon(icons.icon("check" if editing else "pencil", "accent" if editing else "dim", 14))
 
-    def set_editing(self, on: bool) -> None:
+    def set_editing(self, on: bool, focus: bool = True) -> None:
+        """focus=False — при создании виджета: фокус в редакторе сделал бы блок активным."""
         if on:
             self.stack.setCurrentWidget(self.edit)
-            self.edit.setFocus()
+            self._restore_edit_selection()
+            if focus:
+                self.edit.setFocus()
         else:
             self._render()
             self.stack.setCurrentWidget(self.view)
@@ -305,25 +452,14 @@ class MarkdownBlockWidget(BlockWidget):
 # ------------------------------------------------------------------ Код
 
 class CodeBlockWidget(BlockWidget):
-    arm_requested = Signal(object)
     selection_changed = Signal(object)
     steps_changed = Signal(object)              # разметка шагов поменялась
     step_pointer_requested = Signal(object, int)   # «печатать дальше с шага k»
 
     def __init__(self, block: Block, number: int) -> None:
         super().__init__(block, number)
-        self.armed = False
         self.step_mode = False
         self.step_next: int | None = None       # какой шаг печатать следующим (None — все напечатаны)
-        self.arm_btn = QToolButton()
-        self.arm_btn.setObjectName("armBtn")
-        self.arm_btn.setCheckable(True)
-        self.arm_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.arm_btn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
-        self.arm_btn.setIconSize(QSize(11, 11))
-        self.arm_btn.setToolTip("Сделать этот блок активным для печати по хоткею")
-        self.arm_btn.clicked.connect(lambda: self.arm_requested.emit(self))
-        self.left_slot.addWidget(self.arm_btn)
         self.info = QLabel()
         self.info.setObjectName("dim")
         self.left_slot.addWidget(self.info)
@@ -500,15 +636,6 @@ class CodeBlockWidget(BlockWidget):
             self.info.setText(f"<span style='color:{css(theme.c('accent'))}'>выделено строк: {n} из {lines}</span>")
         else:
             self.info.setText(f"{lines} стр. · {len(text)} симв.")
-
-    def set_armed(self, on: bool) -> None:
-        self.armed = on
-        self.arm_btn.setChecked(on)
-        self.arm_btn.setText("Активный" if on else "Печатать этот")
-        self.arm_btn.setIcon(icons.icon("play", "accent" if on else "dim", 11))
-        if self.property("armed") != on:
-            self.setProperty("armed", on)
-            repolish(self)
 
     def set_progress(self, start: int, pos: int, end: int) -> None:
         self.editor.set_progress(start, pos, end)

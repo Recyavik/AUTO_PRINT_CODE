@@ -97,6 +97,8 @@ def main() -> int:
     except RuntimeError as e:
         QMessageBox.critical(None, APP_NAME, str(e))
         return 1
+    if store.warning:
+        QMessageBox.warning(None, APP_NAME, store.warning)
 
     from autoprint.ui import logo
     from autoprint.ui.frameless import NativeFrameStyler
@@ -131,7 +133,7 @@ def main() -> int:
     # процесс ещё завершается, и должна сама занять канал (иначе её окно не покажется при повторном запуске)
     server.close()
     lock.unlock()
-    if win.relaunch_requested:   # обновление или откат: запустить уже новую версию
+    if win.relaunch_requested:   # установлено обновление: запустить уже новую версию
         from autoprint import updater
         updater.relaunch()
     return code
