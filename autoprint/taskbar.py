@@ -51,10 +51,10 @@ _COMMIT = ctypes.WINFUNCTYPE(ctypes.HRESULT, ctypes.c_void_p)
 _RELEASE = ctypes.WINFUNCTYPE(ctypes.c_ulong, ctypes.c_void_p)
 
 
-def set_process_app_id() -> None:
-    """Вызвать до создания первого окна."""
+def set_process_app_id(app_id: str = APP_ID) -> None:
+    """Вызвать до создания первого окна. app_id — своё у каждой программы (иначе Windows сгруппирует их кнопки)."""
     try:
-        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(APP_ID)
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(app_id)
     except OSError as e:
         log.warning("AppUserModelID не установлен: %s", e)
 
@@ -69,7 +69,7 @@ def relaunch_command() -> str:
     return f'"{gui if gui.exists() else exe}" "{script}"'
 
 
-def apply_to_window(hwnd: int, icon_path: str, name: str) -> bool:
+def apply_to_window(hwnd: int, icon_path: str, name: str, app_id: str = APP_ID) -> bool:
     """Записать окну AppUserModel-свойства. False — если не получилось (тогда останется значок Python)."""
     shell32 = ctypes.windll.shell32
     store = ctypes.c_void_p()
@@ -87,7 +87,7 @@ def apply_to_window(hwnd: int, icon_path: str, name: str) -> bool:
     try:
         # ID записывается последним: при его смене Windows перечитывает остальные свойства
         for pid, value in ((PID_RELAUNCH_COMMAND, relaunch_command()), (PID_RELAUNCH_ICON, icon_path),
-                           (PID_RELAUNCH_NAME, name), (PID_APP_ID, APP_ID)):
+                           (PID_RELAUNCH_NAME, name), (PID_APP_ID, app_id)):
             set_value(store, ctypes.byref(_PROPERTYKEY(fmtid, pid)), ctypes.byref(_PROPVARIANT(VT_LPWSTR, pwsz=value)))
         commit(store)
         return True

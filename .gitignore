@@ -28,6 +28,11 @@ tests/pages/node_modules/
 tests/pages/cm6bundle.js
 tests/pages/package-lock.json
 
+# --- Медиа для таймера вебинара (большие файлы — у каждого свои) ---
+*.mp4
+*.mov
+Фон.jpg
+
 # --- Временное и служебное ---
 *.log
 *.tmp

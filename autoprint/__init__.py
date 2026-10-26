@@ -1,4 +1,4 @@
 """AutoPrintCode — агент, печатающий заготовленный код в любое окно."""
 
-__version__ = "0.5.3"
+__version__ = "0.6.0"
 APP_NAME = "AutoPrintCode"
