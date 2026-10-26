@@ -6,8 +6,7 @@ import threading
 import time
 from pathlib import Path
 
-from PySide6.QtCore import QObject, Qt, QUrl, Signal
-from PySide6.QtGui import QDesktopServices
+from PySide6.QtCore import QObject, Qt, Signal
 from PySide6.QtWidgets import QDialog, QHBoxLayout, QLabel, QProgressBar, QPushButton, QTextBrowser, QVBoxLayout
 
 from .. import __version__, updater
@@ -23,9 +22,6 @@ UPDATE_MODES = {
     MODE_AUTO: "Скачать и установить при выходе",
 }
 INTERVALS = {0: "При каждом запуске", 24: "Раз в день", 168: "Раз в неделю"}
-
-FROZEN_NOTE = "Скачайте новую версию со страницы релиза."
-
 
 class UpdateManager(QObject):
     """Проверка → загрузка → подготовка идут в фоновом потоке; установка — в GUI-потоке, она быстрая."""
@@ -48,7 +44,7 @@ class UpdateManager(QObject):
 
     @property
     def can_install(self) -> bool:
-        return self.mode != MODE_FROZEN
+        return True     # исходники — git или архив; собранная версия — установщиком из релиза
 
     # ---- проверка
     def check_due(self) -> bool:
@@ -104,6 +100,13 @@ class UpdateManager(QObject):
 
     def _download(self, rel: Release) -> None:
         try:
+            if self.mode == MODE_FROZEN:
+                root = updater.download_installer(rel, lambda got, total: self.progress.emit("Загрузка", got, total),
+                                                  lambda: self._cancel)
+                self.downloading = False
+                self.staged = (rel, root)
+                self.ready.emit(rel)
+                return
             if self.mode == MODE_GIT:
                 self.progress.emit("Загрузка", 0, 0)
                 root = updater.git_stage(rel)
@@ -129,14 +132,17 @@ class UpdateManager(QObject):
         self.ready.emit(rel)
 
     # ---- установка
-    def apply_staged(self) -> str:
-        """Ставит скачанное обновление. Возвращает новую версию. UpdateError — если не вышло."""
+    def apply_staged(self, relaunch: bool = True) -> str:
+        """Ставит скачанное обновление. Возвращает новую версию. UpdateError — если не вышло.
+        Собранная версия: запускает установщик (он закроет программу и, если relaunch, запустит новую)."""
         if not self.staged:
             raise UpdateError("Обновление ещё не скачано.")
         if self.applied:
             return self.staged[0].version
         rel, root = self.staged
-        if self.mode == MODE_GIT:
+        if self.mode == MODE_FROZEN:
+            updater.run_installer(root, rel.version, relaunch)
+        elif self.mode == MODE_GIT:
             updater.git_apply(rel)
         else:
             updater.apply(root, rel.version)
@@ -202,10 +208,7 @@ class UpdateDialog(QDialog):
 
     def _refresh(self) -> None:
         m = self.m
-        if m.mode == MODE_FROZEN:
-            self.btn_install.setText("Скачать…")
-            self.status.setText(FROZEN_NOTE)
-        elif m.staged and m.staged[0].version == self.rel.version:
+        if m.staged and m.staged[0].version == self.rel.version:
             self.btn_install.setText("Перезапустить и обновить")
             self.status.setText("Обновление скачано и проверено. Ваши образцы и настройки не изменятся.")
         elif m.downloading:
@@ -217,10 +220,7 @@ class UpdateDialog(QDialog):
 
     def _install(self) -> None:
         m = self.m
-        if m.mode == MODE_FROZEN:
-            QDesktopServices.openUrl(QUrl(self.rel.page_url))
-            self.accept()
-        elif m.downloading:
+        if m.downloading:
             m.cancel()
         elif m.staged and m.staged[0].version == self.rel.version:
             self.accept()

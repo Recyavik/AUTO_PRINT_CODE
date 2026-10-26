@@ -56,10 +56,10 @@ def run(cmd: list, **kw) -> None:
     subprocess.run([str(c) for c in cmd], check=True, **kw)
 
 
-def run_tests(py: Path) -> None:
-    """Тесты таймера в окружении сборки. Итог — по их собственному выводу («Ran N tests … OK»): процесс Python
+def run_tests(py: Path, tests_dir: Path = APP / "tests") -> None:
+    """Тесты (по умолчанию — таймера) в окружении сборки. Итог — по их собственному выводу («Ran N tests … OK»): процесс Python
     с PySide6 6.12 иногда падает уже после итога, при выгрузке Qt, — это не провал тестов."""
-    r = subprocess.run([str(py), "-c", TEST_RUNNER, str(APP / "tests")], cwd=ROOT, capture_output=True,
+    r = subprocess.run([str(py), "-c", TEST_RUNNER, str(tests_dir)], cwd=ROOT, capture_output=True,
                        text=True, encoding="utf-8", errors="replace")
     lines = (r.stdout + r.stderr).rstrip().splitlines()
     for line in lines[-4:]:

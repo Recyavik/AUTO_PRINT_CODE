@@ -8,7 +8,7 @@ from dataclasses import asdict
 from pathlib import Path
 
 from PySide6.QtCore import QBuffer, QByteArray, QEvent, QIODevice, QRect, Qt, QTimer
-from PySide6.QtGui import QAction, QColor, QCursor, QFont, QIcon, QKeySequence, QPainter, QPixmap, QShortcut
+from PySide6.QtGui import QAction, QColor, QCursor, QFont, QIcon, QKeySequence, QPainter, QPen, QPixmap, QShortcut
 from PySide6.QtWidgets import (QApplication, QComboBox, QFileDialog, QHBoxLayout, QInputDialog, QLabel,
                                QLineEdit, QListWidget, QListWidgetItem, QMainWindow, QMenu, QMessageBox,
                                QProgressBar, QPushButton, QSlider, QSpinBox, QSplitter, QSystemTrayIcon, QTabWidget,
@@ -30,7 +30,7 @@ from .settings_dialog import HOTKEYS, SettingsDialog
 from .template_view import TemplateView, ZoomWheelFilter
 from .updates import MODE_AUTO, MODE_DOWNLOAD, UpdateDialog, UpdateManager
 
-STATE_COLORS = {IDLE: "#3b82f6", COUNTDOWN: "#a855f7", RUNNING: "#2ea043", PAUSED: "#d29922",
+STATE_COLORS = {IDLE: "#3b82f6", COUNTDOWN: "#c084fc", RUNNING: "#22c55e", PAUSED: "#f2b64b",
                 FINISHED: "#3b82f6"}
 STATE_TEXT = {IDLE: "Готов", COUNTDOWN: "Отсчёт…", RUNNING: "Печатает", PAUSED: "Пауза",
               FINISHED: "Готово ✓"}
@@ -48,16 +48,18 @@ def make_icon_pixmap(color: str, size: int = 64) -> QPixmap:
     p.setRenderHint(QPainter.RenderHint.Antialiasing)
     p.setRenderHint(QPainter.RenderHint.TextAntialiasing)
     p.scale(size / 64, size / 64)   # рисуется в координатах 64×64
-    p.setBrush(QColor("#1e2229"))
+    # фирменный значок 1Т: фиолетовый, белый «</>»; полоса внизу — цвет состояния (готов, печать, пауза…)
+    p.setBrush(QColor("#8E4DFF"))
     p.setPen(Qt.PenStyle.NoPen)
     p.drawRoundedRect(2, 2, 60, 60, 12, 12)
     p.setBrush(QColor(color))
-    p.drawRoundedRect(2, 50, 60, 12, 6, 6)
-    p.setPen(QColor(color))
+    p.setPen(QPen(QColor("white"), 2))
+    p.drawRoundedRect(3, 48, 58, 13, 6, 6)
+    p.setPen(QColor("white"))
     f = QFont("Consolas", 22)
     f.setBold(True)
     p.setFont(f)
-    p.drawText(QRect(0, -8, 64, 64), Qt.AlignmentFlag.AlignCenter, "</>")
+    p.drawText(QRect(0, -9, 64, 64), Qt.AlignmentFlag.AlignCenter, "</>")
     p.end()
     return pm
 
@@ -1083,6 +1085,10 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Обновление", str(e))
             return
         log.info("Перезапуск после обновления до %s", ver)
+        if self.updates.mode == updater.MODE_FROZEN:
+            self.engine.stop()                  # установщик сам закроет и снова запустит программу
+            QTimer.singleShot(0, self.quit_app)
+            return
         self._restart()
 
     def _restart(self) -> None:
@@ -1105,7 +1111,7 @@ class MainWindow(QMainWindow):
         if (self.updates.staged and not self.updates.applied and not self.relaunch_requested
                 and self.settings.update_mode == MODE_AUTO):
             try:
-                self.updates.apply_staged()
+                self.updates.apply_staged(relaunch=False)    # новая версия — со следующего запуска
             except updater.UpdateError as err:
                 log.warning("Обновление при выходе не установлено: %s", err)
         self.engine.stop()

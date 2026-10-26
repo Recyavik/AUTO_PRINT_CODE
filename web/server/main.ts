@@ -20,6 +20,7 @@ import { Engine } from "./engine.ts";
 import { InputHooks } from "./input.ts";
 import { log, LOG_FILE } from "./log.ts";
 import { DATA_DIR, Store, WEB_DIR } from "./store.ts";
+import { checkUpdate, installUpdate } from "./update.ts";
 import * as w from "./win32.ts";
 
 const PORT = Number(process.env.AUTOPRINT_PORT || 8790);
@@ -364,6 +365,22 @@ const server = http.createServer((req, res) => {
     res.writeHead(200).end("ok");
     log("info", "Завершаюсь: запускается другая версия помощника");
     void shutdown();
+    return;
+  }
+  if (p === "/api/update") {   // есть ли версия новее (GitHub Releases) и можно ли поставить её кнопкой
+    void checkUpdate(VERSION).then((info) =>
+      res.writeHead(200, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" })
+        .end(JSON.stringify(info)));
+    return;
+  }
+  // свой заголовок с чужого сайта без разрешения CORS не отправить — поставить обновление может только страница
+  if (p === "/api/update/install" && req.method === "POST") {
+    if (req.headers["x-autoprint-update"] !== "1") return void res.writeHead(403).end("Forbidden");
+    installUpdate().then(() => {
+      res.writeHead(200).end("ok");
+      log("info", "Ставится обновление — помощник завершается, установщик запустит новую версию");
+      setTimeout(() => void shutdown(), 500);
+    }, (e: Error) => res.writeHead(500, { "Content-Type": "text/plain; charset=utf-8" }).end(e.message));
     return;
   }
   if (p.startsWith("/sounds/") && serveFile(res, SOUNDS, p.slice("/sounds/".length))) return;

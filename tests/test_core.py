@@ -517,3 +517,47 @@ class ImportersTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class FrozenUpdateTest(unittest.TestCase):
+    """Установленная (собранная) версия обновляется установщиком из релиза — без сети: ответ GitHub подставлен."""
+
+    def setUp(self):
+        from autoprint import updater
+        self.u = updater
+        self._get_json, self._mode = updater._get_json, updater.install_mode
+        asset = lambda v: {"name": f"autoprintcode-update-{v}.exe",    # noqa: E731
+                           "browser_download_url": f"https://x/autoprintcode-update-{v}.exe"}
+        releases = [
+            {"tag_name": "webinar-v9.0.0", "assets": [{"name": "webinar-timer-update-9.0.0.exe"}]},   # таймер — мимо
+            {"tag_name": "v0.9.0", "assets": []},                    # без установщика: только для исходников
+            {"tag_name": "v0.8.0", "body": "Новое", "assets": [asset("0.8.0")]},
+        ]
+        updater._get_json = lambda url: releases if "releases" in url else []
+
+    def tearDown(self):
+        self.u._get_json, self.u.install_mode = self._get_json, self._mode
+
+    def test_frozen_takes_release_with_installer(self):
+        self.u.install_mode = lambda: self.u.MODE_FROZEN
+        r = self.u.fetch_latest()
+        self.assertEqual((r.version, r.installer_url), ("0.8.0", "https://x/autoprintcode-update-0.8.0.exe"))
+
+    def test_source_takes_newest_release(self):
+        self.u.install_mode = lambda: self.u.MODE_SOURCE
+        self.assertEqual(self.u.fetch_latest().version, "0.9.0", "исходникам установщик не нужен")
+
+    def test_run_installer_args(self):
+        import subprocess
+        calls = []
+        orig = subprocess.Popen
+        subprocess.Popen = lambda args, **kw: calls.append(args)
+        try:
+            self.u.run_installer(Path("C:/x/setup.exe"), "0.8.0", relaunch=False)
+            self.u.run_installer(Path("C:/x/setup.exe"), "0.8.0", relaunch=True)
+        finally:
+            subprocess.Popen = orig
+        self.assertIn("/SILENT", calls[0])
+        self.assertIn("/NORELAUNCH", calls[0], "«установить при выходе» — без перезапуска")
+        self.assertNotIn("/NORELAUNCH", calls[1])
+        self.assertEqual(self.u.pop_last_update().get("to"), "0.8.0", "после запуска — «обновлён до 0.8.0»")

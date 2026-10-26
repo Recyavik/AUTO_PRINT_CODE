@@ -5,6 +5,8 @@
 - Программа скачана git clone → обновление через git (fetch тега + перемотка вперёд), git-история не ломается.
 - Скачана архивом → архив исходников релиза распаковывается поверх; если замена сорвётся,
   старые файлы возвращаются из временной копии.
+- Установлена мастером (собранный .exe) → к релизу приложен лёгкий установщик autoprintcode-update-X.Y.Z.exe;
+  он скачивается и запускается тихо: закрывает программу, ставит новую версию и (если просили) запускает её.
 
 Модуль без Qt: функции блокирующие, вызываются из фонового потока (см. ui/updates.py).
 """
@@ -45,7 +47,8 @@ SKIP_TOP = {"data", ".git", ".github", ".venv", "venv", "env", "build", "dist"}
 
 MODE_SOURCE = "source"   # исходники, скачанные архивом — замена файлов
 MODE_GIT = "git"         # git-клон — обновление через git
-MODE_FROZEN = "frozen"   # собранный .exe: только ссылка на страницу релиза
+MODE_FROZEN = "frozen"   # собранный .exe: обновление — установщиком из релиза (autoprintcode-update-*.exe)
+INSTALLER_RE = re.compile(r"^autoprintcode-update-.*\.exe$", re.IGNORECASE)
 
 
 class UpdateError(Exception):
@@ -176,6 +179,7 @@ class Release:
     zip_url: str
     published: str      # '2026-10-07'
     prerelease: bool = False
+    installer_url: str = ""   # лёгкий установщик для собранной версии (если приложен к релизу)
 
 
 def fetch_latest(include_prerelease: bool = False) -> Release | None:
@@ -187,11 +191,17 @@ def fetch_latest(include_prerelease: bool = False) -> Release | None:
         tag = r.get("tag_name", "")
         if parse_version(tag) is None:
             continue
+        setup = next((a.get("browser_download_url", "") for a in r.get("assets") or []
+                      if INSTALLER_RE.match(str(a.get("name", "")))), "")
         rels.append(Release(
             version=tag.lstrip("vV"), tag=tag, name=r.get("name") or tag, notes=r.get("body") or "",
             page_url=r.get("html_url") or f"{RELEASES_PAGE}/tag/{tag}",
             zip_url=f"https://github.com/{REPO}/archive/refs/tags/{tag}.zip",
-            published=(r.get("published_at") or "")[:10], prerelease=bool(r.get("prerelease"))))
+            published=(r.get("published_at") or "")[:10], prerelease=bool(r.get("prerelease")),
+            installer_url=setup))
+    if install_mode() == MODE_FROZEN:
+        # собранной версии нужен установщик: релизы без него и голые теги ей не подходят
+        return max((r for r in rels if r.installer_url), key=lambda r: parse_version(r.tag), default=None)
     if not rels:
         for t in _get_json(f"{API}/tags?per_page=50"):
             tag = t.get("name", "")
@@ -225,6 +235,43 @@ def download(rel: Release, progress: Callable[[int, int], None] | None = None,
     os.replace(part, dest)
     log.info("Скачано обновление %s: %d байт, sha256 %s", rel.version, dest.stat().st_size, _sha256(dest)[:16])
     return dest
+
+
+def download_installer(rel: Release, progress: Callable[[int, int], None] | None = None,
+                       cancelled: Callable[[], bool] = lambda: False) -> Path:
+    """Скачивает лёгкий установщик релиза (для собранной версии) в data/updates/."""
+    if not rel.installer_url:
+        raise UpdateError("К этой версии не приложен установщик обновления.")
+    UPDATES_DIR.mkdir(parents=True, exist_ok=True)
+    dest = UPDATES_DIR / f"autoprintcode-update-{rel.version}.exe"
+    part = dest.with_suffix(".exe.part")
+    with _request(rel.installer_url, timeout=30) as r, open(part, "wb") as f:
+        total = int(r.headers.get("Content-Length") or 0)
+        got = 0
+        while chunk := r.read(64 * 1024):
+            if cancelled():
+                f.close()
+                part.unlink(missing_ok=True)
+                raise Cancelled("Загрузка отменена.")
+            f.write(chunk)
+            got += len(chunk)
+            if progress:
+                progress(got, total)
+    os.replace(part, dest)
+    log.info("Скачан установщик обновления %s: %d байт", rel.version, dest.stat().st_size)
+    return dest
+
+
+def run_installer(setup: Path, version: str, relaunch: bool) -> None:
+    """Тихая установка обновления: установщик закрывает программу, ставит новую версию и, если relaunch,
+    запускает её (иначе — новая версия со следующего запуска). Данные (data/) не трогает."""
+    args = [str(setup), "/SILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/CLOSEAPPLICATIONS"]
+    if not relaunch:
+        args.append("/NORELAUNCH")
+    _write_last_update({"from": __version__, "to": version, "time": time.time()})
+    log.info("Запуск установщика обновления %s (перезапуск: %s)", version, relaunch)
+    flags = getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+    subprocess.Popen(args, creationflags=flags, close_fds=True)
 
 
 def _sha256(path: Path) -> str:

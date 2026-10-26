@@ -13,21 +13,22 @@ import { savedTheme, setTheme, type Theme } from "./theme.ts";
 
 const TAB_MIME = "application/x-autoprintcode-tab";
 
-const STATE: Record<EngineState, [string, string]> = {
-  idle: ["Готов", "#3b82f6"],
-  countdown: ["Отсчёт", "#a855f7"],
-  running: ["Печать", "#2ea043"],
-  paused: ["Пауза", "#d29922"],
-  finished: ["Готово", "#3b82f6"],
+// состояние: подпись, цвет полосы на значке, цветной кружок в начале заголовка — вкладку видно и на панели задач
+const STATE: Record<EngineState, [string, string, string]> = {
+  idle: ["Готов", "#3b82f6", "🔵"],
+  countdown: ["Отсчёт", "#c084fc", "🟣"],
+  running: ["Печать", "#22c55e", "🟢"],
+  paused: ["Пауза", "#f2b64b", "🟡"],
+  finished: ["Готово", "#3b82f6", "🔵"],
 };
 
-/** Значок вкладки — логотип, полоса которого окрашена по состоянию (как значок Python-версии в трее). */
+/** Значок вкладки — фирменный (фиолетовый, белый «</>»), полоса внизу окрашена по состоянию. */
 function faviconSvg(color: string): string {
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">` +
-    `<rect x="2" y="2" width="60" height="60" rx="12" fill="#1e2229"/>` +
-    `<rect x="2" y="50" width="60" height="12" rx="6" fill="${color}"/>` +
-    `<text x="32" y="33" font-family="Consolas,monospace" font-size="22" font-weight="bold" text-anchor="middle" ` +
-    `dominant-baseline="middle" fill="${color}">&lt;/&gt;</text></svg>`;
+    `<rect x="2" y="2" width="60" height="60" rx="12" fill="#8E4DFF"/>` +
+    `<rect x="2" y="48" width="60" height="14" rx="6" fill="${color}" stroke="white" stroke-width="2"/>` +
+    `<text x="32" y="30" font-family="Consolas,monospace" font-size="24" font-weight="bold" text-anchor="middle" ` +
+    `dominant-baseline="middle" fill="white">&lt;/&gt;</text></svg>`;
   return "data:image/svg+xml," + encodeURIComponent(svg);
 }
 
@@ -55,25 +56,37 @@ export function App() {
   const toasts = useApp((s) => s.toasts);
   const version = useApp((s) => s.version);
   const [showSettings, setShowSettings] = useState(false);
+  const [update, setUpdate] = useState<{ latest: string | null; installed: boolean; notes: string } | null>(null);
+  const [updating, setUpdating] = useState("");
   const [theme, setThemeState] = useState<Theme>(savedTheme);
   const [drag, setDrag] = useState<{ id: string; over: string; after: boolean } | null>(null);   // перетаскивание вкладки
   const [soundLocked, setSoundLocked] = useState(true);
   const fileInput = useRef<HTMLInputElement>(null);
   const [canInstall, setCanInstall] = useState(!!installEvent);
+  // обновления: при подключении к помощнику и раз в сутки (GitHub Releases, см. server/update.ts)
+  useEffect(() => {
+    if (!connected) return;
+    const check = () => fetch("/api/update").then((r) => r.json()).then(setUpdate, () => {});
+    check();
+    const id = setInterval(check, 24 * 3600 * 1000);
+    return () => clearInterval(id);
+  }, [connected]);
+
   useEffect(() => {
     const l = () => setCanInstall(!!installEvent);
     installListeners.add(l);
     return () => { installListeners.delete(l); };
   }, []);
 
-  const [stateText, stateColor] = STATE[engine.state];
+  const [stateText, stateColor, stateDot] = STATE[engine.state];
   const busy = engine.state === "running" || engine.state === "countdown";
 
   // заголовок вкладки начинается с метки — по ней помощник узнаёт окно браузера со страницей
   useEffect(() => {
-    document.title = `⌨ AutoPrintCode — ${engine.state === "countdown" && engine.countdown ? `старт через ${engine.countdown}` : stateText}`;
+    // в начале — цветной кружок состояния; метку «⌨ AutoPrintCode» помощник ищет в заголовке окна (не в начале)
+    document.title = `${stateDot} ⌨ AutoPrintCode — ${engine.state === "countdown" && engine.countdown ? `старт через ${engine.countdown}` : stateText}`;
     (document.getElementById("favicon") as HTMLLinkElement | null)?.setAttribute("href", faviconSvg(stateColor));
-  }, [stateText, engine.countdown]);
+  }, [stateText, stateDot, engine.countdown]);
 
   // звук разрешается после первого действия на странице
   useEffect(() => {
@@ -134,6 +147,18 @@ export function App() {
         // страницу помощник берёт с диска, а сам работает в памяти: после обновления он мог остаться старым
         <div className="banner">Помощник печати — версии {version}, а страница — {__APP_VERSION__}. Перезапустите
           помощника: нажмите ⏻ справа вверху и запустите <code>web\start.bat</code> (он и сам заменяет устаревшего).</div>
+      )}
+      {connected && update?.latest && (
+        <div className="banner info">
+          Доступна версия {update.latest}{update.notes ? ` — ${update.notes.split("\n")[0]}` : ""}.{" "}
+          {update.installed
+            ? (updating || <button className="btn primary" onClick={async () => {
+                setUpdating("Устанавливаю… помощник перезапустится, страница переподключится сама.");
+                const r = await fetch("/api/update/install", { method: "POST", headers: { "x-autoprint-update": "1" } });
+                if (!r.ok) setUpdating(`Не удалось: ${await r.text()}`);
+              }}>⬇ Установить</button>)
+            : "Обновите: git pull и перезапустите start.bat."}
+        </div>
       )}
       {connected && settings.sound_enabled && soundLocked && (
         <div className="banner info">Щёлкните в любом месте страницы, чтобы браузер разрешил звук клавиш.</div>
