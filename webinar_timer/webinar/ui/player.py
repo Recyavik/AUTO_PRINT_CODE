@@ -190,7 +190,7 @@ class PlayerPanel(_Remote):
         self.slider.sliderMoved.connect(self._on_slider_moved)
         self.slider.sliderReleased.connect(lambda: self.seek_to(self.slider.value()))
         self.volume.valueChanged.connect(self._on_volume)
-        self.volume.setValue(round(audio.volume() * 100) if audio is not None else 100)
+        self.volume.setValue(round(audio.volume() * 100))
         self._on_duration(player.duration())
         self._on_position(player.position())
         self._sync_play()
@@ -217,9 +217,8 @@ class PlayerPanel(_Remote):
         self.seek_to(self.player.position() + delta_ms)
 
     def toggle_mute(self) -> None:
-        if self.audio is not None:
-            self.audio.setMuted(not self.audio.isMuted())
-            self.mute_btn.setText("🔇" if self.audio.isMuted() else "🔊")
+        self.audio.setMuted(not self.audio.isMuted())
+        self.mute_btn.setText("🔇" if self.audio.isMuted() else "🔊")
 
     # ---- отображение
     def _sync_play(self) -> None:
@@ -243,8 +242,7 @@ class PlayerPanel(_Remote):
         self.time.setText(f"{fmt_ms(ms)} / {fmt_ms(self.player.duration())}")
 
     def _on_volume(self, v: int) -> None:
-        if self.audio is not None:
-            self.audio.setVolume(v / 100)
+        self.audio.setVolume(v / 100)
 
 
 class BreakPanel(_Remote):

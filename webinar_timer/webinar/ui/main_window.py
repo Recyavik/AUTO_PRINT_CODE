@@ -12,14 +12,16 @@ from PySide6.QtGui import QAction, QColor, QFontMetrics, QIcon, QPainter, QPen, 
 from PySide6.QtWidgets import (QFileDialog, QFrame, QGridLayout, QHBoxLayout, QInputDialog, QLabel, QListWidget,
                                QListWidgetItem, QMainWindow, QMenu, QMessageBox, QProgressBar, QPushButton,
                                QScrollArea, QSpinBox, QSystemTrayIcon, QTimeEdit, QVBoxLayout, QWidget)
+from shiboken6 import isValid
 
 from .. import APP_NAME, __version__
-from ..model import DEMO_NONE, DEMO_ON, DEMO_TEXT, Activity, Plan, Segment, State, default_plan, fmt_left, parse_time, plan_from, \
-    plan_to
+from ..model import DEMO_NONE, DEMO_ON, DEMO_TEXT, Activity, Plan, Segment, State, default_plan, fmt_left, lessons, \
+    parse_time, plan_from, plan_to
 from ..scheduler import Scheduler
-from ..store import PlanStore, Settings, existing
+from ..store import TEMPLATES_DIR, PlanStore, Settings, existing
 from . import screens, style
 from .editor import PlanEditor
+from .lessons import LessonPanel, TimelineBar
 from .notify import Notifier, parse_pos
 from .overlay import BreakOverlay, MediaOverlay
 from .player import BreakPanel, PlayerPanel
@@ -145,7 +147,9 @@ class MainWindow(QMainWindow):
         self.media: MediaOverlay | None = None        # видео/картинка активности на экране демонстрации
         self.player_panel: PlayerPanel | None = None  # пульт этого видео на мониторе управления
         self.break_panel: BreakPanel | None = None    # пульт перерыва (вместо карточки с отсчётом)
+        self._break_index = -1                        # какой блок-перерыв сейчас на заставке (-1 — вне расписания)
         self.rows: list[AgendaRow] = []
+        self.lesson_panels: list[LessonPanel] = []
         self._quitting = False
         self._last_index = -2
 
@@ -157,7 +161,9 @@ class MainWindow(QMainWindow):
         self.scheduler.break_started.connect(self._show_break)
         self.scheduler.finished.connect(self._on_finished)
         self.notifier = Notifier(lambda: screens.control_screen(self.settings), clock)
-        self.notifier.on_hide_break = self._hide_break
+        # перерыв уже идёт — у ведущего его пульт, карточка «сейчас» не нужна (и после «⏰ 1 мин» тоже)
+        self.notifier.accepts = lambda seg, heads_up: not (seg.activity.breaks and not heads_up
+                                                           and self.break_panel is not None)
         self.notifier.anchor = parse_pos(settings.note_pos)
         self.notifier.on_moved = self._save_note_pos
         self.notifier.on_next = self._start_activity
@@ -191,11 +197,15 @@ class MainWindow(QMainWindow):
         for w in (self.today, self.clock_lbl, self.status, gear):
             head.addWidget(w)
         outer.addLayout(head)
-        self.overall = QProgressBar()
-        self.overall.setTextVisible(False)
-        self.overall.setRange(0, 1000)
-        self.overall.setFixedHeight(5)
-        outer.addWidget(self.overall)
+        # весь эфир: уроки и перерывы в масштабе времени, рядом — сколько прошло и сколько осталось
+        line = QHBoxLayout()
+        line.setSpacing(12)
+        self.overall = TimelineBar()
+        self.overall_lbl = QLabel(objectName="muted")
+        self.overall_lbl.setStyleSheet("font-size: 10pt; font-weight: 600;")
+        line.addWidget(self.overall, 1)
+        line.addWidget(self.overall_lbl)
+        outer.addLayout(line)
 
         body = QHBoxLayout()
         body.setSpacing(14)
@@ -369,7 +379,11 @@ class MainWindow(QMainWindow):
         self._rebuild_agenda()
 
     def _save_plans(self, select: str = "") -> None:
-        self.store.save()
+        try:
+            self.store.save()
+        except OSError as e:
+            log.error("Шаблоны не сохранены: %s", e)
+            QMessageBox.warning(self, APP_NAME, f"Шаблоны не сохранены: {e}")
         self._fill_plans(select)
 
     def new_plan(self) -> None:
@@ -385,8 +399,10 @@ class MainWindow(QMainWindow):
         p = self.current_plan()
         if p is None:
             return
-        dlg = PlanEditor(p, self)
-        if dlg.exec() and dlg.result_plan:
+        dlg = PlanEditor(p, self, self.settings.lesson_min, self.settings.manual_break_min)
+        ok = dlg.exec() and dlg.result_plan
+        dlg.deleteLater()
+        if ok:
             i = self.store.plans.index(p)
             self.store.plans[i] = dlg.result_plan
             self._save_plans(dlg.result_plan.id)
@@ -409,7 +425,7 @@ class MainWindow(QMainWindow):
             self._save_plans()
 
     def import_plan(self) -> None:
-        path, _ = QFileDialog.getOpenFileName(self, "Импорт шаблона", "", "JSON (*.json)")
+        path, _ = QFileDialog.getOpenFileName(self, "Импорт шаблона", str(TEMPLATES_DIR), "JSON (*.json)")
         if not path:
             return
         try:
@@ -426,9 +442,14 @@ class MainWindow(QMainWindow):
         p = self.current_plan()
         if p is None:
             return
-        path, _ = QFileDialog.getSaveFileName(self, "Экспорт шаблона", f"{p.title}.json", "JSON (*.json)")
+        # по умолчанию — в templates/: оттуда шаблоны получают коллеги вместе с папкой программы
+        path, _ = QFileDialog.getSaveFileName(self, "Экспорт шаблона", str(TEMPLATES_DIR / f"{p.title}.json"),
+                                              "JSON (*.json)")
         if path:
-            Path(path).write_text(json.dumps(plan_to(p), ensure_ascii=False, indent=2), encoding="utf-8")
+            try:
+                Path(path).write_text(json.dumps(plan_to(p), ensure_ascii=False, indent=2), encoding="utf-8")
+            except OSError as e:
+                QMessageBox.warning(self, "Экспорт", f"Не получилось: {e}")
 
     # ================================================================ эфир
     def _on_run(self, on: bool) -> None:
@@ -450,8 +471,7 @@ class MainWindow(QMainWindow):
         self.settings.save()
 
     def _remind(self, seg: Segment, heads_up: bool) -> None:
-        if not (seg.activity.breaks and not heads_up and self.break_panel is not None):
-            self.notifier.show(seg, heads_up)      # перерыв уже идёт — у ведущего его пульт, карточка не нужна
+        self.notifier.show(seg, heads_up)
         if self.settings.sound:
             _sound()
         if self.settings.windows_toast:
@@ -465,7 +485,10 @@ class MainWindow(QMainWindow):
         return existing(a.media) or (existing(self.settings.eyes_media) if a.kind == "eyes" else "")
 
     def _show_break(self, seg: Segment) -> None:
+        if self.overlay is not None and seg.index >= 0 and self._break_index == seg.index:
+            return      # этот перерыв уже на экране (начали заранее — «Далее ▶»): пауза и ±мин ведущего остаются
         self._hide_demo()
+        self._break_index = seg.index
         image = existing(seg.activity.media) or existing(self.settings.break_image)
         self.overlay = BreakOverlay(screens.demo_screen(self.settings), seg.end, self.clock, image, seg.activity.name)
         o = self.overlay
@@ -481,7 +504,7 @@ class MainWindow(QMainWindow):
             self.notifier.close(c)
         panel = BreakPanel(o, screens.control_screen(self.settings), parse_pos(self.settings.player_pos))
         self.break_panel = panel
-        panel.stop_requested.connect(lambda: self.overlay is o and self._hide_break())
+        panel.stop_requested.connect(lambda: self._remove_from_demo(o, "перерыв"))
         panel.dropped.connect(self._save_player_pos)
         o.closed.connect(panel.close)            # заставку убрали — пульт уходит вместе с ней
         panel.destroyed.connect(lambda: self.break_panel is panel and setattr(self, "break_panel", None))
@@ -516,7 +539,7 @@ class MainWindow(QMainWindow):
         panel = PlayerPanel(m.player, m.audio, title, screens.control_screen(self.settings),
                             parse_pos(self.settings.player_pos))
         self.player_panel = panel
-        panel.stop_requested.connect(lambda: self.media is m and self._hide_demo())
+        panel.stop_requested.connect(lambda: self._remove_from_demo(m, "видео"))
         panel.dropped.connect(self._save_player_pos)
         m.closed.connect(panel.close)            # видео кончилось или его убрали — пульт уходит вместе с ним
         panel.destroyed.connect(lambda: self.player_panel is panel and setattr(self, "player_panel", None))
@@ -584,21 +607,30 @@ class MainWindow(QMainWindow):
             if btn.text() != text:
                 btn.setText(text)
 
+    def _remove_from_demo(self, w, what: str) -> None:
+        """«Убрать» на пульте: закрыть именно ту заставку или видео, к которому пульт относится
+        (не полагаясь на то, что окно таймера считает показанным сейчас)."""
+        log.info("Пульт: «Убрать» (%s)", what)
+        if isValid(w):
+            w.close()                    # closed → пульт закроется сам, ссылка в окне таймера обнулится
+        if self.overlay is w:
+            self.overlay = None
+        if self.media is w:
+            self.media = None
+        self._sync_break_btn()
+
     def _hide_break(self) -> None:
         if self.overlay is not None:
             o, self.overlay = self.overlay, None
             o.close()
-        for c in [c for c in self.notifier.cards if c.seg.index == -1]:
-            self.notifier.close(c)       # карточка перерыва «вне расписания» уходит вместе с заставкой
         self._sync_break_btn()
 
     def _hide_demo(self) -> None:
         """Убрать с экрана демонстрации всё наше: заставку перерыва и файл активности."""
-        self._hide_break()
         if self.media is not None:
             m, self.media = self.media, None
             m.close()
-        self._sync_break_btn()
+        self._hide_break()
 
     def _on_finished(self) -> None:
         log.info("Эфир завершён по расписанию")
@@ -610,10 +642,27 @@ class MainWindow(QMainWindow):
             if w:
                 w.setParent(None)        # убрать сразу: иначе старые строки мелькают поверх новых до удаления
                 w.deleteLater()
-        self.rows = [AgendaRow(s) for s in self.scheduler.segs]
-        for r in self.rows:
-            self.agenda_lay.addWidget(r)
+        segs = self.scheduler.segs
+        self.rows = [AgendaRow(s) for s in segs]
+        # каждый урок — своя панель с заголовком; перерывы — между панелями
+        self.lesson_panels = []
+        panel = None
+        for s, r in zip(segs, self.rows, strict=True):
+            if s.activity.breaks:
+                panel = None
+                self.agenda_lay.addWidget(r)
+                continue
+            if panel is None:
+                group = next(g for g in lessons(segs) if g[0] is s)
+                plan = self.scheduler.plan
+                limit = plan.lesson_min if plan.lesson_min is not None else self.settings.lesson_min
+                n = len(self.lesson_panels)
+                panel = LessonPanel(n + 1, group, limit, plan.lesson_name(n))
+                self.lesson_panels.append(panel)
+                self.agenda_lay.addWidget(panel)
+            panel.add_row(r)
         self.agenda_lay.addStretch(1)
+        self.overall.set_segments(segs, self.scheduler.plan.lesson_names)
         self._last_index = -2
         self._on_tick(self.scheduler.state())
 
@@ -625,7 +674,23 @@ class MainWindow(QMainWindow):
         segs = self.scheduler.segs
         if not segs:
             return
-        self.overall.setValue(int(st.overall * 1000))
+        if segs[0].start.date() != now.date() and not self.run_btn.isChecked():
+            self._apply_plan()           # наступил новый день (таймер ночевал в трее) — повестка на сегодня
+            return
+        self.overall.set_now(now)
+        begin, end = segs[0].start, segs[-1].end
+        if now < begin:
+            text = f"до начала {fmt_left(begin - now)} · всего {fmt_left(end - begin)}"
+        elif now < end:
+            passed = timedelta(seconds=int((now - begin).total_seconds()))   # прошедшее — вниз, до целых секунд
+            text = f"прошло {fmt_left(passed)} · осталось {fmt_left(end - now)}"
+        else:
+            text = f"всего {fmt_left(end - begin)} · {begin:%H:%M}–{end:%H:%M}"
+        if self.overall_lbl.text() != text:
+            self.overall_lbl.setText(text)
+        for p in self.lesson_panels:
+            p.set_state("now" if st.index >= 0 and p.contains(st.index) else
+                        ("past" if now >= p.segs[-1].end else ""))
         running = self.run_btn.isChecked()
         for i, r in enumerate(self.rows):
             mode = "now" if i == st.index else ("past" if now >= r.seg.end else
@@ -636,7 +701,7 @@ class MainWindow(QMainWindow):
                 r.set_mode(mode)
         if st.index != self._last_index:
             self._last_index = st.index
-            if st.index >= 0:
+            if 0 <= st.index < len(self.rows):   # повестка могла ещё не успеть перестроиться под новый шаблон
                 self.agenda_scroll.ensureWidgetVisible(self.rows[st.index], 0, 60)
 
         if st.phase == "before":
@@ -679,15 +744,21 @@ class MainWindow(QMainWindow):
 
     # ================================================================ окно и выход
     def open_settings(self) -> None:
+        before = copy.deepcopy(self.settings)
         dlg = SettingsDialog(self.settings, self)
-        if dlg.exec():
+        ok = dlg.exec()
+        dlg.deleteLater()
+        if ok:
+            # только то, что поменяли в окне: карточки и пульт могли передвинуть, пока оно было открыто
             new = dlg.result_settings()
             for k, v in vars(new).items():
-                setattr(self.settings, k, v)
+                if v != getattr(before, k):
+                    setattr(self.settings, k, v)
             self.scheduler.heads_up_min = self.settings.heads_up_min
             self.settings.save()
             self.notifier.anchor = parse_pos(self.settings.note_pos)
             self.notifier.layout()
+            self._rebuild_agenda()               # продолжительность урока — в заголовках панелей
 
     def _show(self) -> None:
         self.showNormal()

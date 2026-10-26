@@ -58,7 +58,13 @@ class Plan:
     start: str = "11:00"
     schedule: list[Activity] = field(default_factory=list)
     id: str = field(default_factory=new_id)
-    part_min: int = 45      # предел части занятия (до перерыва, между перерывами, после); 0 — без предела
+    part_min: int = 45      # действующий предел урока (до перерыва, между перерывами, после); 0 — без предела
+    lesson_min: int | None = None   # своя продолжительность урока у шаблона; None — как в настройках
+    lesson_names: list[str] = field(default_factory=list)   # названия уроков по порядку; пусто — «Урок N»
+
+    def lesson_name(self, i: int) -> str:
+        """Название урока i (с 0); пусто, если не задано."""
+        return self.lesson_names[i] if 0 <= i < len(self.lesson_names) else ""
 
     @property
     def total_min(self) -> int:
@@ -144,10 +150,15 @@ def plan_from(d: dict, title: str = "Вебинар") -> Plan:
     schedule = [activity_from(a, i) for i, a in enumerate(d["schedule"])]
     if not schedule:
         raise ValueError("Расписание пустое")
-    part = d.get("part_min", 45)
-    part_min = int(part) if isinstance(part, (int, float)) and not isinstance(part, bool) and part >= 0 else 45
+    def minutes(v) -> int | None:
+        return int(v) if isinstance(v, (int, float)) and not isinstance(v, bool) and v >= 0 else None
+
+    part_min = minutes(d.get("part_min"))
+    names = d.get("lessons")
+    names = [str(n).strip() for n in names] if isinstance(names, list) else []
     return Plan(str(d.get("title") or title).strip() or title, f"{h:02d}:{m:02d}", schedule,
-                str(d.get("id") or new_id()), part_min)
+                str(d.get("id") or new_id()), 45 if part_min is None else part_min, minutes(d.get("lesson_min")),
+                names)
 
 
 def activity_to(a: Activity) -> dict:
@@ -162,8 +173,16 @@ def activity_to(a: Activity) -> dict:
 
 
 def plan_to(p: Plan) -> dict:
-    return {"id": p.id, "title": p.title, "start": p.start, "part_min": p.part_min,
-            "schedule": [activity_to(a) for a in p.schedule]}
+    d = {"id": p.id, "title": p.title, "start": p.start, "part_min": p.part_min,
+         "schedule": [activity_to(a) for a in p.schedule]}
+    if p.lesson_min is not None:
+        d["lesson_min"] = p.lesson_min
+    names = list(p.lesson_names)
+    while names and not names[-1]:
+        names.pop()
+    if names:
+        d["lessons"] = names
+    return d
 
 
 # ---------------------------------------------------------------- расчёт повестки
@@ -182,7 +201,6 @@ class State:
     index: int                       # текущий блок (-1 — вне эфира)
     remaining: timedelta             # до конца блока (before — до начала эфира)
     progress: float                  # доля текущего блока (0…1)
-    overall: float                   # доля всего эфира (0…1)
 
 
 def segments(plan: Plan, day: date) -> list[Segment]:
@@ -196,17 +214,60 @@ def segments(plan: Plan, day: date) -> list[Segment]:
     return out
 
 
+def split_lessons(schedule: list[Activity]) -> tuple[list[list[Activity]], list[list[Activity]]]:
+    """Расписание → (уроки, перерывы вокруг них). Перерывов на один набор больше: до первого урока,
+    между уроками и после последнего (наборы бывают пустыми)."""
+    groups: list[list[Activity]] = []
+    seps: list[list[Activity]] = [[]]
+    cur: list[Activity] | None = None
+    for a in schedule:
+        if a.breaks:
+            if cur is not None:
+                groups.append(cur)
+                cur = None
+                seps.append([])
+            seps[-1].append(a)
+        else:
+            if cur is None:
+                cur = []
+            cur.append(a)
+    if cur is not None:
+        groups.append(cur)
+        seps.append([])
+    return groups, seps
+
+
+def reorder_lessons(schedule: list[Activity], order: list[int]) -> list[Activity]:
+    """Уроки целиком (все их блоки) в новом порядке order; перерывы остаются на своих местах."""
+    groups, seps = split_lessons(schedule)
+    if sorted(order) != list(range(len(groups))):
+        raise ValueError("Порядок уроков: нужна перестановка всех уроков")
+    out = list(seps[0])
+    for k, i in enumerate(order):
+        out += groups[i] + seps[k + 1]
+    return out
+
+
+def lessons(segs: list[Segment]) -> list[list[Segment]]:
+    """Уроки: подряд идущие блоки между перерывами (сами перерывы не входят)."""
+    out: list[list[Segment]] = [[]]
+    for s in segs:
+        if s.activity.breaks:
+            out.append([])
+        else:
+            out[-1].append(s)
+    return [x for x in out if x]
+
+
 def state_at(segs: list[Segment], now: datetime) -> State:
     if not segs:
-        return State("after", -1, timedelta(0), 0.0, 0.0)
-    begin, end = segs[0].start, segs[-1].end
-    overall = min(1.0, max(0.0, (now - begin) / (end - begin)))
-    if now < begin:
-        return State("before", -1, begin - now, 0.0, 0.0)
+        return State("after", -1, timedelta(0), 0.0)
+    if now < segs[0].start:
+        return State("before", -1, segs[0].start - now, 0.0)
     for s in segs:
         if s.start <= now < s.end:
-            return State("running", s.index, s.end - now, (now - s.start) / (s.end - s.start), overall)
-    return State("after", -1, timedelta(0), 1.0, 1.0)
+            return State("running", s.index, s.end - now, (now - s.start) / (s.end - s.start))
+    return State("after", -1, timedelta(0), 1.0)
 
 
 def fmt_left(td: timedelta) -> str:

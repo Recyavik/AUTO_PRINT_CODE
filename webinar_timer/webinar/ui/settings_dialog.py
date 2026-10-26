@@ -6,14 +6,15 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from PySide6.QtCore import Qt
-from shiboken6 import isValid
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QFileDialog, QFormLayout, QHBoxLayout, QLabel,
                                QLineEdit, QPushButton, QSpinBox, QVBoxLayout)
+from shiboken6 import isValid
 
 from ..model import DEMO_OFF, Activity, Segment
 from ..store import MEDIA_DIR, Settings, existing, portable, resolve
 from . import screens
 from .editor import finish_on_enter
+from .lessons import LessonLengthEdit
 from .notify import Notifier, parse_pos
 from .overlay import BreakOverlay
 
@@ -53,7 +54,7 @@ class SettingsDialog(QDialog):
         test_break = QPushButton("Проба заставки (10 с)")
         test_break.clicked.connect(self._test_break)
         reset = QPushButton("Сбросить позиции напоминаний и пульта")
-        reset.setToolTip("Напоминания — снова в правом верхнем углу монитора управления, пульт видео — внизу по центру")
+        reset.setToolTip("Напоминания — снова в правом верхнем углу монитора управления, пульты видео и перерыва — внизу по центру")
         reset.clicked.connect(self._reset_pos)
         for b in (ident, test_note, test_break):
             probe.addWidget(b)
@@ -66,6 +67,12 @@ class SettingsDialog(QDialog):
         self.eyes = self._file_row(form, "Гимнастика для глаз:", self.s.eyes_media,
                                    "видео или картинка — по «Далее» в напоминании о зарядке",
                                    "Видео и картинки (*.mp4 *.mov *.avi *.mkv *.webm *.wmv *.m4v *.png *.jpg *.jpeg)")
+
+        self.lesson = LessonLengthEdit()
+        self.lesson.setValue(self.s.lesson_min)
+        self.lesson.setToolTip("Предел каждой части занятия: до перерыва и после него (академический час — 45 мин).<br>"
+                               "В редакторе шаблона минуты блока нельзя увеличить сверх него. Для всех шаблонов, у которых не задана своя.")
+        form.addRow("Продолжительность урока:", self.lesson)
 
         self.heads = QSpinBox()
         self.heads.setRange(0, 15)
@@ -132,6 +139,7 @@ class SettingsDialog(QDialog):
         s.break_image = self.image.text().strip()
         s.eyes_media = self.eyes.text().strip()
         s.heads_up_min = self.heads.value()
+        s.lesson_min = self.lesson.value()
         s.sound = self.sound.isChecked()
         s.windows_toast = self.toast.isChecked()
         return s

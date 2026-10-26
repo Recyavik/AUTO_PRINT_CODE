@@ -3,6 +3,7 @@
 Папка webinar_timer самодостаточна — её можно скопировать целиком:
     data/   шаблоны, настройки, журнал
     media/  фон перерыва, видео гимнастики, шрифт Furore
+    templates/  шаблоны в JSON (экспорт) — их получает новая установка, пока своих шаблонов нет
 Пути к файлам из media/ хранятся относительно папки приложения («media/Фон.jpg»).
 Запись — через временный файл с fsync и резервной копией plans.json.bak.
 """
@@ -12,14 +13,17 @@ import json
 import logging
 import os
 import shutil
+import sys
 import time
 from dataclasses import asdict, dataclass, fields
 from pathlib import Path
 
 from .model import Plan, default_plan, plan_from, plan_to
 
-APP_DIR = Path(__file__).resolve().parent.parent       # webinar_timer/
+# папка программы: рядом с «Таймер вебинара.exe» (собранная версия) или webinar_timer/ (из исходников)
+APP_DIR = Path(sys.executable).parent if getattr(sys, "frozen", False) else Path(__file__).resolve().parent.parent
 MEDIA_DIR = APP_DIR / "media"
+TEMPLATES_DIR = APP_DIR / "templates"                  # шаблоны для коллег: с них начинается новая установка
 # WEBINAR_DATA — другая папка (для тестов, чтобы не трогать рабочие шаблоны)
 DATA_DIR = Path(os.environ.get("WEBINAR_DATA") or APP_DIR / "data")
 PLANS_FILE = DATA_DIR / "plans.json"
@@ -52,6 +56,17 @@ def existing(path: str) -> str:
     return full if full and Path(full).is_file() else ""
 
 
+def _quarantine(path: Path) -> str:
+    """Нечитаемый файл — в сторону (plans.json.broken-ДАТА): иначе следующее сохранение затёрло бы им копию .bak."""
+    keep = path.with_name(f"{path.name}.broken-{time.strftime('%Y%m%d-%H%M%S')}")
+    try:
+        path.replace(keep)
+    except OSError as e:
+        log.warning("Не удалось отложить %s: %s", path, e)
+        return ""
+    return f"; он сохранён как {keep.name}"
+
+
 def _atomic_write(path: Path, data: dict, backup: bool = False) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(path.suffix + ".tmp")
@@ -74,9 +89,11 @@ class Settings:
     break_image: str = "media/Фон.jpg"                 # фон заставки перерыва; нет файла — встроенный фон
     eyes_media: str = "media/Гимнастика для глаз.mp4"  # видео/картинка «Зарядки для глаз» (если у блока нет своего)
     heads_up_min: int = 1          # предупреждать за N минут до активности (0 — не предупреждать)
+    lesson_min: int = 45           # продолжительность урока — предел части до перерыва и после (0 — без предела)
     manual_break_min: int = 10     # «Перерыв сейчас» — длительность по умолчанию
     note_pos: str = ""             # куда перетащили напоминания: «x,y» от угла монитора управления; пусто — справа вверху
-    player_pos: str = ""           # куда перетащили пульт видео: «x,y» от угла монитора управления; пусто — внизу по центру
+    player_pos: str = ""           # куда перетащили пульты (видео и перерыва): «x,y» от угла монитора управления;
+                                   # пусто — внизу по центру
     sound: bool = True             # звук уведомления
     windows_toast: bool = False    # дублировать всплывающим уведомлением Windows (оно на основном мониторе!)
     current_plan: str = ""
@@ -98,7 +115,24 @@ class Settings:
         return s
 
     def save(self) -> None:
-        _atomic_write(SETTINGS_FILE, asdict(self))
+        try:
+            _atomic_write(SETTINGS_FILE, asdict(self))
+        except OSError as e:          # настройки (место окна, мониторы) — не повод прерывать эфир
+            log.error("Настройки не сохранены: %s", e)
+
+
+def starter_plans() -> list[Plan]:
+    """Шаблоны из папки templates/ (по алфавиту) — для первого запуска на новом компьютере."""
+    plans: list[Plan] = []
+    for path in sorted(TEMPLATES_DIR.glob("*.json")):
+        try:
+            p = plan_from(json.loads(path.read_text(encoding="utf-8-sig")), path.stem)
+        except (OSError, ValueError, AttributeError, TypeError) as e:
+            log.warning("Шаблон %s не читается: %s", path.name, e)
+            continue
+        if all(p.id != q.id for q in plans):
+            plans.append(p)
+    return plans
 
 
 class PlanStore:
@@ -108,22 +142,28 @@ class PlanStore:
         self.load()
 
     def load(self) -> None:
+        problem = ""
         for path in (PLANS_FILE, PLANS_FILE.with_suffix(".json.bak")):
             try:
                 raw = json.loads(path.read_text(encoding="utf-8-sig"))
                 self.plans = [plan_from(p) for p in raw.get("plans", [])]
             except FileNotFoundError:
+                problem = problem or f"{path.name} не найден"
                 continue
             except (OSError, ValueError, AttributeError, TypeError) as e:
-                self.warning = f"{path.name} не читается ({e})"
-                log.warning(self.warning)
+                problem = problem or f"{path.name} не читается ({e}){_quarantine(path)}"
+                log.warning(problem)
+                continue
+            if not self.plans:
+                problem = problem or f"в {path.name} нет шаблонов"
                 continue
             if path != PLANS_FILE:
-                self.warning = (self.warning or f"{PLANS_FILE.name} не найден") + \
-                    ". Шаблоны восстановлены из резервной копии."
-            if self.plans:
-                return
-        self.plans = [default_plan()]
+                self.warning = f"{problem}. Шаблоны восстановлены из резервной копии."
+            return
+        if problem.startswith(PLANS_FILE.name + " не найден") or problem.startswith(f"в {PLANS_FILE.name}"):
+            problem = ""             # первый запуск — это не ошибка
+        self.warning = problem
+        self.plans = starter_plans() or [default_plan()]
         if not self.warning:
             self.save()
 

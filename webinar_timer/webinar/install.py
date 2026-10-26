@@ -20,11 +20,10 @@ SHORTCUT_NAME = "Таймер вебинара.lnk"
 def make_icon_file() -> None:
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")   # без окон: только нарисовать значок
     from PySide6.QtWidgets import QApplication
-    app = QApplication.instance() or QApplication([])
+    _app = QApplication.instance() or QApplication([])     # нужен, чтобы рисовать значок
     from webinar.ui.main_window import make_icon
     if not make_icon().pixmap(256).save(str(ICON), "ICO"):
         raise SystemExit("Не удалось сохранить значок")
-    del app
 
 
 def desktop_dir() -> Path:

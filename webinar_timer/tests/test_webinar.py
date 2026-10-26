@@ -4,6 +4,7 @@
 """
 from __future__ import annotations
 
+import copy
 import json
 import os
 import sys
@@ -87,6 +88,38 @@ PLAN = Plan("Тест", "11:00", [Activity("Приветствие", DEMO_ON, 2)
                               Activity("Выводы", DEMO_OFF, 2)])
 
 
+class LessonsTest(unittest.TestCase):
+    def test_lessons_split_by_breaks(self):
+        from webinar.model import lessons
+        segs = segments(PLAN, DAY)
+        got = [[x.activity.name for x in g] for g in lessons(segs)]
+        self.assertEqual(got, [["Приветствие", "Зарядка", "ПРЕЗЕНТАЦИЯ"], ["Выводы"]])
+        self.assertEqual(lessons([]), [])
+
+    def test_reorder_lessons_keeps_breaks_in_place(self):
+        from webinar.model import reorder_lessons, split_lessons
+        A = lambda n, m=5: Activity(n, DEMO_ON, m)                       # noqa: E731
+        B = lambda: Activity("ПЕРЕРЫВ", DEMO_NONE, 10, is_break=True)    # noqa: E731
+        sched = [A("a1"), A("a2"), B(), A("b1"), B(), A("c1"), A("c2")]
+        groups, seps = split_lessons(sched)
+        self.assertEqual([[x.name for x in g] for g in groups], [["a1", "a2"], ["b1"], ["c1", "c2"]])
+        self.assertEqual([len(x) for x in seps], [0, 1, 1, 0])
+        out = reorder_lessons(sched, [2, 0, 1])
+        self.assertEqual([x.name for x in out], ["c1", "c2", "ПЕРЕРЫВ", "a1", "a2", "ПЕРЕРЫВ", "b1"])
+        lead = [B(), A("x"), B(), A("y"), B()]                             # перерывы в начале и в конце
+        self.assertEqual([x.name for x in reorder_lessons(lead, [1, 0])], ["ПЕРЕРЫВ", "y", "ПЕРЕРЫВ", "x", "ПЕРЕРЫВ"])
+        with self.assertRaises(ValueError):
+            reorder_lessons(sched, [0, 0, 1])
+
+    def test_own_lesson_length_in_template_json(self):
+        p = plan_from({"start": "11:00", "lesson_min": 90, "schedule": [{"name": "a", "min": 1}]})
+        self.assertEqual(p.lesson_min, 90)
+        self.assertEqual(plan_from(plan_to(p)).lesson_min, 90)
+        q = plan_from({"start": "11:00", "schedule": [{"name": "a", "min": 1}]})
+        self.assertIsNone(q.lesson_min, "нет поля — как в настройках")
+        self.assertNotIn("lesson_min", plan_to(q))
+
+
 class SchedulerTest(unittest.TestCase):
     def make(self, t: datetime):
         clock = FakeClock(t)
@@ -95,7 +128,6 @@ class SchedulerTest(unittest.TestCase):
         s.heads_up.connect(lambda seg: events.append(("head", seg.activity.name)))
         s.block_started.connect(lambda seg: events.append(("start", seg.activity.name)))
         s.break_started.connect(lambda seg: events.append(("break+", seg.activity.name)))
-        s.break_ended.connect(lambda seg: events.append(("break-", seg.activity.name)))
         s.finished.connect(lambda: events.append(("finished", "")))
         s.set_plan(PLAN, DAY)
         return s, clock, events
@@ -113,7 +145,7 @@ class SchedulerTest(unittest.TestCase):
             ("head", "Зарядка"), ("start", "Зарядка"),            # за минуту и в начале
             ("head", "ПЕРЕРЫВ"), ("break+", "ПЕРЕРЫВ"), ("start", "ПЕРЕРЫВ"),
             ("head", "Выводы"),                                   # за минуту до конца перерыва — пора возвращаться
-            ("break-", "ПЕРЕРЫВ"), ("start", "Выводы"),           # конец перерыва — начало «Выводов»
+            ("start", "Выводы"),                                  # конец перерыва — начало «Выводов»
             ("finished", ""),
         ], "о приветствии и презентации не напоминаем; каждое событие — один раз")
 
@@ -127,14 +159,26 @@ class SchedulerTest(unittest.TestCase):
         s.start()
         self.assertEqual(events, [("break+", "ПЕРЕРЫВ"), ("start", "ПЕРЕРЫВ")], "о прошлых блоках — ничего")
 
-    def test_stop_hides_break(self):
+    def test_stop_silences(self):
         s, clock, events = self.make(at("11:11"))
         s.start()
         s.stop()
-        self.assertEqual(events[-1], ("break-", "ПЕРЕРЫВ"))
         events.clear()
         self.walk(s, clock, at("11:20"))
         self.assertEqual(events, [], "после остановки — тишина")
+
+    def test_replan_same_template_does_not_repeat_events(self):
+        """Во время эфира поменяли время старта или сохранили тот же шаблон — уже отправленное не повторяется
+        (иначе — второе напоминание и пересозданная заставка перерыва: пауза и ±мин ведущего терялись)."""
+        s, clock, events = self.make(at("11:11"))          # идёт перерыв
+        s.start()
+        self.assertEqual(events, [("break+", "ПЕРЕРЫВ"), ("start", "ПЕРЕРЫВ")])
+        s.set_plan(PLAN, DAY)                               # тот же шаблон — пересчёт
+        s.start()                                           # окно включает эфир снова — он уже идёт
+        self.assertEqual(len(events), 2, "ничего не повторилось")
+        other = Plan("Другой", "11:00", [Activity("ПЕРЕРЫВ", DEMO_NONE, 30)])
+        s.set_plan(other, DAY)                              # другой шаблон — с чистого листа
+        self.assertEqual(events[-2:], [("break+", "ПЕРЕРЫВ"), ("start", "ПЕРЕРЫВ")])
 
     def test_heads_up_off(self):
         s, clock, events = self.make(at("10:58"))
@@ -164,6 +208,34 @@ class StoreTest(unittest.TestCase):
     def setUp(self):
         for f in wstore.DATA_DIR.glob("plans*"):
             f.unlink()
+        self._templates = wstore.TEMPLATES_DIR
+        wstore.TEMPLATES_DIR = Path(tempfile.mkdtemp(prefix="webinar-templates-"))   # пустая — встроенный пример
+
+    def tearDown(self):
+        wstore.TEMPLATES_DIR = self._templates
+
+    def test_first_run_takes_templates_folder(self):
+        """Новая установка получает шаблоны из templates/; битый файл и повтор id пропускаются."""
+        d = wstore.TEMPLATES_DIR
+        a = {"id": "a1", "title": "Вторая пара", "start": "13:00", "schedule": [{"name": "Код", "min": 40}]}
+        (d / "2 вторая.json").write_text(json.dumps(a, ensure_ascii=False), encoding="utf-8")
+        (d / "1 первая.json").write_text(json.dumps({**a, "id": "b2", "title": "Первая пара"}, ensure_ascii=False),
+                                         encoding="utf-8")
+        (d / "3 копия.json").write_text(json.dumps(a), encoding="utf-8")
+        (d / "4 битый.json").write_text("{не json", encoding="utf-8")
+        st = wstore.PlanStore()
+        self.assertEqual([p.title for p in st.plans], ["Первая пара", "Вторая пара"])
+        self.assertTrue(wstore.PLANS_FILE.exists(), "сразу сохранены как свои")
+        (d / "5 новый.json").write_text(json.dumps({**a, "id": "c3", "title": "Новый"}), encoding="utf-8")
+        self.assertEqual(len(wstore.PlanStore().plans), 2, "свои шаблоны уже есть — папку больше не читаем")
+
+    def test_shipped_templates_are_valid(self):
+        """Шаблоны, которые едут с программой, читаются и укладываются в урок 45 мин."""
+        files = sorted(self._templates.glob("*.json"))
+        for f in files:
+            p = plan_from(json.loads(f.read_text(encoding="utf-8-sig")))
+            p.part_min = 45
+            self.assertEqual(p.over_limit(), [], f.name)
 
     def test_first_run_has_example_and_roundtrip(self):
         st = wstore.PlanStore()
@@ -183,6 +255,20 @@ class StoreTest(unittest.TestCase):
         again = wstore.PlanStore()
         self.assertEqual(again.plans[0].title, "Мой вебинар")
         self.assertIn("резервной копии", again.warning)
+        broken = list(wstore.DATA_DIR.glob("plans.json.broken-*"))
+        self.assertEqual(len(broken), 1, "битый файл отложен, а не затёрт")
+        self.assertEqual(broken[0].read_text(encoding="utf-8"), "{не json")
+        self.assertIn(broken[0].name, again.warning)
+        again.save()
+        again.save()                                # два сохранения: копия .bak — из хороших данных
+        self.assertEqual(wstore.PlanStore().plans[0].title, "Мой вебинар")
+        broken[0].unlink()
+
+    def test_empty_plans_file_message(self):
+        wstore.PLANS_FILE.write_text('{"plans": []}', encoding="utf-8")
+        st = wstore.PlanStore()
+        self.assertEqual(st.warning, "", "пустой список — как первый запуск, без ложного «не найден»")
+        self.assertTrue(st.plans)
 
 
 class _WindowBase(unittest.TestCase):
@@ -348,6 +434,111 @@ class WindowsTest(_WindowBase):
         self.assertEqual(o.left_text(), "ПРОДОЛЖАЕМ", "не меньше нуля")
         self.win._hide_break()
         self.assertIsNone(self.win.overlay)
+
+    def test_panel_stop_removes_its_own_screen(self):
+        """«Убрать» на пульте закрывает свою заставку, даже если окно таймера уже «забыло» про неё."""
+        self.win.start_break(5)
+        o, panel = self.win.overlay, self.win.break_panel
+        self.win.overlay = None                              # рассинхрон: окно считает, что заставки нет
+        panel.stop_btn.click()
+        self.assertFalse(o.isVisible(), "заставка ушла с экрана демонстрации")
+        self.assertFalse(panel.isVisible(), "и пульт вместе с ней")
+        self.assertEqual(self.win.break_btn.text(), "☕ Перерыв сейчас")
+
+    def test_lesson_panels_and_overall_timer(self):
+        """Повестка: каждый урок — панель с заголовком, перерыв между панелями; сверху — прошло/осталось."""
+        from webinar.ui.lessons import LessonPanel
+        panels = self.win.lesson_panels
+        self.assertEqual([(p.title.text(), p.info.text()) for p in panels],
+                         [("УРОК 1", "11:00–11:10 · 10 мин"), ("УРОК 2", "11:14–11:16 · 2 мин")])
+        self.assertEqual([len(p.findChildren(type(self.win.rows[0]))) for p in panels], [3, 1])
+        brk = self.win.rows[3]
+        self.assertNotIsInstance(brk.parent(), LessonPanel, "перерыв — между панелями, не внутри")
+        self.assertEqual(self.win.overall_lbl.text(), "до начала 02:00 · всего 16:00")
+        self.clock.t = at("11:05", 30)
+        self.win.scheduler.poll()
+        self.assertEqual(self.win.overall_lbl.text(), "прошло 05:30 · осталось 10:30")
+        self.assertEqual([p.state for p in panels], ["now", ""])
+        self.clock.t = at("11:15")
+        self.win.scheduler.poll()
+        self.assertEqual([p.state for p in panels], ["past", "now"])
+        self.clock.t = at("12:00")
+        self.win.scheduler.poll()
+        self.assertEqual(self.win.overall_lbl.text(), "всего 16:00 · 11:00–11:16")
+        parts = [(k, label) for k, _a, _b, label in self.win.overall._parts]
+        self.assertEqual(parts, [("lesson", "Урок 1 · 10 мин"), ("break", "☕ 4"), ("lesson", "Урок 2 · 2 мин")])
+
+    def test_lesson_names_on_board(self):
+        named = copy.deepcopy(PLAN)
+        named.lesson_names = ["Теория"]
+        self.store.plans = [named]
+        self.win._fill_plans(named.id)
+        self.assertEqual([p.title.text() for p in self.win.lesson_panels], ["УРОК 1 · Теория", "УРОК 2"])
+        self.assertEqual([label for k, _a, _b, label in self.win.overall._parts if k == "lesson"],
+                         ["Теория · 10 мин", "Урок 2 · 2 мин"])
+
+    def test_break_started_early_keeps_host_adjustments(self):
+        """«Далее ▶» на «скоро перерыв» — заставка раньше времени; в начале перерыва она та же (пауза не теряется)."""
+        self.win.run_btn.setChecked(True)
+        self.walk(at("11:09"))                               # перерыв 11:10–11:14, предупреждение за минуту
+        card = next(c for c in self.win.notifier.cards if c.seg.activity.breaks)
+        card.next.emit(card)                                 # «Далее ▶» — начать перерыв сейчас
+        o = self.win.overlay
+        self.assertIsNotNone(o)
+        o.pause()
+        self.walk(at("11:11"))                               # перерыв начался по расписанию
+        self.assertIs(self.win.overlay, o, "та же заставка")
+        self.assertTrue(o.paused, "пауза ведущего сохранилась")
+
+    def test_snoozed_break_card_does_not_come_back_during_break(self):
+        """«⏰ 1 мин» на «скоро перерыв», а перерыв уже идёт с пультом — карточка «сейчас» не появляется."""
+        from webinar.ui import notify as wnotify
+        self.win.run_btn.setChecked(True)
+        self.walk(at("11:09"))
+        card = next(c for c in self.win.notifier.cards if c.seg.activity.breaks)
+        old = wnotify.SNOOZE_MS
+        wnotify.SNOOZE_MS = 0
+        try:
+            self.win.notifier.snooze(card)
+            self.walk(at("11:11"))                           # перерыв начался — у ведущего пульт
+            app.processEvents()
+            app.processEvents()
+        finally:
+            wnotify.SNOOZE_MS = old
+        self.assertIsNotNone(self.win.break_panel)
+        self.assertFalse([c for c in self.win.notifier.cards if c.seg.activity.breaks], "только пульт")
+
+    def test_replan_while_live_does_not_repeat_reminder(self):
+        """Во время эфира поправили «Старт сегодня» на минуту — о текущем блоке второй раз не напоминает."""
+        self.win.run_btn.setChecked(True)
+        self.walk(at("11:11"))                               # идёт перерыв
+        o = self.win.overlay
+        o.add(timedelta(minutes=2))
+        self.win.start_edit.setTime(self.win.start_edit.time().addSecs(60))   # 11:01 — перерыв всё ещё идёт
+        self.assertIs(self.win.overlay, o, "заставка не пересоздана — +2 мин ведущего на месте")
+
+    def test_new_day_refreshes_agenda(self):
+        """Таймер провёл ночь в трее — утром повестка на сегодня, а не «эфир завершён» вчерашний."""
+        first = self.win.scheduler.segs[0].start
+        self.clock.t = self.clock.t + timedelta(days=1)
+        self.win.scheduler.poll()
+        self.assertEqual(self.win.scheduler.segs[0].start, first + timedelta(days=1))
+        self.assertEqual(self.win.hero_label.text(), "ДО НАЧАЛА")
+
+    def test_settings_save_keeps_positions_moved_meanwhile(self):
+        """Пока открыты настройки, передвинули пульт — «Сохранить» не откатывает его место."""
+        orig = SettingsDialog.exec
+
+        def fake_exec(dlg):
+            self.win.settings.player_pos = "10,20"           # пульт передвинули, пока окно открыто
+            dlg.heads.setValue(3)                            # а в окне поменяли только «Предупреждать»
+            return 1
+        SettingsDialog.exec = fake_exec
+        try:
+            self.win.open_settings()
+        finally:
+            SettingsDialog.exec = orig
+        self.assertEqual((self.win.settings.player_pos, self.win.settings.heads_up_min), ("10,20", 3))
 
     def test_video_has_player_on_control_monitor(self):
         """У видео — пульт на мониторе управления (у картинки — нет); «Убрать» — видео и пульт уходят вместе."""
@@ -561,6 +752,118 @@ class ButtonsAndMediaTest(_WindowBase):
         expected = "Furore" if "Furore" in QFontDatabase.families() else "Segoe UI"
         self.assertEqual((f.family(), f.pixelSize()), (expected, 100))
 
+    def test_add_lesson(self):
+        """«+ Добавить урок»: перерыв и блок на всю продолжительность урока; уроки разделены линиями."""
+        dlg = PlanEditor(Plan("x", "11:00", [Activity("Теория", DEMO_ON, 45)]), lesson_min=60, break_min=15)
+        self.assertEqual(dlg.table.marks, [], "один урок — разделять нечего")
+        dlg.add_lesson()
+        s = dlg.plan.schedule
+        self.assertEqual([(a.name, a.min, a.breaks) for a in s],
+                         [("Теория", 45, False), ("ПЕРЕРЫВ", 15, True), ("Урок 2", 60, False)])
+        self.assertEqual(dlg.table.marks, [0, 1, 2], "линии: начало, до и после перерыва")
+        self.assertIn("2-й урок: <b>60</b>/60", dlg.parts_lbl.text())
+        dlg.plan.schedule.append(Activity("ПЕРЕРЫВ", DEMO_NONE, 5, is_break=True))
+        dlg.add_lesson()                                     # в конце уже перерыв — второй не добавляется
+        self.assertEqual([a.name for a in dlg.plan.schedule][-2:], ["ПЕРЕРЫВ", "Урок 3"])
+
+    def test_add_block_after_selected_or_at_end(self):
+        """«+ Добавить блок» — после выбранного блока; ничего не выбрано — в конец. Урок — всегда в конец."""
+        dlg = PlanEditor(Plan("x", "11:00", [Activity("a", DEMO_ON, 5), Activity("b", DEMO_ON, 5),
+                                             Activity("c", DEMO_ON, 5)]), lesson_min=0)
+        names = lambda: [a.name for a in dlg.plan.schedule]            # noqa: E731
+        dlg._add()
+        self.assertEqual(names(), ["a", "b", "c", "Новый блок"], "не выбрано — в конец")
+        self.assertEqual(dlg.table.selected, 3, "новый блок сразу выбран")
+        dlg.table.select(0)
+        dlg._add()
+        self.assertEqual(names(), ["a", "Новый блок", "b", "c", "Новый блок"], "после выбранного")
+        name0 = dlg.table.cellWidget(0, C_NAME)
+        self.assertEqual(dlg.table.row_of(name0), 0)
+        self.assertIsNone(dlg.table.row_of(dlg.title), "поле не из таблицы")
+        dlg.table.select(2)
+        dlg.add_lesson()
+        self.assertEqual(names()[-2:], ["ПЕРЕРЫВ", "Урок 2"], "урок — всегда в конец")
+
+    def test_editor_unsubscribes_from_app_focus(self):
+        """Редактор подписывается на смену фокуса во всём приложении — и отписывается при закрытии."""
+        dlg = PlanEditor(PLAN)
+        dlg.reject()
+        import warnings
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            app.focusChanged.disconnect(dlg._focus_changed)        # уже отписан — PySide только предупреждает
+        self.assertTrue(any("Failed to disconnect" in str(w.message) for w in caught))
+
+    def test_lessons_reorder_from_strip(self):
+        """Полоса «Уроки»: плитка на урок; перестановка переносит все блоки урока и его название."""
+        p = Plan("x", "11:00", [Activity("a1", DEMO_ON, 5), Activity("a2", DEMO_ON, 5),
+                                Activity("ПЕРЕРЫВ", DEMO_NONE, 10, is_break=True), Activity("b1", DEMO_ON, 7)])
+        dlg = PlanEditor(p, lesson_min=45)
+        strip = dlg.lessons_list
+        self.assertEqual([strip.item(i).text() for i in range(strip.count())],
+                         ["⠿ 1 · без названия · 10 мин", "⠿ 2 · без названия · 7 мин"])
+        dlg.set_lesson_name(0, "  Теория ")
+        self.assertEqual(strip.item(0).text(), "⠿ 1 · Теория · 10 мин")
+        dlg.reorder_lessons([1, 0])
+        self.assertEqual([a.name for a in dlg.plan.schedule], ["b1", "ПЕРЕРЫВ", "a1", "a2"])
+        self.assertEqual([strip.item(i).text() for i in range(strip.count())],
+                         ["⠿ 1 · без названия · 7 мин", "⠿ 2 · Теория · 10 мин"], "название — вместе с уроком")
+        dlg.set_lesson_name(0, "Практика")
+        dlg._save()
+        self.assertEqual(dlg.result_plan.lesson_names, ["Практика", "Теория"])
+        self.assertEqual(plan_from(plan_to(dlg.result_plan)).lesson_names, ["Практика", "Теория"])
+        one = PlanEditor(Plan("y", "11:00", [Activity("a", DEMO_ON, 5)]), lesson_min=45)
+        self.assertEqual(one.lessons_list.count(), 1, "один урок — тоже можно назвать")
+
+    def test_own_lesson_length_in_editor(self):
+        """У шаблона может быть своя продолжительность урока; «Как в настройках» — из общих настроек."""
+        p = Plan("x", "11:00", [Activity("a", DEMO_ON, 50)])
+        dlg = PlanEditor(p, lesson_min=45)
+        self.assertEqual((dlg.lesson_edit.value(), dlg.plan.part_min), (None, 45))
+        self.assertEqual(dlg.plan.over_limit(), [(1, 50)])
+        dlg.lesson_edit.setValue(60)
+        dlg.lesson_edit.changed.emit(60)
+        self.assertEqual((dlg.plan.lesson_min, dlg.plan.part_min, dlg.plan.over_limit()), (60, 60, []))
+        dlg.lesson_edit.mode.setCurrentIndex(dlg.lesson_edit.mode.findData("custom"))
+        dlg.lesson_edit.custom.setValue(90)
+        self.assertEqual((dlg.plan.lesson_min, dlg.plan.part_min), (90, 90), "своя — 90 мин")
+        self.assertFalse(dlg.lesson_edit.custom.isHidden())
+        dlg._save()
+        self.assertEqual(dlg.result_plan.lesson_min, 90)
+        again = PlanEditor(dlg.result_plan, lesson_min=45)
+        self.assertEqual((again.lesson_edit.value(), again.plan.part_min), (90, 90), "открылся со своей")
+        again.lesson_edit.mode.setCurrentIndex(again.lesson_edit.mode.findData("follow"))
+        self.assertEqual((again.plan.lesson_min, again.plan.part_min), (None, 45))
+        self.assertTrue(again.lesson_edit.custom.isHidden())
+
+    def test_lesson_length_widget_values(self):
+        from webinar.ui.lessons import LessonLengthEdit
+        w = LessonLengthEdit()
+        for v in (45, 60, 0, 75):
+            w.setValue(v)
+            self.assertEqual(w.value(), v)
+        self.assertEqual(w.mode.findData("follow"), -1, "в общих настройках «как в настройках» нет")
+
+    def test_lesson_length_in_settings(self):
+        """Продолжительность урока — в общих настройках; редактор шаблона берёт её оттуда."""
+        s = wstore.Settings()
+        self.assertEqual(s.lesson_min, 45)
+        dlg = SettingsDialog(s)
+        dlg.lesson.setValue(40)
+        self.assertEqual(dlg.result_settings().lesson_min, 40)
+        self.win.settings.lesson_min = 40
+        captured = []
+        orig = PlanEditor.exec
+        PlanEditor.exec = lambda ed: captured.append(ed) or 0
+        try:
+            self.win.edit_plan()
+        finally:
+            PlanEditor.exec = orig
+        ed = captured[0]
+        self.assertEqual((ed.plan.part_min, ed.lesson_edit.value()), (40, None), "как в настройках — 40")
+        self.assertIn("Как в настройках · 40 мин", ed.lesson_edit.mode.currentText())
+        self.assertEqual(plan_from({"start": "11:00", "schedule": [{"name": "a", "min": 1}]}).part_min, 45)
+
 
 class SettingsSaveTest(unittest.TestCase):
     def test_save_after_identify_closes_dialog(self):
@@ -741,13 +1044,14 @@ class EditorTest(unittest.TestCase):
         self.assertEqual([t for _n, t in dlg.plan.over_limit()], [62])
         dlg._save()
         self.assertIsNone(dlg.result_plan, "превышение — не сохраняется")
-        self.assertIn("1-я часть — 62 мин из 45", dlg.error.text())
+        self.assertIn("1-й урок — 62 мин из 45", dlg.error.text())
 
-        dlg.part.setValue(0)                                 # без предела
-        dlg._save()
-        self.assertEqual(dlg.result_plan.part_min, 0)
-        self.assertEqual(plan_from(plan_to(dlg.result_plan)).part_min, 0, "предел — в JSON шаблона")
-        self.assertEqual(plan_from({"start": "11:00", "schedule": [{"name": "a", "min": 1}]}).part_min, 45)
+        free = PlanEditor(dlg.plan, lesson_min=0)            # в настройках — «без предела»
+        self.assertEqual((free.lesson_edit.value(), free.plan.part_min), (None, 0), "как в настройках — без предела")
+        free._save()
+        self.assertEqual(free.result_plan.part_min, 0)
+        self.assertEqual(plan_from(plan_to(free.result_plan)).part_min, 0, "предел — в JSON шаблона")
+        self.assertEqual(PlanEditor(p, lesson_min=40).plan.part_min, 40, "предел — из общих настроек")
 
     def test_settings_dialog_screens(self):
         s = wstore.Settings()

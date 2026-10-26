@@ -4,9 +4,10 @@
 События (каждое — один раз за эфир):
   * heads_up(seg)      — за settings.heads_up_min минут до блока с напоминанием;
   * block_started(seg) — начался блок с напоминанием (или перерыв);
-  * break_started(seg) / break_ended(seg) — перерыв: заставку показать / начался следующий блок;
+  * break_started(seg) — начался перерыв: заставку показать (убирает её ведущий — кнопкой на пульте);
   * finished()         — эфир завершён.
 Если эфир включили посреди блока, о текущем блоке тоже сообщается (предупреждения о прошлом — нет).
+Пересчёт того же шаблона во время эфира (другое время старта, правка) не повторяет уже отправленные события.
 """
 from __future__ import annotations
 
@@ -23,7 +24,6 @@ class Scheduler(QObject):
     heads_up = Signal(object)          # Segment
     block_started = Signal(object)     # Segment
     break_started = Signal(object)     # Segment
-    break_ended = Signal(object)       # Segment
     finished = Signal()
 
     def __init__(self, clock: Callable[[], datetime] = datetime.now, parent=None) -> None:
@@ -34,18 +34,20 @@ class Scheduler(QObject):
         self.heads_up_min = 1
         self.running = False
         self._fired: set[tuple[str, int]] = set()
-        self._break_on: Segment | None = None
         self._finished = False
         self._timer = QTimer(self)
         self._timer.setInterval(250)
         self._timer.timeout.connect(self.poll)
 
     # ---------------------------------------------------------------- управление
-    def set_plan(self, plan: Plan | None, day: date | None = None) -> None:
-        """Показать план на табло (без напоминаний, пока эфир не включён)."""
+    def set_plan(self, plan: Plan, day: date | None = None) -> None:
+        """Показать план на табло (без напоминаний, пока эфир не включён). day — для тестов; по умолчанию сегодня.
+        Тот же шаблон (пересчёт во время эфира) помнит отправленные события, другой — начинает заново."""
+        same = self.plan is not None and self.plan.id == plan.id
         self.plan = plan
-        self.segs = segments(plan, day or self.clock().date()) if plan else []
-        self._reset()
+        self.segs = segments(plan, day or self.clock().date())
+        if not same:
+            self._reset()
         self.poll()
 
     def watch(self) -> None:
@@ -53,21 +55,19 @@ class Scheduler(QObject):
         self._timer.start()
 
     def start(self) -> None:
+        """Включить напоминания. Уже идущий эфир не начинается заново (события не повторяются)."""
+        if not self.running:
+            self._reset()
         self.running = True
-        self._reset()
         self._timer.start()
         self.poll()
 
     def stop(self) -> None:
         self.running = False
-        if self._break_on:
-            seg, self._break_on = self._break_on, None
-            self.break_ended.emit(seg)
         self._reset()
 
     def _reset(self) -> None:
         self._fired.clear()
-        self._break_on = None
         self._finished = False
 
     def state(self) -> State:
@@ -84,15 +84,9 @@ class Scheduler(QObject):
             return
         cur = self.segs[st.index] if st.index >= 0 else None
 
-        # перерыв закончился (или эфир кончился) — заставку убрать
-        if self._break_on and (cur is None or cur.index != self._break_on.index):
-            seg, self._break_on = self._break_on, None
-            self.break_ended.emit(seg)
-
         if cur is not None and self._once("start", cur.index):
             self._once("head", cur.index)        # предупреждать о начавшемся блоке поздно
             if cur.activity.breaks:
-                self._break_on = cur
                 self.break_started.emit(cur)
             if cur.activity.reminds or cur.activity.breaks:
                 self.block_started.emit(cur)

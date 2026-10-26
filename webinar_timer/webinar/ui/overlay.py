@@ -3,10 +3,11 @@
 Заставка перерыва — на весь монитор, поверх всего, что там показано: фон (картинка, растянутая
 с обрезкой краёв, или встроенный фиолетовый), название («ПЕРЕРЫВ») и крупный обратный отсчёт
 шрифтом Furore — как на слайдах 1Т. Когда время вышло — «ПРОДОЛЖАЕМ»; заставка остаётся, пока её
-не уберут (кнопкой в напоминании, щелчком по ней или Esc), чтобы не исчезнуть посреди фразы ведущего.
+не уберут («■ Убрать» на пульте перерыва, щелчком по ней или Esc), чтобы не исчезнуть посреди фразы ведущего.
 """
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Callable
@@ -17,6 +18,8 @@ from PySide6.QtWidgets import QLabel, QStackedLayout, QWidget
 
 from ..model import fmt_left
 from . import style
+
+log = logging.getLogger(__name__)
 
 TITLE_FONT = "Furore"          # шрифт заголовков 1Т; если не установлен — Segoe UI Black
 VIDEO_EXT = {".mp4", ".mov", ".avi", ".mkv", ".webm", ".wmv", ".m4v"}
@@ -168,7 +171,6 @@ class MediaOverlay(_ScreenWindow):
 
     def __init__(self, screen: QScreen, path: str) -> None:
         super().__init__(screen)
-        self.path = path
         self.setStyleSheet("background: black;")
         lay = QStackedLayout(self)
         self.player = None
@@ -184,6 +186,7 @@ class MediaOverlay(_ScreenWindow):
             self.player.setVideoOutput(video)
             self.player.setSource(QUrl.fromLocalFile(str(Path(path).resolve())))
             self.player.mediaStatusChanged.connect(self._on_status)
+            self.player.errorOccurred.connect(lambda _e, msg: log.warning("Видео %s: %s", Path(path).name, msg))
         else:
             label = QLabel(self)
             label.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -200,7 +203,10 @@ class MediaOverlay(_ScreenWindow):
 
     def _on_status(self, status) -> None:
         from PySide6.QtMultimedia import QMediaPlayer
+        if status == QMediaPlayer.MediaStatus.InvalidMedia:
+            log.warning("Видео не открылось: %s", self.player.errorString())
         if status == QMediaPlayer.MediaStatus.EndOfMedia:
+            log.info("Видео закончилось (%d с)", self.player.position() // 1000)
             self.close()            # видео кончилось — экран демонстрации снова виден
 
     def closeEvent(self, e) -> None:

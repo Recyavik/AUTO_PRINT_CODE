@@ -35,7 +35,6 @@ QPushButton {{ background: rgba(255,255,255,0.05); border: 1px solid {LINE}; bor
 QPushButton:hover {{ border-color: {BRAND}; background: rgba(142,77,255,0.18); }}
 QPushButton:checked, QPushButton#primary {{ background: {BRAND}; border-color: {BRAND}; color: white; }}
 QPushButton#primary:hover {{ background: {BRAND_BRIGHT}; }}
-QPushButton#danger {{ color: {RED}; }}
 QLineEdit, QSpinBox, QTimeEdit, QComboBox, QPlainTextEdit {{ background: rgba(255,255,255,0.05);
   border: 1px solid {LINE}; border-radius: 8px; padding: 4px 6px; color: {INK}; selection-background-color: {BRAND}; }}
 QLineEdit:focus, QSpinBox:focus, QTimeEdit:focus, QComboBox:focus, QPlainTextEdit:focus {{ border-color: {BRAND_BRIGHT}; }}

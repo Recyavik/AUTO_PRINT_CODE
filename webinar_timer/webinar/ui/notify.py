@@ -2,7 +2,7 @@
 
 Карточка не забирает фокус (печать и демонстрация продолжаются) и висит, пока её не уберут:
 ведущий может закончить мысль и только потом перейти к зарядке. Кнопки:
-  «⏰ Через 1 мин» — спрятать и напомнить снова через минуту;
+  «⏰ 1 мин»       — спрятать и напомнить снова через минуту;
   «Закрыть»       — убрать напоминание;
   «Далее ▶»       — начать активность: её файл (видео гимнастики, картинка) — на экран демонстрации.
 Несколько карточек — столбиком. Карточку можно перетащить мышью (за любое место, кроме кнопок):
@@ -48,7 +48,6 @@ class Card(QWidget):
     acked = Signal(object)          # «Закрыть» — сама карточка
     snoozed = Signal(object)        # «Через 1 мин»
     next = Signal(object)           # «Далее ▶»
-    hide_break = Signal()           # «Убрать заставку» (только у перерыва)
     dropped = Signal(object)        # карточку перетащили и отпустили
 
     def __init__(self, seg: Segment, heads_up: bool, clock: Callable[[], datetime]) -> None:
@@ -86,12 +85,6 @@ class Card(QWidget):
         top = QHBoxLayout()
         top.addWidget(self.left)
         top.addStretch(1)
-        if a.breaks and not heads_up:
-            b = QPushButton("Убрать заставку")
-            b.setCursor(Qt.CursorShape.ArrowCursor)
-            b.setToolTip("Убрать заставку перерыва с экрана демонстрации")
-            b.clicked.connect(self.hide_break)
-            top.addWidget(b)
         lay.addLayout(top)
 
         row = QHBoxLayout()
@@ -180,19 +173,21 @@ class Notifier:
         self.anchor: QPoint | None = None
         self.on_moved: Callable[[QPoint | None], None] = lambda anchor: None
         self.cards: list[Card] = []
-        self.on_hide_break: Callable[[], None] = lambda: None
+        # показывать ли карточку (окно таймера: идёт перерыв — у ведущего пульт, карточка «сейчас» не нужна)
+        self.accepts: Callable[[Segment, bool], bool] = lambda seg, heads_up: True
         self.on_next: Callable[[Segment], None] = lambda seg: None
         self._snoozed: list[QTimer] = []
 
-    def show(self, seg: Segment, heads_up: bool) -> Card:
+    def show(self, seg: Segment, heads_up: bool) -> Card | None:
         # о блоке достаточно одной карточки: «сейчас» заменяет «скоро»
         for c in [c for c in self.cards if c.seg.index == seg.index]:
             self.close(c)
+        if not self.accepts(seg, heads_up):
+            return None
         card = Card(seg, heads_up, self.clock)
         card.acked.connect(self.close)
         card.snoozed.connect(self.snooze)
         card.next.connect(self._next)
-        card.hide_break.connect(lambda: self.on_hide_break())
         card.dropped.connect(self._dropped)
         self.cards.append(card)
         card.adjustSize()

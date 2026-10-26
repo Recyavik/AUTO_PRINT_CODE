@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "saved": 1793004070.8131788,
+  "saved": 1793009686.072563,
   "plans": [
     {
       "id": "2eb5412c56dd",
@@ -85,11 +85,15 @@
           "min": 3,
           "remind": true
         }
+      ],
+      "lessons": [
+        "Лекция",
+        "Практика 1"
       ]
     },
     {
       "id": "06e7f227c427",
-      "title": "Вебинар 1Т (Первая пара) (копия)",
+      "title": "Вебинар 1Т (Вторая пара)",
       "start": "11:00",
       "part_min": 45,
       "schedule": [
@@ -102,66 +106,30 @@
         {
           "name": "Целеполагание",
           "demo": "off",
-          "min": 5,
-          "remind": true
-        },
-        {
-          "name": "Слайды практики",
-          "demo": "on",
-          "min": 14,
-          "remind": true
-        },
-        {
-          "name": "ЗАРЯДКА ДЛЯ ГЛАЗ",
-          "demo": "off",
-          "min": 5,
-          "remind": true
-        },
-        {
-          "name": "Теория",
-          "demo": "on",
-          "min": 15,
-          "remind": true
-        },
-        {
-          "name": "Выводы",
-          "demo": "off",
-          "min": 5,
-          "remind": true
-        },
-        {
-          "name": "ПЕРЕРЫВ",
-          "demo": "none",
-          "min": 10,
+          "min": 3,
           "remind": true
         },
         {
           "name": "Викторина",
-          "demo": "off",
-          "min": 7,
-          "remind": true
-        },
-        {
-          "name": "Разбор СР прошлого занятия",
-          "demo": "off",
-          "min": 5
-        },
-        {
-          "name": "Слайды заданий",
           "demo": "on",
-          "min": 8,
-          "remind": true
+          "min": 7
         },
         {
-          "name": "Тренажёры",
+          "name": "Слайды практики",
           "demo": "on",
-          "min": 7,
+          "min": 9,
           "remind": true
         },
         {
           "name": "ЗАРЯДКА ДЛЯ ГЛАЗ",
           "demo": "off",
           "min": 5,
+          "remind": true
+        },
+        {
+          "name": "Тренажёр кода",
+          "demo": "on",
+          "min": 10,
           "remind": true
         },
         {
@@ -171,11 +139,71 @@
           "remind": true
         },
         {
+          "name": "ПЕРЕРЫВ",
+          "demo": "none",
+          "min": 10,
+          "remind": true
+        },
+        {
+          "name": "Задание проектого часа",
+          "demo": "on",
+          "min": 2,
+          "remind": true
+        },
+        {
+          "name": "Слайды проектного задания",
+          "demo": "off",
+          "min": 8
+        },
+        {
+          "name": "План проекта (модуль проектов)",
+          "demo": "on",
+          "min": 5,
+          "remind": true
+        },
+        {
+          "name": "Кан-бан доска с задачами",
+          "demo": "on",
+          "min": 3
+        },
+        {
+          "name": "ЗАРЯДКА ДЛЯ ГЛАЗ",
+          "demo": "off",
+          "min": 5,
+          "remind": true
+        },
+        {
+          "name": "Разработка (модуль проектов)",
+          "demo": "on",
+          "min": 8,
+          "remind": true
+        },
+        {
+          "name": "Совместная работа (модуль проектов)",
+          "demo": "on",
+          "min": 7
+        },
+        {
+          "name": "Git",
+          "demo": "on",
+          "min": 1
+        },
+        {
+          "name": "Форма проектного часа",
+          "demo": "on",
+          "min": 2,
+          "remind": true
+        },
+        {
           "name": "Выводы",
           "demo": "off",
-          "min": 3,
+          "min": 4,
           "remind": true
         }
+      ],
+      "lessons": [
+        "Практика 2",
+        "Проектный модуль"
       ]
     }
   ]
