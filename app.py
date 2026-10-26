@@ -49,9 +49,13 @@ def main() -> int:
     if store.warning:
         QMessageBox.warning(None, APP_NAME, store.warning)
 
+    from autoprint.ui import theme
     from autoprint.ui.main_window import STATE_COLORS, MainWindow, save_ico
     from autoprint.typer import IDLE
-    win = MainWindow(Settings.load(), store)
+    settings = Settings.load()
+    theme.apply(settings.theme)              # тема — до создания окон
+    app.setStyleSheet(theme.APP_QSS)
+    win = MainWindow(settings, store)
     app.setWindowIcon(win.windowIcon())   # и для диалогов
     icon_file = DATA_DIR / "autoprintcode.ico"
     if save_ico(STATE_COLORS[IDLE], icon_file):

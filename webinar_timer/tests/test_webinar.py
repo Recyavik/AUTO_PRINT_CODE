@@ -295,6 +295,9 @@ class UpdaterTest(unittest.TestCase):
         r = updater.pick_latest(releases)
         self.assertEqual((r.version, r.notes, r.asset_url), ("1.3.0", "Новое", "https://x/1.3.0.exe"))
         self.assertIsNone(updater.pick_latest([{"tag_name": "v0.6.3"}]))
+        # релиз выложили под чужим тегом (v0.6.5) — версия берётся из имени установщика
+        wrong_tag = [{"tag_name": "v0.6.5", "name": "AUTO_WEB 1.3.0", "assets": [asset("1.3.0")]}]
+        self.assertEqual(updater.pick_latest(wrong_tag).version, "1.3.0")
 
     def test_settings_updates_section(self):
         from webinar import updater

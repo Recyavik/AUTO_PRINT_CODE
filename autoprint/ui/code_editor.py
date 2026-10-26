@@ -1,12 +1,12 @@
-"""Редактор кода образца: номера строк, тёмная тема, подсветка синтаксиса."""
+"""Редактор кода образца: номера строк, подсветка синтаксиса; цвета — по теме окна (apply_theme)."""
 from __future__ import annotations
 
 from PySide6.QtCore import QRect, QSize, Qt, Signal
 from PySide6.QtGui import QColor, QFont, QFontDatabase, QPainter, QTextCursor, QTextFormat
 from PySide6.QtWidgets import QPlainTextEdit, QTextEdit, QWidget
 
-from ..highlighter import (EDITOR_BG, EDITOR_FG, EDITOR_GUTTER, EDITOR_LINE, EDITOR_SEL,
-                           CodeHighlighter)
+from .. import highlighter as hl
+from ..highlighter import CodeHighlighter
 
 
 def code_font(size: int = 11) -> QFont:
@@ -46,9 +46,7 @@ class CodeEditor(QPlainTextEdit):
         self.setFont(code_font())
         self.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
         self.setTabChangesFocus(False)
-        self.setStyleSheet(
-            f"QPlainTextEdit {{ background:{EDITOR_BG}; color:{EDITOR_FG}; border:none;"
-            f" selection-background-color:{EDITOR_SEL}; selection-color:{EDITOR_FG}; }}")
+        self._style()
         self.setPlainText(text)
         self.highlighter = CodeHighlighter(self.document(), lang)
         self._gutter = _Gutter(self)
@@ -57,6 +55,17 @@ class CodeEditor(QPlainTextEdit):
         self.cursorPositionChanged.connect(self._refresh_extra)
         self.blockCountChanged.connect(lambda *_: self.height_changed.emit())
         self._update_gutter_width()
+        self._refresh_extra()
+
+    def _style(self) -> None:
+        self.setStyleSheet(
+            f"QPlainTextEdit {{ background:{hl.EDITOR_BG}; color:{hl.EDITOR_FG}; border:none;"
+            f" selection-background-color:{hl.EDITOR_SEL}; selection-color:{hl.EDITOR_FG}; }}")
+
+    def apply_theme(self) -> None:
+        """Тему окна сменили: фон, номера строк, текущая строка и подсветка — в новых цветах."""
+        self._style()
+        self.highlighter.refresh()
         self._refresh_extra()
 
     # ---- высота по содержимому (блоки идут в общей прокрутке страницы)
@@ -92,7 +101,7 @@ class CodeEditor(QPlainTextEdit):
 
     def paint_gutter(self, event) -> None:
         p = QPainter(self._gutter)
-        p.fillRect(event.rect(), QColor(EDITOR_BG))
+        p.fillRect(event.rect(), QColor(hl.EDITOR_BG))
         block = self.firstVisibleBlock()
         num = block.blockNumber()
         top = round(self.blockBoundingGeometry(block).translated(self.contentOffset()).top())
@@ -101,7 +110,7 @@ class CodeEditor(QPlainTextEdit):
         while block.isValid() and top <= event.rect().bottom():
             if block.isVisible() and bottom >= event.rect().top():
                 in_sel = sel and sel[0] <= num <= sel[1]
-                p.setPen(QColor("#e5c07b" if in_sel else EDITOR_GUTTER))
+                p.setPen(QColor(hl.EDITOR_GUTTER_SEL if in_sel else hl.EDITOR_GUTTER))
                 p.drawText(0, top, self._gutter.width() - 6, self.fontMetrics().height(),
                            Qt.AlignmentFlag.AlignRight, str(num + 1))
             block = block.next()
@@ -123,7 +132,7 @@ class CodeEditor(QPlainTextEdit):
         extras = []
         if self.hasFocus() and not self.textCursor().hasSelection():
             s = QTextEdit.ExtraSelection()
-            s.format.setBackground(QColor(EDITOR_LINE))
+            s.format.setBackground(QColor(hl.EDITOR_LINE))
             s.format.setProperty(QTextFormat.Property.FullWidthSelection, True)
             s.cursor = self.textCursor()
             s.cursor.clearSelection()

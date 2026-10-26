@@ -109,6 +109,7 @@ class Settings:
     guard_enabled: bool = True         # пауза при нажатии клавиши / клике во время печати
     auto_advance: bool = False         # по окончании выбрать следующий блок кода
     always_on_top: bool = False
+    theme: str = "dark"                # оформление окна и редактора кода: dark | light
 
     update_auto_check: bool = True     # проверять обновления на GitHub сам
     update_interval_h: int = 24        # как часто: 0 — при каждом запуске, 24 — раз в день, 168 — раз в неделю

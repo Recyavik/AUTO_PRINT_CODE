@@ -23,7 +23,9 @@ from ..sounds import KeySoundPlayer
 from ..storage import BLOCK_CODE, PROFILE_SHORT, PROFILES, Block, Settings, Template, TemplateStore
 from ..textprint import PRINT_COMMENT, PRINT_MARKDOWN, PRINT_MODES, PRINT_PLAIN, printable, selection_text
 from ..typer import COUNTDOWN, FINISHED, IDLE, PAUSED, RUNNING, TypingEngine
+from . import theme
 from .blocks import BlockWidget, typing_slice
+from .code_editor import CodeEditor
 from .settings_dialog import HOTKEYS, SettingsDialog
 from .template_view import TemplateView, ZoomWheelFilter
 from .updates import MODE_AUTO, MODE_DOWNLOAD, UpdateDialog, UpdateManager
@@ -137,6 +139,7 @@ class MainWindow(QMainWindow):
         self._auto_checked_once = False
 
         self._build_ui()
+        self._sync_theme_button()
         self._build_tray()
         self._apply_settings()
         self._restore_session()
@@ -194,6 +197,9 @@ class MainWindow(QMainWindow):
         self.vol.sliderReleased.connect(self._on_volume_released)
         bar.addWidget(self.vol)
         bar.addStretch(1)
+        self.btn_theme = QPushButton()
+        self.btn_theme.clicked.connect(lambda: self.set_theme("light" if theme.current == "dark" else "dark"))
+        bar.addWidget(self.btn_theme)
         btn_settings = QPushButton("⚙ Настройки")
         btn_settings.clicked.connect(self.open_settings)
         bar.addWidget(btn_settings)
@@ -287,6 +293,8 @@ class MainWindow(QMainWindow):
         self._act(m, "Блок в обычный размер", lambda: self._zoom_block(0), "Ctrl+0")
         self._act(m, "Все блоки образца в обычный размер", self._reset_zoom)
         m.addSeparator()
+        self._act(m, "Тема: светлая / тёмная", lambda: self.set_theme("light" if theme.current == "dark" else "dark"))
+        m.addSeparator()
         m.addAction("Ctrl/Shift + колёсико — масштаб блока под мышью").setEnabled(False)
         m = self.menuBar().addMenu("Справка")
         self._act(m, "Как пользоваться", self.show_help, "F1")
@@ -306,6 +314,23 @@ class MainWindow(QMainWindow):
         QShortcut(QKeySequence("Ctrl+W"), self, lambda: self.close_tab(self.tabs.currentIndex()))
         for i in range(1, 10):
             QShortcut(QKeySequence(f"Ctrl+{i}"), self, lambda i=i: self._goto_tab(i - 1))
+
+    def set_theme(self, name: str) -> None:
+        """Сменить тему на лету (без перезапуска); запоминается. Открытые редакторы кода — тоже."""
+        theme.apply(name)
+        QApplication.instance().setStyleSheet(theme.APP_QSS)
+        for ed in self.findChildren(CodeEditor):
+            ed.apply_theme()
+        if self.settings.theme != theme.current:
+            self.settings.theme = theme.current
+            self.settings.save()
+        self._sync_theme_button()
+        log.info("Тема: %s", theme.THEME_NAMES[theme.current])
+
+    def _sync_theme_button(self) -> None:
+        dark = theme.current == "dark"
+        self.btn_theme.setText("☀" if dark else "🌙")
+        self.btn_theme.setToolTip("Светлая тема" if dark else "Тёмная тема")
 
     def _tabs_corner(self) -> QWidget:
         b = QToolButton()

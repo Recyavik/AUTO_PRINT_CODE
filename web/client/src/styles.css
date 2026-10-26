@@ -1,35 +1,41 @@
 :root {
-  --bg: #0f1115;
-  --panel: #161a21;
-  --panel-2: #1c212a;
-  --border: #2a313c;
-  --text: #e6e8eb;
-  --muted: #8b94a3;
-  --accent: #3b82f6;
+  /* палитра 1Т — как у настольного AutoPrintCode и «Таймера вебинара» */
+  --bg: #130C1F;
+  --panel: #221836;
+  --panel-2: #2A1E44;
+  --border: #3A2B5C;
+  --text: #F4EFFC;
+  --muted: #9C8FBC;
+  --accent: #8E4DFF;
   --accent-text: #ffffff;
-  --ok: #2ea043;
-  --warn: #d29922;
-  --danger: #e5534b;
-  --code-bg: #12151b;
-  --typed: rgba(46, 160, 67, 0.22);
+  --ok: #39C08A;
+  --warn: #F2B64B;
+  --danger: #F2688B;
+  --code-bg: #1e2229;   /* редактор кода; в светлой теме — подложка на тон темнее панели */
+  --code-fg: #d7dae0;
+  --typed: rgba(57, 192, 138, 0.22);
   --shadow: 0 8px 28px rgba(0, 0, 0, 0.45);
   --radius: 8px;
   --mono: "Cascadia Code", "JetBrains Mono", Consolas, monospace;
   color-scheme: dark;
 }
-@media (prefers-color-scheme: light) {
-  :root {
-    --bg: #f4f5f7;
-    --panel: #ffffff;
-    --panel-2: #f0f2f5;
-    --border: #d8dce3;
-    --text: #1d2330;
-    --muted: #667085;
-    --code-bg: #fbfbfc;
-    --typed: rgba(46, 160, 67, 0.18);
-    --shadow: 0 8px 28px rgba(20, 30, 50, 0.16);
-    color-scheme: light;
-  }
+/* светлая — мягкая сиреневая, без белого; выбирается кнопкой ☀/🌙 (theme.ts), пока не выбрана — как в системе */
+:root[data-theme="light"] {
+  --bg: #D9D1E8;
+  --panel: #E3DBEF;
+  --panel-2: #D5CBE7;
+  --border: #B9ABD3;
+  --text: #241A38;
+  --muted: #5E5378;
+  --accent: #7A3FE0;
+  --ok: #17805A;
+  --warn: #9C6410;
+  --danger: #BE3150;
+  --code-bg: #CEC3E2;
+  --code-fg: #241A38;
+  --typed: rgba(57, 192, 138, 0.22);
+  --shadow: 0 8px 28px rgba(36, 26, 56, 0.18);
+  color-scheme: light;
 }
 
 * { box-sizing: border-box; }
@@ -136,7 +142,7 @@ input[type="range"] { accent-color: var(--accent); }
 }
 .block-head .title-edit:hover, .block-head .title-edit:focus { border-color: var(--border); background: var(--panel-2); }
 .block-head .info { color: var(--muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.block-head .info.sel-info { color: #d29922; font-weight: 600; }
+.block-head .info.sel-info { color: var(--warn); font-weight: 600; }
 .block-head .grow { flex: 1; }
 .block-head select { padding: 1px 4px; font-size: 12.5px; }
 .block-head .tools { display: flex; gap: 2px; opacity: 0.55; transition: opacity 0.15s; }
@@ -146,7 +152,7 @@ input[type="range"] { accent-color: var(--accent); }
 .md-view { padding: 6px 16px; cursor: text; }
 .md-view:empty::before { content: "Пустой блок — щёлкните, чтобы написать текст"; color: var(--muted); }
 .md-view code { font-family: var(--mono); background: var(--panel-2); padding: 1px 4px; border-radius: 4px; font-size: 0.92em; }
-.md-view pre { background: var(--code-bg); padding: 8px 10px; border-radius: 6px; overflow: auto; }
+.md-view pre { background: var(--code-bg); color: var(--code-fg); padding: 8px 10px; border-radius: 6px; overflow: auto; }
 .md-view pre code { background: none; padding: 0; }
 .md-view a { color: var(--accent); }
 .md-edit {
@@ -155,6 +161,8 @@ input[type="range"] { accent-color: var(--accent); }
 }
 .code-wrap .cm-editor { background: var(--code-bg); border-radius: 0 0 var(--radius) var(--radius); }
 .code-wrap .cm-editor.cm-focused { outline: none; }
+.code-wrap .cm-gutters { background: var(--code-bg); border-right: none; }
+.code-wrap .cm-activeLineGutter { background: transparent; color: var(--accent); font-weight: 600; }
 .code-wrap .cm-scroller { font-family: var(--mono); }
 .cm-typed { background: var(--typed); }
 

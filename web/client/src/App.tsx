@@ -9,6 +9,7 @@ import { NumberField } from "./components/NumberField.tsx";
 import { SettingsDialog } from "./components/SettingsDialog.tsx";
 import { TemplateView } from "./components/TemplateView.tsx";
 import { sounds } from "./sound.ts";
+import { savedTheme, setTheme, type Theme } from "./theme.ts";
 
 const TAB_MIME = "application/x-autoprintcode-tab";
 
@@ -54,6 +55,7 @@ export function App() {
   const toasts = useApp((s) => s.toasts);
   const version = useApp((s) => s.version);
   const [showSettings, setShowSettings] = useState(false);
+  const [theme, setThemeState] = useState<Theme>(savedTheme);
   const [drag, setDrag] = useState<{ id: string; over: string; after: boolean } | null>(null);   // перетаскивание вкладки
   const [soundLocked, setSoundLocked] = useState(true);
   const fileInput = useRef<HTMLInputElement>(null);
@@ -166,6 +168,10 @@ export function App() {
           <button className="btn" title="Своё окно и значок в панели задач; приложение можно закрепить"
             onClick={async () => { await installEvent?.prompt(); installEvent = null; setCanInstall(false); }}>⇓ Установить как приложение</button>
         )}
+        <button className="btn ghost" title={theme === "dark" ? "Светлая тема" : "Тёмная тема"}
+          onClick={() => { const t = theme === "dark" ? "light" : "dark"; setTheme(t); setThemeState(t); }}>
+          {theme === "dark" ? "☀" : "🌙"}
+        </button>
         <button className="btn" onClick={() => setShowSettings(true)} title="Настройки (Ctrl+,)">⚙ Настройки</button>
         <button className="btn ghost" title="Выключить помощника печати (хоткеи перестанут работать)"
           onClick={() => confirm("Выключить помощника AutoPrintCode? Печать и хоткеи перестанут работать до следующего запуска start.bat.")

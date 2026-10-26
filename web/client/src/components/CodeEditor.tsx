@@ -4,6 +4,7 @@ import { EditorSelection, type Extension, StateEffect, StateField } from "@codem
 import { Decoration, type DecorationSet, EditorView } from "@codemirror/view";
 import CodeMirror, { type ReactCodeMirrorRef } from "@uiw/react-codemirror";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { currentTheme, onThemeChange, type Theme } from "../theme.ts";
 
 // ---- подсветка напечатанной части: [from, to) — набрано, остальное — ещё нет
 const setTyped = StateEffect.define<[number, number] | null>();
@@ -35,8 +36,6 @@ function loadLang(name: string): Promise<Extension | null> {
   return p;
 }
 
-const dark = () => window.matchMedia("(prefers-color-scheme: dark)").matches;
-
 interface Props {
   value: string;
   lang: string;
@@ -51,20 +50,14 @@ interface Props {
 export function CodeEditor({ value, lang, sel, zoom, typed, onChange, onSelection, onFocus }: Props) {
   const ref = useRef<ReactCodeMirrorRef>(null);
   const [langExt, setLangExt] = useState<Extension | null>(null);
-  const [theme, setTheme] = useState<"dark" | "light">(dark() ? "dark" : "light");
+  const [theme, setThemeState] = useState<Theme>(currentTheme);
+  useEffect(() => onThemeChange(setThemeState), []);
 
   useEffect(() => {
     let alive = true;
     void loadLang((lang || "").toLowerCase()).then((ext) => alive && setLangExt(ext));
     return () => { alive = false; };
   }, [lang]);
-
-  useEffect(() => {
-    const mq = window.matchMedia("(prefers-color-scheme: dark)");
-    const on = () => setTheme(mq.matches ? "dark" : "light");
-    mq.addEventListener("change", on);
-    return () => mq.removeEventListener("change", on);
-  }, []);
 
   useEffect(() => {
     ref.current?.view?.dispatch({ effects: setTyped.of(typed) });

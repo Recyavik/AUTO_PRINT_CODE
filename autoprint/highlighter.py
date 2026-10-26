@@ -13,26 +13,46 @@ from PySide6.QtGui import QColor, QFont, QSyntaxHighlighter, QTextCharFormat
 LANGUAGES = ["python", "javascript", "typescript", "html", "css", "sql", "java", "c", "cpp",
              "csharp", "go", "rust", "php", "bash", "powershell", "json", "yaml", "markdown", "text"]
 
-# Тёмная тема в духе One Dark — редактор образца всегда тёмный, как в IDE.
-EDITOR_BG = "#1e2229"
-EDITOR_FG = "#d7dae0"
-EDITOR_LINE = "#2a2f38"
-EDITOR_SEL = "#264f78"
-EDITOR_GUTTER = "#5c6370"
-
-_STYLE = [
-    (Comment, "#7f848e", False, True),
-    (Keyword, "#c678dd", False, False),
-    (Name.Builtin, "#56b6c2", False, False),
-    (Name.Function, "#61afef", False, False),
-    (Name.Class, "#e5c07b", True, False),
-    (Name.Decorator, "#e5c07b", False, False),
-    (Name.Tag, "#e06c75", False, False),
-    (Name.Attribute, "#d19a66", False, False),
-    (String, "#98c379", False, False),
-    (Number, "#d19a66", False, False),
-    (Operator, "#56b6c2", False, False),
-]
+# Редактор образца — по теме окна: тёмная в духе One Dark; светлая — сиреневая подложка на тон темнее панели
+# (код выделяется), цвета подсветки — тёмные, читаемые на светлом. set_editor_theme() переключает на лету.
+EDITOR_THEMES = {
+    "dark": {
+        "EDITOR_BG": "#1e2229", "EDITOR_FG": "#d7dae0", "EDITOR_LINE": "#2a2f38", "EDITOR_SEL": "#264f78",
+        "EDITOR_GUTTER": "#5c6370", "EDITOR_GUTTER_SEL": "#e5c07b",
+        "STYLE": [
+            (Comment, "#7f848e", False, True),
+            (Keyword, "#c678dd", False, False),
+            (Name.Builtin, "#56b6c2", False, False),
+            (Name.Function, "#61afef", False, False),
+            (Name.Class, "#e5c07b", True, False),
+            (Name.Decorator, "#e5c07b", False, False),
+            (Name.Tag, "#e06c75", False, False),
+            (Name.Attribute, "#d19a66", False, False),
+            (String, "#98c379", False, False),
+            (Number, "#d19a66", False, False),
+            (Operator, "#56b6c2", False, False),
+        ],
+    },
+    "light": {
+        "EDITOR_BG": "#CEC3E2", "EDITOR_FG": "#241A38", "EDITOR_LINE": "#C3B6DB", "EDITOR_SEL": "#A994DA",
+        "EDITOR_GUTTER": "#7A6F96", "EDITOR_GUTTER_SEL": "#7A3FE0",
+        "STYLE": [
+            (Comment, "#6C6386", False, True),
+            (Keyword, "#8A23B5", False, False),
+            (Name.Builtin, "#0B6E7D", False, False),
+            (Name.Function, "#2552B5", False, False),
+            (Name.Class, "#8A5A00", True, False),
+            (Name.Decorator, "#8A5A00", False, False),
+            (Name.Tag, "#B3261E", False, False),
+            (Name.Attribute, "#9A4F00", False, False),
+            (String, "#2E6B1F", False, False),
+            (Number, "#9A4F00", False, False),
+            (Operator, "#0B6E7D", False, False),
+        ],
+    },
+}
+EDITOR_BG = EDITOR_FG = EDITOR_LINE = EDITOR_SEL = EDITOR_GUTTER = EDITOR_GUTTER_SEL = ""
+_FORMATS: list = []
 
 
 def _fmt(color: str, bold: bool, italic: bool) -> QTextCharFormat:
@@ -44,7 +64,15 @@ def _fmt(color: str, bold: bool, italic: bool) -> QTextCharFormat:
     return f
 
 
-_FORMATS = [(tt, _fmt(c, b, i)) for tt, c, b, i in _STYLE]
+def set_editor_theme(name: str) -> None:
+    """Цвета редактора и подсветки — по теме окна (dark | light). Открытые редакторы перекрашивает окно."""
+    global _FORMATS
+    t = EDITOR_THEMES.get(name, EDITOR_THEMES["dark"])
+    globals().update({k: v for k, v in t.items() if k != "STYLE"})
+    _FORMATS = [(tt, _fmt(c, b, i)) for tt, c, b, i in t["STYLE"]]
+
+
+set_editor_theme("dark")
 
 
 def _format_for(ttype) -> QTextCharFormat | None:
@@ -80,6 +108,10 @@ class CodeHighlighter(QSyntaxHighlighter):
     def _on_change(self, _pos, removed, added):
         if not self._busy and (removed or added):
             self._timer.start()
+
+    def refresh(self) -> None:
+        """Перекрасить заново (сменили тему окна)."""
+        self._refresh()
 
     def _refresh(self) -> None:
         self._relex()

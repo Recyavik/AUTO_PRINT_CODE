@@ -30,7 +30,7 @@ log = logging.getLogger(__name__)
 REPO = "Recyavik/AUTO_PRINT_CODE"
 API = f"https://api.github.com/repos/{REPO}/releases?per_page=30"
 TAG_PREFIX = "webinar-v"
-ASSET_RE = re.compile(r"^webinar-timer-update-.*\.exe$", re.IGNORECASE)
+ASSET_RE = re.compile(r"^webinar-timer-update-(\d+(?:\.\d+)*)\.exe$", re.IGNORECASE)
 TIMEOUT = 15
 
 
@@ -57,15 +57,25 @@ def is_newer(v: str, current: str = __version__) -> bool:
 
 
 def pick_latest(releases: list[dict]) -> Release | None:
-    """Самый новый релиз таймера с лёгким установщиком (черновики и пре-релизы — мимо)."""
+    """Самый новый релиз таймера с лёгким установщиком (черновики и пре-релизы — мимо).
+    Версия — из тега «webinar-v1.3.0», а если релиз выложили под другим тегом — из имени установщика
+    «webinar-timer-update-1.3.0.exe» (так релиз не потеряется из-за ошибки в теге)."""
     best: Release | None = None
     for r in releases:
-        tag = str(r.get("tag_name", ""))
-        if not tag.startswith(TAG_PREFIX) or r.get("draft") or r.get("prerelease"):
+        if r.get("draft") or r.get("prerelease"):
             continue
-        ver = tag[len(TAG_PREFIX):]
-        asset = next((a for a in r.get("assets", []) if ASSET_RE.match(str(a.get("name", "")))), None)
-        if version_key(ver) is None or asset is None:
+        m = None
+        asset = None
+        for a in r.get("assets", []):
+            m = ASSET_RE.match(str(a.get("name", "")))
+            if m:
+                asset = a
+                break
+        if asset is None:
+            continue
+        tag = str(r.get("tag_name", ""))
+        ver = tag[len(TAG_PREFIX):] if tag.startswith(TAG_PREFIX) else m.group(1)
+        if version_key(ver) is None:
             continue
         if best is None or version_key(ver) > version_key(best.version):
             best = Release(ver, str(r.get("body") or ""), str(asset.get("browser_download_url", "")),
