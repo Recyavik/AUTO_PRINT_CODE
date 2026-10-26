@@ -97,6 +97,7 @@ class Settings:
     sound: bool = True             # звук уведомления
     windows_toast: bool = False    # дублировать всплывающим уведомлением Windows (оно на основном мониторе!)
     auto_update_check: bool = True # сам проверять обновления и сообщать о новой версии (ставит пользователь)
+    theme: str = "dark"            # тема окна таймера: dark | light (экран демонстрации от неё не зависит)
     current_plan: str = ""
     live: str = ""                 # идущий эфир «id шаблона|ЧЧ:ММ старта|ГГГГ-ММ-ДД» — продолжить после перезапуска
     window_geometry: str = ""

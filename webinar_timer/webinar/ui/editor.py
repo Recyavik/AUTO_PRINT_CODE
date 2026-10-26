@@ -7,10 +7,10 @@ import json
 from pathlib import Path
 
 from PySide6.QtCore import QMimeData, QPoint, QRect, Qt, QTime, QTimer, Signal
-from PySide6.QtGui import QColor, QDrag, QIntValidator, QPainter, QPen
+from PySide6.QtGui import QColor, QDrag, QPainter, QPen
 from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog, QFileDialog, QFrame,
                                QHBoxLayout, QHeaderView, QInputDialog, QLabel, QLineEdit, QListWidget, QListWidgetItem,
-                               QMenu, QPlainTextEdit, QPushButton, QTableWidget, QTimeEdit, QToolButton,
+                               QMenu, QPlainTextEdit, QPushButton, QSpinBox, QTableWidget, QTimeEdit, QToolButton,
                                QVBoxLayout, QWidget)
 from shiboken6 import isValid
 
@@ -66,7 +66,7 @@ class _Handle(QLabel):
         self.setCursor(Qt.CursorShape.ArrowCursor if locked else Qt.CursorShape.OpenHandCursor)
         self.setToolTip("Тайминг урока зафиксирован — «Разморозить» на полосе «Уроки» (правая кнопка мыши)"
                         if locked else "Потяните, чтобы перенести блок")
-        self.setStyleSheet(f"font-size: {'11' if locked else '15'}pt; color: #9C8FBC; padding: 0 6px;")
+        self.setStyleSheet(f"font-size: {'11' if locked else '15'}pt; color: {style.MUTED}; padding: 0 6px;")
         self._press: QPoint | None = None
 
     def mousePressEvent(self, e) -> None:
@@ -98,66 +98,14 @@ LINE_COLOR = QColor(242, 182, 75, 128)        # границы уроков — 
 SELECT_COLOR = QColor(110, 175, 255, 150)     # рамка выбранного блока
 
 
-class _Minutes(QLineEdit):
-    """Минуты блока: только целое число с клавиатуры (↑/↓ — ±1). Без стрелок и колёсика: колёсико мыши
-    прокручивает таблицу. Обычное поле ввода, а не QSpinBox: тот без стрелок в PySide6 6.12 сжимал текст до 1 px.
-    Сверх maximum() (свободное место в уроке) не вводится — лишнее обрезается."""
-    valueChanged = Signal(int)
+class _Minutes(QSpinBox):
+    """Минуты блока: стрелки ▲▼ и ввод с клавиатуры (↑/↓ — ±1). Колёсико мыши число не меняет — прокручивает
+    таблицу: иначе при прокрутке длинного шаблона минуты сбивались незаметно. В зафиксированном уроке поле
+    неактивно и стрелок нет."""
 
     def __init__(self) -> None:
         super().__init__()
-        self._min, self._max, self._value = 1, 600, 1
-        self.setValidator(QIntValidator(0, 9999, self))
-        self.setMinimumWidth(56)
-        self.setText("1")
-        self.textEdited.connect(self._typed)
-        self.editingFinished.connect(lambda: self.setValue(self._parse(self._value)))
-
-    def value(self) -> int:
-        return self._value
-
-    def maximum(self) -> int:
-        return self._max
-
-    def setRange(self, lo: int, hi: int) -> None:
-        self._min, self._max = lo, hi
-        self.setValue(self._value)
-
-    def setMaximum(self, hi: int) -> None:
-        self.setRange(self._min, hi)
-
-    def setValue(self, v: int) -> None:
-        v = max(self._min, min(self._max, v))
-        if self.text() != str(v):
-            self.setText(str(v))
-        if v != self._value:
-            self._value = v
-            self.valueChanged.emit(v)
-
-    def stepUp(self) -> None:
-        self.setValue(self._value + 1)
-
-    def stepDown(self) -> None:
-        self.setValue(self._value - 1)
-
-    def _parse(self, default: int) -> int:
-        return int(self.text()) if self.text().isdigit() else default
-
-    def _typed(self, _text: str) -> None:
-        v = self._parse(0)
-        if self._min <= v <= self._max and v != self._value:
-            self._value = v
-            self.valueChanged.emit(v)
-        elif v > self._max:                 # больше, чем свободно в уроке, — сразу до предела
-            self.setValue(self._max)
-
-    def keyPressEvent(self, e) -> None:
-        if e.key() == Qt.Key.Key_Up:
-            self.stepUp()
-        elif e.key() == Qt.Key.Key_Down:
-            self.stepDown()
-        else:
-            super().keyPressEvent(e)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
 
     def wheelEvent(self, e) -> None:
         e.ignore()
@@ -199,12 +147,11 @@ class _RowTable(QTableWidget):
         self.viewport().setAcceptDrops(True)
         self.setDragDropMode(QTableWidget.DragDropMode.DropOnly)
         self._line = QFrame(self.viewport())
-        self._line.setStyleSheet("background: #B98CFF; border-radius: 1px;")
+        self._line.setStyleSheet(f"background: {style.BRAND_BRIGHT}; border-radius: 1px;")
         self._line.hide()
         self.marks: list[int] = []      # строки, над которыми проходит граница урока (вокруг перерывов)
         self.selected: int | None = None    # выбранный блок: «+ Добавить блок» вставит новый после него
         self._lessons = _LessonLines(self)
-        self.verticalScrollBar().valueChanged.connect(lambda _v: self._lessons.update())
 
     def set_marks(self, rows: list[int]) -> None:
         self.marks = rows
@@ -236,6 +183,12 @@ class _RowTable(QTableWidget):
     def resizeEvent(self, e) -> None:
         super().resizeEvent(e)
         self._lessons.setGeometry(self.viewport().rect())
+
+    def scrollContentsBy(self, dx: int, dy: int) -> None:
+        # прокрутка сдвигает все виджеты области — и слой с линиями; вернуть его на место (линии съезжали)
+        super().scrollContentsBy(dx, dy)
+        self._lessons.setGeometry(self.viewport().rect())
+        self._lessons.update()
 
     def _target(self, y: int) -> int:
         row = self.rowAt(y)
@@ -309,11 +262,12 @@ class _LessonStrip(QListWidget):
         else:
             m.addAction("🔒 Зафиксировать тайминг", lambda: self.lock.emit(i, True))
         m.exec(self.viewport().mapToGlobal(pos))
+        item, border, selected = style.STRIP
         self.setStyleSheet(f"""
             QListWidget {{ background: transparent; border: none; }}
-            QListWidget::item {{ background: rgba(110,175,255,0.10); border: 1px solid rgba(110,175,255,0.35);
+            QListWidget::item {{ background: {item}; border: 1px solid {border};
               border-radius: 8px; padding: 4px 10px; color: {style.INK}; }}
-            QListWidget::item:selected {{ background: rgba(110,175,255,0.25); }}
+            QListWidget::item:selected {{ background: {selected}; }}
         """)
 
     def set_lessons(self, labels: list[str], locked: list[bool]) -> None:
@@ -443,7 +397,7 @@ class PlanEditor(QDialog):
         jr.addStretch(1)
         jl.addLayout(jr)
         self.error = QLabel(objectName="hint")
-        self.error.setStyleSheet("color: #F2688B;")
+        self.error.setStyleSheet(f"color: {style.RED};")
         jl.addWidget(self.error)
         self.json_box.setVisible(False)
         self.json_toggle.toggled.connect(self.json_box.setVisible)
@@ -595,7 +549,7 @@ class PlanEditor(QDialog):
         bits = []
         for n, part in enumerate(parts, 1):
             t = self.plan.part_total(part)
-            color = "#F2688B" if t > self.plan.part_min else ("#39C08A" if t == self.plan.part_min else "#9C8FBC")
+            color = style.RED if t > self.plan.part_min else (style.ON if t == self.plan.part_min else style.MUTED)
             bits.append(f"<span style='color:{color}'>{n}-й урок: <b>{t}</b>/{self.plan.part_min}</span>")
         self.parts_lbl.setText(" · ".join(bits))
 

@@ -116,7 +116,7 @@ class LessonPanel(QFrame):
             return
         self.state = state
         border = style.BRAND if state == "now" else style.LINE
-        bg = "rgba(142,77,255,0.07)" if state == "now" else "rgba(255,255,255,0.02)"
+        bg = style.LESSON_NOW_BG if state == "now" else style.LESSON_BG
         self.setStyleSheet(f"QFrame#lesson {{ background: {bg}; border: 1px solid {border}; border-radius: 14px; }}")
         accent = style.BRAND_BRIGHT if state == "now" else (style.DIM if state == "past" else style.MUTED)
         self.title.setStyleSheet(f"color: {accent}; font-weight: 800; letter-spacing: 2px; font-size: 8.5pt;")
@@ -178,26 +178,31 @@ class TimelineBar(QWidget):
             r = QRectF(x_of(a) + 1, 0, max(2.0, x_of(b) - x_of(a) - 2), h)
             clip = QPainterPath()
             clip.addRoundedRect(r, 6, 6)
-            base, fill = (("rgba(242,182,75,0.16)", style.AMBER) if kind == "break"
-                          else ("rgba(255,255,255,0.06)", style.BRAND))
+            base, fill = ((style.TL_BREAK, style.AMBER) if kind == "break" else (style.TL_BASE, style.BRAND))
             p.fillPath(clip, _color(base))
-            if now is not None and now > a:
-                done = QRectF(r.left(), 0, min(r.width(), x_of(min(now, b)) - r.left()), h)
+            done_w = min(r.width(), x_of(min(now, b)) - r.left()) if now is not None and now > a else 0.0
+            done = QRectF(r.left(), 0, done_w, h)
+            if done_w > 0:
                 p.save()
                 p.setClipPath(clip)
                 p.fillRect(done, QColor(fill))
                 p.restore()
             text = fm.elidedText(label, Qt.TextElideMode.ElideRight, int(r.width()) - 10)
             if text and text != "…":
-                if kind == "lesson":
-                    p.setPen(QColor(style.INK))
-                else:                                # прошедший перерыв закрашен янтарём — текст тёмный
-                    p.setPen(QColor("#1A1206" if now is not None and now >= b else style.AMBER))
-                p.drawText(r, Qt.AlignmentFlag.AlignCenter, text)
+                # подпись в два цвета: на закрашенной части — контрастный к заливке, на остальной — обычный
+                plain, on_fill = ((style.INK, style.ON_BRAND) if kind == "lesson"
+                                  else (style.AMBER, style.TL_BREAK_DONE_INK))
+                for part, color in ((QRectF(done.right(), 0, r.right() - done.right(), h), plain), (done, on_fill)):
+                    if part.width() > 0:
+                        p.save()
+                        p.setClipRect(part)
+                        p.setPen(QColor(color))
+                        p.drawText(r, Qt.AlignmentFlag.AlignCenter, text)
+                        p.restore()
         if now is not None and begin <= now <= end:
             x = x_of(now)
             p.setPen(Qt.PenStyle.NoPen)
-            p.setBrush(QColor("white"))
+            p.setBrush(QColor(style.TL_MARK))
             p.drawRoundedRect(QRectF(x - 1.5, -1, 3, h + 2), 1.5, 1.5)
 
 

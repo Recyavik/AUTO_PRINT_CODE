@@ -23,11 +23,10 @@ BREAK_STEP = timedelta(minutes=1)   # перерыв: −1 мин / +1 мин
 WIDTH = 600
 MARGIN = 24
 
-# оформление пульта: (фон, рамка, акцент, кнопка «ok», она же при наведении)
-THEME = {
-    "video": ("#1A2E2A", "#2F5A4E", style.EYE, "#2E7D62", "#379873"),
-    "break": ("#2E2516", "#5E4A26", style.AMBER, "#9A6B14", "#B07C18"),
-}
+def theme_colors(kind: str) -> tuple[str, str, str, str, str]:
+    """Оформление пульта в цветах текущей темы: (фон, рамка, акцент, кнопка «ok», она же при наведении)."""
+    bg, border, ok, ok_hover = style.PANEL_VIDEO if kind == "video" else style.PANEL_BREAK
+    return bg, border, style.EYE if kind == "video" else style.AMBER, ok, ok_hover
 
 
 def fmt_ms(ms: int) -> str:
@@ -63,7 +62,9 @@ class _Remote(QWidget):
         self.screen_, self.anchor = screen, anchor
         self._drag_from = None
 
+        self._kind = theme
         frame = QFrame(self, objectName="player")
+        self.frame = frame
         frame.setCursor(Qt.CursorShape.OpenHandCursor)   # подсказка: пульт можно перетащить
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
@@ -79,8 +80,13 @@ class _Remote(QWidget):
         head.addWidget(self.title, 1)
         self.lay.addLayout(head)
 
-        bg, border, accent, ok, ok_hover = THEME[theme]
-        frame.setStyleSheet(f"""
+        self.restyle()
+        self.setMinimumWidth(WIDTH)
+
+    def restyle(self) -> None:
+        """Оформить в цветах текущей темы (и перекрасить, если тему сменили)."""
+        bg, border, accent, ok, ok_hover = theme_colors(self._kind)
+        self.frame.setStyleSheet(f"""
             QFrame#player {{ background: {bg}; border: 1px solid {border};
               border-left: 5px solid {accent}; border-radius: 12px; }}
             QLabel {{ background: transparent; color: {style.INK}; }}
@@ -88,19 +94,18 @@ class _Remote(QWidget):
             QLabel#name {{ font-size: 10pt; font-weight: 700; }}
             QLabel#time {{ color: {style.MUTED}; font-size: 9pt; font-weight: 600; }}
             QLabel#big {{ color: {accent}; font-size: 20pt; font-weight: 800; }}
-            QPushButton {{ background: rgba(255,255,255,0.07); border: 1px solid {border}; border-radius: 7px;
+            QPushButton {{ background: {style.TINT2}; border: 1px solid {border}; border-radius: 7px;
               padding: 4px 10px; color: {style.INK}; font-weight: 600; font-size: 9.5pt; }}
             QPushButton:hover {{ border-color: {accent}; }}
-            QPushButton#ok {{ background: {ok}; border-color: {ok}; color: white; }}
+            QPushButton#ok {{ background: {ok}; border-color: {ok}; color: {style.ON_BRAND}; }}
             QPushButton#ok:hover {{ background: {ok_hover}; }}
             QPushButton#stop:hover {{ border-color: {style.RED}; color: {style.RED}; }}
             QSlider {{ background: transparent; }}
-            QSlider::groove:horizontal {{ height: 6px; background: rgba(255,255,255,0.12); border-radius: 3px; }}
+            QSlider::groove:horizontal {{ height: 6px; background: {style.TINT2}; border-radius: 3px; }}
             QSlider::sub-page:horizontal {{ background: {accent}; border-radius: 3px; }}
             QSlider::handle:horizontal {{ width: 14px; margin: -5px 0; border-radius: 7px; background: {style.INK}; }}
             QSlider#progress::handle:horizontal {{ width: 0px; margin: 0; }}
         """)
-        self.setMinimumWidth(WIDTH)
 
     def _button(self, text: str, tip: str, slot: Callable, name: str = "") -> QPushButton:
         b = QPushButton(text, objectName=name)

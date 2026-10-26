@@ -682,6 +682,32 @@ class WindowsTest(_WindowBase):
         self.assertFalse(self.win.update_btn.isHidden())
         self.assertEqual(self.win.update_btn.text(), "⬆ Обновление 9.9.0")
 
+    def test_theme_switch_on_the_fly(self):
+        """☀/🌙 в заголовке: тема меняется сразу — таблица стилей, повестка, карточки; выбор запоминается."""
+        from webinar.ui import style
+        try:
+            self.assertEqual((style.current, self.win.theme_btn.text()), ("dark", "☀"))
+            self.win.run_btn.setChecked(True)
+            self.walk(at("11:01"))
+            card = self.win.notifier.cards[0]
+            dark_card = card.frame.styleSheet()
+            self.win.theme_btn.click()
+            self.assertEqual((style.current, self.win.theme_btn.text()), ("light", "🌙"))
+            self.assertIn(style.THEMES["light"]["BG"], app.styleSheet())
+            self.assertEqual(wstore.Settings.load().theme, "light", "запомнено")
+            self.assertNotEqual(card.frame.styleSheet(), dark_card, "карточка перекрашена")
+            self.assertIn(style.THEMES["light"]["CARD_SOON"][0], card.frame.styleSheet())
+            self.assertTrue(self.win.run_btn.isChecked(), "эфир не прервался")
+            self.win.theme_btn.click()
+            self.assertEqual(style.current, "dark")
+        finally:
+            style.apply("dark")
+            app.setStyleSheet(style.APP_QSS)
+
+    def test_light_palette_complete(self):
+        from webinar.ui import style
+        self.assertEqual(set(style.THEMES["light"]), set(style.THEMES["dark"]), "у тем одинаковый набор цветов")
+
     def test_video_has_player_on_control_monitor(self):
         """У видео — пульт на мониторе управления (у картинки — нет); «Убрать» — видео и пульт уходят вместе."""
         from PySide6.QtCore import QEvent
@@ -847,7 +873,7 @@ class ButtonsAndMediaTest(_WindowBase):
         self.clock.t = at("11:06")
         card.refresh()
         self.assertEqual((card.phase, card.label.text()), ("over", "ВРЕМЯ ВЫШЛО"))
-        backgrounds = {notify.PHASE_STYLE[ph][0] for ph in ("soon", "now", "over")}
+        backgrounds = {notify.phase_style(ph)[0] for ph in ("soon", "now", "over")}
         self.assertEqual(len(backgrounds), 3, "у фаз разные фоны")
         card.close()
 
@@ -936,6 +962,20 @@ class ButtonsAndMediaTest(_WindowBase):
             app.focusChanged.disconnect(dlg._focus_changed)        # уже отписан — PySide только предупреждает
         self.assertTrue(any("Failed to disconnect" in str(w.message) for w in caught))
 
+    def test_lesson_lines_stay_in_place_after_scroll(self):
+        """Прокрутили таблицу — слой с линиями границ уроков не уезжает вместе с полями (линии съезжали)."""
+        p = Plan("x", "11:00", [Activity(f"a{i}", DEMO_ON, 1) for i in range(30)]
+                 + [Activity("ПЕРЕРЫВ", DEMO_NONE, 10, is_break=True), Activity("b", DEMO_ON, 1)])
+        dlg = PlanEditor(p, lesson_min=0)
+        dlg.resize(900, 400)
+        dlg.show()
+        app.processEvents()
+        dlg.table.scrollToBottom()
+        app.processEvents()
+        self.assertGreater(dlg.table.verticalScrollBar().value(), 0, "таблица прокручена")
+        self.assertEqual(dlg.table._lessons.geometry(), dlg.table.viewport().rect())
+        dlg.close()
+
     def test_lessons_reorder_from_strip(self):
         """Полоса «Уроки»: плитка на урок; перестановка переносит все блоки урока и его название."""
         p = Plan("x", "11:00", [Activity("a1", DEMO_ON, 5), Activity("a2", DEMO_ON, 5),
@@ -963,13 +1003,15 @@ class ButtonsAndMediaTest(_WindowBase):
         from PySide6.QtCore import QPoint, QPointF, Qt
         from PySide6.QtGui import QWheelEvent
         from PySide6.QtTest import QTest
+        from PySide6.QtWidgets import QSpinBox
         p = Plan("x", "11:00", [Activity("a1", DEMO_ON, 20), Activity("a2", DEMO_ON, 25),
                                 Activity("ПЕРЕРЫВ", DEMO_NONE, 10, is_break=True), Activity("b1", DEMO_ON, 30)])
         dlg = PlanEditor(p, lesson_min=45)
         mins = dlg.table.cellWidget(0, C_MIN)
         mins.show()
         app.processEvents()
-        self.assertGreater(mins.width(), 40, "число видно (QSpinBox без стрелок в PySide6 6.12 сжимался до 1 px)")
+        self.assertGreater(mins.lineEdit().width(), 20, "число видно")
+        self.assertEqual(mins.buttonSymbols(), QSpinBox.ButtonSymbols.UpDownArrows, "стрелки ▲▼ есть")
         wheel = QWheelEvent(QPointF(5, 5), QPointF(5, 5), QPoint(0, 0), QPoint(0, 120), Qt.MouseButton.NoButton,
                             Qt.KeyboardModifier.NoModifier, Qt.ScrollPhase.NoScrollPhase, False)
         app.sendEvent(mins, wheel)
@@ -978,9 +1020,10 @@ class ButtonsAndMediaTest(_WindowBase):
         self.assertEqual(dlg.plan.schedule[0].min, 20, "урок заполнен (20 + 25 = 45) — больше нельзя")
         QTest.keyClick(mins, Qt.Key.Key_Down)
         self.assertEqual(dlg.plan.schedule[0].min, 19, "↓ — минус минута")
-        mins.selectAll()
+        mins.lineEdit().selectAll()
         QTest.keyClicks(mins, "99")
-        self.assertEqual((mins.text(), dlg.plan.schedule[0].min), ("20", 20), "больше свободного — до предела")
+        self.assertLessEqual(dlg.plan.schedule[0].min, 20, "больше свободного в уроке не ввести")
+        mins.setValue(20)
         dlg.set_lesson_locked(0, True)
         names = lambda: [a.name for a in dlg.plan.schedule]            # noqa: E731
         self.assertFalse(dlg.table.cellWidget(0, C_MIN).isEnabled(), "минуты не правятся")
@@ -1002,8 +1045,9 @@ class ButtonsAndMediaTest(_WindowBase):
         dlg._save()
         again = plan_from(plan_to(dlg.result_plan))
         self.assertEqual([a.locked for a in again.schedule], [False, False, True, True], "сохраняется в шаблоне")
+        self.assertFalse(dlg.table.cellWidget(2, C_MIN).isEnabled(), "заморожено — минуты неактивны")
         dlg.set_lesson_locked(1, False)                      # разморозить
-        self.assertTrue(dlg.table.cellWidget(2, C_MIN).isEnabled())
+        self.assertTrue(dlg.table.cellWidget(2, C_MIN).isEnabled(), "после разморозки — снова со стрелками")
         dlg.table.select(2)
         dlg._add()
         self.assertEqual(names(), ["b1", "ПЕРЕРЫВ", "a1", "Новый блок", "a2"], "после разморозки — снова можно")

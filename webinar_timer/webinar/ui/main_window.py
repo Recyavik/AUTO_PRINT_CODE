@@ -9,7 +9,7 @@ from pathlib import Path
 
 from PySide6.QtCore import QByteArray, QPoint, QPointF, QRectF, Qt, QTime, QTimer, Signal
 from PySide6.QtGui import QAction, QColor, QFontMetrics, QIcon, QPainter, QPen, QPixmap
-from PySide6.QtWidgets import (QFileDialog, QFrame, QGridLayout, QHBoxLayout, QInputDialog, QLabel, QListWidget,
+from PySide6.QtWidgets import (QApplication, QFileDialog, QFrame, QGridLayout, QHBoxLayout, QInputDialog, QLabel, QListWidget,
                                QListWidgetItem, QMainWindow, QMenu, QMessageBox, QProgressBar, QPushButton,
                                QScrollArea, QSpinBox, QSystemTrayIcon, QTimeEdit, QVBoxLayout, QWidget)
 from shiboken6 import isValid
@@ -134,13 +134,12 @@ class AgendaRow(QFrame):
         """mode: now | past | next | ""."""
         a = self.seg.activity
         color = {"break": style.AMBER, "eyes": style.EYE}.get(a.kind, style.INK)
-        bg = {"now": "rgba(142,77,255,0.28)", "past": "transparent"}.get(
-            mode, "rgba(95,208,160,0.08)" if a.kind == "eyes" else
-            ("rgba(255,255,255,0.05)" if a.kind == "break" else "transparent"))
+        bg = {"now": style.ROW_NOW, "past": "transparent"}.get(
+            mode, style.ROW_EYES if a.kind == "eyes" else (style.ROW_BREAK if a.kind == "break" else "transparent"))
         border = style.BRAND if mode == "now" else (style.LINE if mode == "next" else "transparent")
         self.setStyleSheet(f"AgendaRow {{ background: {bg}; border: 1px solid {border}; border-radius: 12px; }}")
         dim = mode == "past"
-        self.name.setStyleSheet(f"color: {style.MUTED if dim else ('white' if mode == 'now' else color)};"
+        self.name.setStyleSheet(f"color: {style.MUTED if dim else (style.ROW_NOW_INK if mode == 'now' else color)};"
                                 f" font-weight: 600; font-size: 12pt;")
         self.time.setStyleSheet(f"color: {style.BRAND_BRIGHT if mode == 'now' else style.DIM};"
                                 f" font-weight: {'700' if mode == 'now' else '500'};")
@@ -184,6 +183,7 @@ class MainWindow(QMainWindow):
 
         self._build()
         self._build_tray()
+        self._style_theme()
         self._fill_plans()
         if settings.window_geometry:
             self.restoreGeometry(QByteArray.fromBase64(settings.window_geometry.encode()))
@@ -206,9 +206,8 @@ class MainWindow(QMainWindow):
         outer.setSpacing(10)
 
         head = QHBoxLayout()
-        brand = QLabel(f"<b style='color:{style.BRAND_BRIGHT}; font-size:20pt'>1Т</b>"
-                       f"&nbsp;&nbsp;<span style='color:{style.MUTED}; font-size:12pt'>Таймер вебинара</span>")
-        head.addWidget(brand)
+        self.brand = QLabel()
+        head.addWidget(self.brand)
         head.addStretch(1)
         self.today = QLabel(objectName="muted")
         self.clock_lbl = QLabel()
@@ -220,7 +219,9 @@ class MainWindow(QMainWindow):
         self.update_btn.setToolTip("Вышла новая версия таймера — подробности и установка в ⚙ Настройки")
         self.update_btn.clicked.connect(self.open_settings)
         self.update_btn.hide()
-        for w in (self.today, self.clock_lbl, self.status, self.update_btn, gear):
+        self.theme_btn = QPushButton()
+        self.theme_btn.clicked.connect(lambda: self.set_theme("light" if style.current == "dark" else "dark"))
+        for w in (self.today, self.clock_lbl, self.status, self.update_btn, self.theme_btn, gear):
             head.addWidget(w)
         outer.addLayout(head)
         # весь эфир: уроки и перерывы в масштабе времени, рядом — сколько прошло и сколько осталось
@@ -307,11 +308,10 @@ class MainWindow(QMainWindow):
         hl.setContentsMargins(30, 26, 30, 26)
         hl.addStretch(1)
         self.hero_label = QLabel()
-        self.hero_label.setStyleSheet(f"color: {style.BRAND_BRIGHT}; font-weight: 700; letter-spacing: 3px;")
         self.hero_name = QLabel()
         self.hero_name.setWordWrap(True)
         self.hero_name.setStyleSheet("font-size: 26pt; font-weight: 700;")
-        self.hero_timer = FitLabel(max_px=130, css=f"font-weight: 800; color: {style.BRAND_BRIGHT};")
+        self.hero_timer = FitLabel(max_px=130)
         self.hero_sub = QLabel(objectName="muted")
         self.hero_bar = QProgressBar()
         self.hero_bar.setTextVisible(False)
@@ -853,6 +853,36 @@ class MainWindow(QMainWindow):
         self._set_status("Эфир не идёт", style.MUTED)
 
     # ================================================================ окно и выход
+    # ================================================================ тема
+    def set_theme(self, name: str) -> None:
+        """Сменить тему на лету: общая таблица стилей и всё, что оформлено своими цветами (повестка, карточки,
+        пульты). Эфир не прерывается; экран демонстрации не меняется."""
+        style.apply(name)
+        QApplication.instance().setStyleSheet(style.APP_QSS)
+        if self.settings.theme != style.current:
+            self.settings.theme = style.current
+            self.settings.save()
+        self._style_theme()
+        self._rebuild_agenda()
+        self.overall.update()
+        for c in self.notifier.cards:
+            c.restyle()
+        for panel in (self.player_panel, self.break_panel):
+            if panel is not None and isValid(panel):
+                panel.restyle()
+        log.info("Тема: %s", style.THEME_NAMES[style.current])
+
+    def _style_theme(self) -> None:
+        self.brand.setText(f"<b style='color:{style.BRAND_BRIGHT}; font-size:20pt'>1Т</b>"
+                           f"&nbsp;&nbsp;<span style='color:{style.MUTED}; font-size:12pt'>Таймер вебинара</span>")
+        self.hero_label.setStyleSheet(f"color: {style.BRAND_BRIGHT}; font-weight: 700; letter-spacing: 3px;")
+        self.hero_timer.css = f"font-weight: 800; color: {style.BRAND_BRIGHT};"
+        self.hero_timer.px = 0                   # пересчитать и перекрасить
+        self.hero_timer._fit()
+        dark = style.current == "dark"
+        self.theme_btn.setText("☀" if dark else "🌙")
+        self.theme_btn.setToolTip("Светлая тема" if dark else "Тёмная тема")
+
     def _auto_check_updates(self) -> None:
         if not (self.settings.auto_update_check and updater.can_update()) or self._update_check is not None:
             return
@@ -887,6 +917,8 @@ class MainWindow(QMainWindow):
             for k, v in vars(new).items():
                 if v != getattr(before, k):
                     setattr(self.settings, k, v)
+            if self.settings.theme != style.current:
+                self.set_theme(self.settings.theme)
             self.scheduler.heads_up_min = self.settings.heads_up_min
             self.settings.save()
             self.notifier.anchor = parse_pos(self.settings.note_pos)

@@ -13,7 +13,7 @@ from shiboken6 import isValid
 from .. import __version__, updater
 from ..model import DEMO_OFF, Activity, Segment
 from ..store import MEDIA_DIR, Settings, existing, portable, resolve
-from . import screens
+from . import screens, style
 from .editor import finish_on_enter
 from .lessons import LessonLengthEdit
 from .notify import Notifier, parse_pos
@@ -81,6 +81,13 @@ class SettingsDialog(QDialog):
         self.lesson.setToolTip("Предел каждой части занятия: до перерыва и после него (академический час — 45 мин).<br>"
                                "В редакторе шаблона минуты блока нельзя увеличить сверх него. Для всех шаблонов, у которых не задана своя.")
         form.addRow("Продолжительность урока:", self.lesson)
+
+        self.theme = QComboBox()
+        for key, title in style.THEME_NAMES.items():
+            self.theme.addItem(title, key)
+        self.theme.setCurrentIndex(max(0, self.theme.findData(self.s.theme)))
+        self.theme.setToolTip("Оформление окна таймера, карточек и пультов. Экран демонстрации от темы не зависит.")
+        form.addRow("Тема:", self.theme)
 
         self.heads = QSpinBox()
         self.heads.setRange(0, 15)
@@ -152,6 +159,7 @@ class SettingsDialog(QDialog):
         s.sound = self.sound.isChecked()
         s.windows_toast = self.toast.isChecked()
         s.auto_update_check = self.auto_update.isChecked()
+        s.theme = self.theme.currentData()
         return s
 
     def _test_note(self) -> None:

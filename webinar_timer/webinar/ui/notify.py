@@ -27,14 +27,12 @@ WIDTH = 360
 GAP = 8
 SNOOZE_MS = 60_000      # «Через 1 мин»
 
-# Фаза карточки → (фон, рамка, цвет полоски и надписи; None — цвет активности).
-# «Скоро» — холодный сине-фиолетовый и янтарь: предстоит, можно закончить мысль;
-# «сейчас» — насыщенный фиолетовый: идёт; «время вышло» — с красным оттенком.
-PHASE_STYLE = {
-    "soon": ("#1C2140", "#34406E", style.AMBER),
-    "now": ("#3A2068", "#5B3A99", None),
-    "over": ("#3A1A2E", "#6E2E4E", style.RED),
-}
+def phase_style(phase: str) -> tuple[str, str, str | None]:
+    """Фаза карточки → (фон, рамка, цвет полоски и надписи; None — цвет активности) — в цветах текущей темы.
+    «Скоро» — холодный сине-фиолетовый и янтарь: предстоит, можно закончить мысль;
+    «сейчас» — фиолетовый: идёт; «время вышло» — с красным оттенком."""
+    bg, border = {"soon": style.CARD_SOON, "now": style.CARD_NOW, "over": style.CARD_OVER}[phase]
+    return bg, border, {"soon": style.AMBER, "over": style.RED}.get(phase)
 
 def parse_pos(text: str) -> QPoint | None:
     """Позиция столбика из настроек: «x,y» → QPoint; пусто или мусор — None (правый верхний угол)."""
@@ -137,7 +135,7 @@ class Card(QWidget):
         if phase == self.phase:
             return
         self.phase = phase
-        bg, border, accent = PHASE_STYLE[phase]
+        bg, border, accent = phase_style(phase)
         color = accent or style.KIND_COLOR.get(self.seg.activity.kind, style.BRAND_BRIGHT)
         self.frame.setStyleSheet(f"""
             QFrame#notecard {{ background: {bg}; border: 1px solid {border};
@@ -147,13 +145,18 @@ class Card(QWidget):
             QLabel#name {{ font-size: 12.5pt; font-weight: 700; }}
             QLabel#sub {{ color: {style.MUTED}; font-size: 8.5pt; }}
             QLabel#left {{ color: {color}; font-size: 13pt; font-weight: 800; }}
-            QPushButton {{ background: rgba(255,255,255,0.07); border: 1px solid {border}; border-radius: 7px;
+            QPushButton {{ background: {style.TINT2}; border: 1px solid {border}; border-radius: 7px;
               padding: 3px 9px; color: {style.INK}; font-weight: 600; font-size: 9pt; }}
             QPushButton:hover {{ border-color: {style.BRAND_BRIGHT}; }}
-            QPushButton#ok {{ background: {style.BRAND}; border-color: {style.BRAND}; color: white;
+            QPushButton#ok {{ background: {style.BRAND}; border-color: {style.BRAND}; color: {style.ON_BRAND};
               padding: 5px 9px; font-size: 10pt; }}
             QPushButton#ok:hover {{ background: {style.BRAND_BRIGHT}; }}
         """)
+
+    def restyle(self) -> None:
+        """Тему сменили — перекрасить."""
+        self.phase = ""
+        self.refresh()
 
     def refresh(self) -> None:
         now = self.clock()

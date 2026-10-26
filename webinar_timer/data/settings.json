@@ -10,6 +10,8 @@
   "player_pos": "532,773",
   "sound": false,
   "windows_toast": false,
+  "auto_update_check": true,
+  "theme": "light",
   "current_plan": "06e7f227c427",
   "live": "",
   "window_geometry": "AdnQywADAAAAAAD+AAAAQwAABf8AAANuAAAA/gAAAGAAAAX/AAADbgAAAAAAAAAABqsAAAD+AAAAYAAABf8AAANu"

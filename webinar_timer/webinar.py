@@ -45,11 +45,13 @@ def main() -> int:
         return 0
     setup_logging()
 
+    from webinar.ui import style
     from webinar.ui.main_window import MainWindow, make_icon
-    from webinar.ui.style import APP_QSS
-    app.setStyleSheet(APP_QSS)
+    settings = Settings.load()
+    style.apply(settings.theme)              # тема — до создания окон: они берут цвета при оформлении
+    app.setStyleSheet(style.APP_QSS)
     store = PlanStore()
-    win = MainWindow(store, Settings.load())
+    win = MainWindow(store, settings)
     app.setWindowIcon(make_icon())
     if store.warning:
         QMessageBox.warning(win, APP_NAME, store.warning)
