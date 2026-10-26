@@ -7,7 +7,7 @@
 """
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Callable
 
@@ -22,8 +22,24 @@ TITLE_FONT = "Furore"          # шрифт заголовков 1Т; если �
 VIDEO_EXT = {".mp4", ".mov", ".avi", ".mkv", ".webm", ".wmv", ".m4v"}
 
 
+_fonts_loaded = False
+
+
+def _load_media_fonts() -> None:
+    """Шрифт из папки media (Furore.otf) — если он не установлен в Windows: папку можно перенести на другой ПК."""
+    global _fonts_loaded
+    if _fonts_loaded:
+        return
+    _fonts_loaded = True
+    from ..store import MEDIA_DIR
+    for f in list(MEDIA_DIR.glob("*.otf")) + list(MEDIA_DIR.glob("*.ttf")):
+        QFontDatabase.addApplicationFont(str(f))
+
+
 def title_font(px: float) -> QFont:
     """Шрифт в пикселях экрана — одинаковый размер на мониторах с разным масштабом."""
+    if TITLE_FONT not in QFontDatabase.families():
+        _load_media_fonts()
     family = TITLE_FONT if TITLE_FONT in QFontDatabase.families() else "Segoe UI"
     f = QFont(family)
     if family != TITLE_FONT:
@@ -65,13 +81,49 @@ class BreakOverlay(_ScreenWindow):
                  title: str = "ПЕРЕРЫВ") -> None:
         super().__init__(screen)
         self.end, self.clock, self.title = end, clock, (title or "ПЕРЕРЫВ").upper()
+        self.total = max(timedelta(0), end - clock())     # длительность — для «Заново» и полосы на пульте
+        self._paused_left: timedelta | None = None        # отсчёт на паузе: сколько оставалось
         self.pixmap = QPixmap(image) if image else QPixmap()
         self._timer = QTimer(self)
         self._timer.timeout.connect(self.update)
         self._timer.start(250)
 
+    # ---- управление с пульта (расписание эфира при этом не сдвигается)
+    @property
+    def paused(self) -> bool:
+        return self._paused_left is not None
+
+    def left(self) -> timedelta:
+        return self._paused_left if self._paused_left is not None else self.end - self.clock()
+
+    def pause(self) -> None:
+        if self._paused_left is None:
+            self._paused_left = max(timedelta(0), self.end - self.clock())
+            self.update()
+
+    def resume(self) -> None:
+        if self._paused_left is not None:
+            self.end, self._paused_left = self.clock() + self._paused_left, None
+            self.update()
+
+    def add(self, delta: timedelta) -> None:
+        """±минута: перерыв длиннее или короче; после «ПРОДОЛЖАЕМ» +1 мин снова включает отсчёт."""
+        if self._paused_left is not None:
+            self._paused_left = max(timedelta(0), self._paused_left + delta)
+        else:
+            now = self.clock()
+            self.end = max(now, max(self.end, now) + delta if delta > timedelta(0) else self.end + delta)
+        self.total = max(timedelta(0), self.total + delta)
+        self.update()
+
+    def restart(self) -> None:
+        self.end = self.clock() + self.total
+        if self._paused_left is not None:
+            self._paused_left = self.total
+        self.update()
+
     def left_text(self) -> str:
-        left = self.end - self.clock()
+        left = self.left()
         return fmt_left(left) if left.total_seconds() > 0 else "ПРОДОЛЖАЕМ"
 
     def closeEvent(self, e) -> None:

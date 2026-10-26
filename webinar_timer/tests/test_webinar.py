@@ -13,7 +13,6 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 
 os.environ.setdefault("WEBINAR_DATA", tempfile.mkdtemp(prefix="webinar-test-"))
-os.environ.setdefault("AUTOPRINT_DATA", tempfile.mkdtemp(prefix="autoprint-test-"))
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -229,6 +228,8 @@ class WindowsTest(_WindowBase):
             self.assertGreaterEqual(self.win.agenda_scroll.width(), 340, width)
             e = self.win.start_edit
             self.assertLess(e.fontMetrics().horizontalAdvance("23:50"), e.lineEdit().width(), "старт виден")
+            b = self.win.break_min
+            self.assertLess(b.fontMetrics().horizontalAdvance("120 мин"), b.lineEdit().width(), "длительность перерыва видна")
         self.assertEqual(len(self.win.agenda.findChildren(type(self.win.rows[0]))), len(self.win.rows),
                          "старых строк повестки не осталось")
 
@@ -255,9 +256,197 @@ class WindowsTest(_WindowBase):
         self.walk(at("11:15"))
         self.assertIs(self.win.overlay, o, "после конца перерыва заставка ждёт, пока её уберут")
         self.assertEqual(o.left_text(), "ПРОДОЛЖАЕМ")
-        brk = next(c for c in self.win.notifier.cards if c.seg.activity.breaks)
-        brk.hide_break.emit()                         # кнопка «Убрать заставку» на мониторе управления
+        self.assertFalse([c for c in self.win.notifier.cards if c.seg.activity.breaks], "вместо карточки — пульт")
+        panel = self.win.break_panel
+        self.assertTrue(screens.control_screen(self.win.settings).availableGeometry().contains(panel.geometry()))
+        panel.refresh()
+        self.assertEqual(panel.big.text(), "00:00")
+        panel.stop_btn.click()                        # «Убрать» на пульте
         self.assertIsNone(self.win.overlay)
+        self.assertFalse(panel.isVisible(), "пульт ушёл вместе с заставкой")
+
+    def test_break_any_time_from_window_and_tray(self):
+        """Перерыв в любой момент — без эфира, кнопкой в окне и из трея; план не сдвигается."""
+        before = [s.start for s in self.win.scheduler.segs]
+        self.win.break_min.setValue(7)
+        self.win.break_btn.click()                           # эфир не ведётся — всё равно можно
+        o = self.win.overlay
+        self.assertIsNotNone(o)
+        self.assertEqual(o.geometry(), screens.demo_screen(self.win.settings).geometry())
+        self.assertEqual((o.end - self.clock.t, o.left_text()), (timedelta(minutes=7), "07:00"))
+        self.assertEqual(self.win.notifier.cards, [], "у ведущего — пульт, а не карточка")
+        self.assertEqual(self.win.break_panel.big.text(), "07:00")
+        self.assertEqual(self.win.break_btn.text(), "■ Убрать с экрана")
+        self.win.break_btn.click()                           # повторное нажатие — убрать
+        self.assertEqual((self.win.overlay, self.win.notifier.cards), (None, []))
+        self.assertEqual(self.win.break_btn.text(), "☕ Перерыв сейчас")
+
+        self.win._fill_tray_break()                          # меню в трее
+        items = [a.text() for a in self.win.tray_break.actions() if a.text()]
+        self.assertEqual(items, ["☕ 7 мин (как в окне)", "5 мин", "10 мин", "15 мин", "20 мин", "■ Убрать заставку"])
+        self.assertFalse(self.win.tray_break.actions()[-1].isEnabled(), "убирать пока нечего")
+        next(a for a in self.win.tray_break.actions() if a.text() == "15 мин").trigger()
+        self.assertEqual(self.win.overlay.left_text(), "15:00")
+        self.win._fill_tray_break()
+        self.win.tray_break.actions()[-1].trigger()          # «Убрать заставку» из трея
+        self.assertIsNone(self.win.overlay)
+        self.assertEqual([s.start for s in self.win.scheduler.segs], before, "расписание не сдвинулось")
+        self.assertEqual(wstore.Settings.load().manual_break_min, 7, "длительность запомнилась")
+
+    def test_eyes_any_time_from_window_and_tray(self):
+        """Зарядка в любой момент, как перерыв: видео гимнастики — на экран демонстрации; повторно — убрать."""
+        from PySide6.QtGui import QColor, QImage
+        img = Path(wstore.DATA_DIR) / "eyes_now.png"
+        q = QImage(32, 18, QImage.Format.Format_RGB32)
+        q.fill(QColor("green"))
+        q.save(str(img))
+        self.win.settings.eyes_media = "нет-такого-файла.mp4"
+        self.assertFalse(self.win.start_eyes(), "видео нет — подсказка, а не пустой экран")
+        self.assertIsNone(self.win.media)
+        self.win.settings.eyes_media = str(img)
+        self.win.eyes_btn.click()                            # эфир не ведётся — всё равно можно
+        self.assertIsNotNone(self.win.media)
+        self.assertEqual(self.win.media.geometry(), screens.demo_screen(self.win.settings).geometry())
+        self.assertEqual(self.win.eyes_btn.text(), "■ Убрать с экрана")
+        self.win.eyes_btn.click()
+        self.assertIsNone(self.win.media)
+        self.assertEqual(self.win.eyes_btn.text(), "👁 Зарядка сейчас")
+        tray = next(a for a in self.win.tray.contextMenu().actions() if a.text() == "👁 Зарядка сейчас")
+        tray.trigger()                                       # из трея
+        self.assertIsNotNone(self.win.media)
+        self.win._hide_demo()
+
+    def test_break_panel_pause_and_minutes(self):
+        """Пульт перерыва: пауза замораживает отсчёт у зрителей, ±1 мин, «Заново»; после конца +1 мин — снова отсчёт."""
+        self.win.start_break(10)
+        o, panel = self.win.overlay, self.win.break_panel
+        self.clock.t += timedelta(minutes=3)
+        panel.refresh()
+        self.assertEqual((o.left_text(), panel.big.text()), ("07:00", "07:00"))
+        self.assertEqual(panel.progress.value(), 300)
+        panel.pause_btn.click()
+        self.assertEqual(panel.pause_btn.text(), "▶ Продолжить")
+        self.clock.t += timedelta(minutes=2)
+        self.assertEqual(o.left_text(), "07:00", "на паузе отсчёт стоит")
+        panel.pause_btn.click()
+        self.clock.t += timedelta(minutes=1)
+        self.assertEqual(o.left_text(), "06:00")
+        panel.more_btn.click()
+        self.assertEqual(o.left_text(), "07:00")
+        panel.less_btn.click()
+        panel.less_btn.click()
+        self.assertEqual(o.left_text(), "05:00")
+        panel.restart_btn.click()
+        self.assertEqual(o.left_text(), "09:00", "заново — на всю (уже изменённую) длительность")
+        self.clock.t += timedelta(minutes=12)
+        panel.refresh()
+        self.assertEqual((o.left_text(), panel.big.text()), ("ПРОДОЛЖАЕМ", "00:00"))
+        panel.more_btn.click()
+        self.assertEqual(o.left_text(), "01:00", "время вышло, +1 мин — ещё минута отсчёта")
+        for _ in range(3):
+            panel.less_btn.click()
+        self.assertEqual(o.left_text(), "ПРОДОЛЖАЕМ", "не меньше нуля")
+        self.win._hide_break()
+        self.assertIsNone(self.win.overlay)
+
+    def test_video_has_player_on_control_monitor(self):
+        """У видео — пульт на мониторе управления (у картинки — нет); «Убрать» — видео и пульт уходят вместе."""
+        from PySide6.QtCore import QEvent
+        from shiboken6 import isValid
+        video = Path(wstore.DATA_DIR) / "eyes.mp4"
+        video.write_bytes(b"")
+        self.win._show_media(str(video))
+        panel = self.win.player_panel
+        self.assertIsNotNone(panel)
+        self.assertTrue(screens.control_screen(self.win.settings).availableGeometry().contains(panel.geometry()))
+        self.assertEqual(panel.title.text(), "eyes")
+        panel.stop_btn.click()
+        app.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+        self.assertIsNone(self.win.media)
+        self.assertFalse(isValid(panel) and panel.isVisible(), "пульт ушёл вместе с видео")
+        self.assertIsNone(self.win.player_panel)
+        self.assertEqual(self.win.eyes_btn.text(), "👁 Зарядка сейчас")
+
+        from PySide6.QtGui import QColor, QImage
+        img = Path(wstore.DATA_DIR) / "eyes_pic.png"
+        q = QImage(32, 18, QImage.Format.Format_RGB32)
+        q.fill(QColor("green"))
+        q.save(str(img))
+        self.win._show_media(str(img))
+        self.assertIsNone(self.win.player_panel, "у картинки пульта нет")
+        self.win._hide_demo()
+
+    def test_player_panel_seek_pause_volume(self):
+        """Пульт: пауза/играть, ±10 с (не дальше начала и конца), с начала, громкость, перетаскивание."""
+        from PySide6.QtCore import QObject, QPoint, Signal
+        from PySide6.QtMultimedia import QMediaPlayer
+
+        from webinar.ui.player import PlayerPanel, fmt_ms
+
+        class FakePlayer(QObject):
+            positionChanged = Signal(int)
+            durationChanged = Signal(int)
+            playbackStateChanged = Signal(object)
+
+            def __init__(self):
+                super().__init__()
+                self.pos, self.state = 5_000, QMediaPlayer.PlaybackState.PlayingState
+
+            def position(self): return self.pos
+            def duration(self): return 60_000
+            def playbackState(self): return self.state
+            def setPosition(self, ms): self.pos = ms
+            def play(self): self.state = QMediaPlayer.PlaybackState.PlayingState
+            def pause(self): self.state = QMediaPlayer.PlaybackState.PausedState
+
+        class FakeAudio:
+            vol, muted = 1.0, False
+            def volume(self): return self.vol
+            def setVolume(self, v): self.vol = v
+            def isMuted(self): return self.muted
+            def setMuted(self, m): self.muted = m
+
+        p, a = FakePlayer(), FakeAudio()
+        screen = screens.control_screen(self.win.settings)
+        panel = PlayerPanel(p, a, "Гимнастика", screen)
+        self.assertEqual(panel.time.text(), "0:05 / 1:00")
+        self.assertEqual(panel.play_btn.text(), "❚❚ Пауза")
+        panel.play_btn.click()
+        self.assertEqual(p.state, QMediaPlayer.PlaybackState.PausedState)
+        self.assertEqual(panel.play_btn.text(), "▶ Играть")
+        panel.play_btn.click()
+        self.assertEqual(p.state, QMediaPlayer.PlaybackState.PlayingState)
+        panel.back_btn.click()
+        self.assertEqual(p.pos, 0, "назад — не раньше начала")
+        panel.fwd_btn.click()
+        self.assertEqual(p.pos, 10_000)
+        for _ in range(6):
+            panel.fwd_btn.click()
+        self.assertLess(p.pos, 60_000, "вперёд — не до самого конца: видео не закрывается само")
+        panel.restart_btn.click()
+        self.assertEqual((p.pos, panel.slider.value()), (0, 0))
+        panel.volume.setValue(40)
+        self.assertAlmostEqual(a.vol, 0.4)
+        panel.mute_btn.click()
+        self.assertTrue(a.muted)
+        self.assertEqual(panel.mute_btn.text(), "🔇")
+        self.assertEqual(fmt_ms(3_725_000), "1:02:05")
+
+        area = screen.availableGeometry()
+        panel.place()                                        # по умолчанию — внизу по центру
+        self.assertTrue(area.contains(panel.geometry()))
+        self.assertAlmostEqual(panel.geometry().center().x(), area.center().x(), delta=2)
+        far = PlayerPanel(p, a, "x", screen, QPoint(-5000, 99999))     # чужая позиция — всё равно на экране
+        far.place()
+        self.assertTrue(area.contains(far.geometry()))
+        moved = []
+        panel.dropped.connect(moved.append)
+        panel._drag_from = QPoint(0, 0)
+        panel.move(area.left() + 40, area.top() + 50)
+        panel.mouseReleaseEvent(None)
+        self.assertEqual(moved, [QPoint(40, 50)])
+        for w in (panel, far):
+            w.close()
 
     def test_stop_clears_everything(self):
         self.win.run_btn.setChecked(True)
@@ -311,6 +500,24 @@ class ButtonsAndMediaTest(_WindowBase):
         self.win._hide_demo()
         self.assertIsNone(self.win.media)
 
+    def test_card_tint_follows_phase(self):
+        """Что предстоит и что идёт — разными оттенками; карточка «скоро» сама перекрашивается в «сейчас»."""
+        seg = segments(PLAN, DAY)[1]                         # «Зарядка» 11:02–11:05
+        self.clock.t = at("11:01")
+        card = notify.Card(seg, True, self.clock)
+        self.assertEqual(card.phase, "soon")
+        soon_css = card.frame.styleSheet()
+        self.clock.t = at("11:03")
+        card.refresh()
+        self.assertEqual(card.phase, "now")
+        self.assertNotEqual(card.frame.styleSheet(), soon_css, "другой оттенок")
+        self.clock.t = at("11:06")
+        card.refresh()
+        self.assertEqual((card.phase, card.label.text()), ("over", "ВРЕМЯ ВЫШЛО"))
+        backgrounds = {notify.PHASE_STYLE[ph][0] for ph in ("soon", "now", "over")}
+        self.assertEqual(len(backgrounds), 3, "у фаз разные фоны")
+        card.close()
+
     def test_drag_card_saves_position(self):
         """Карточку перетащили мышью — столбик переехал, позиция сохранена и действует для следующих."""
         from PySide6.QtCore import QPoint, Qt
@@ -331,7 +538,7 @@ class ButtonsAndMediaTest(_WindowBase):
         self.assertEqual(self.win.settings.note_pos, f"{card.x() - area.left()},{card.y() - area.top()}")
         self.assertEqual(wstore.Settings.load().note_pos, self.win.settings.note_pos, "сохранено в файл")
 
-        self.walk(at("11:10"))                               # следующее напоминание — перерыв
+        self.walk(at("11:09"))                               # следующее напоминание — «скоро перерыв»
         names = [c.seg.activity.name for c in self.win.notifier.cards]
         self.assertIn("ПЕРЕРЫВ", names)
         self.assertEqual(self.win.notifier.cards[0].pos(), card.pos(), "столбик начинается с той же точки")
@@ -394,6 +601,18 @@ class SettingsSaveTest(unittest.TestCase):
             self.assertEqual(result.get("modality"), Qt.WindowModality.WindowModal, type(dlg).__name__)
             self.assertTrue(result.get("clicked"), f"кнопка карточки не нажалась при открытом {type(dlg).__name__}")
             QEventLoop().processEvents()
+
+    def test_media_paths_relative_to_app_folder(self):
+        """Файлы из папки приложения хранятся относительными путями — папку webinar_timer можно перенести."""
+        inside = wstore.MEDIA_DIR / "Фон.jpg"
+        self.assertEqual(wstore.portable(str(inside)), "media/Фон.jpg")
+        self.assertEqual(Path(wstore.resolve("media/Фон.jpg")), inside)
+        outside = str(Path(tempfile.gettempdir()) / "чужой.mp4")
+        self.assertEqual(wstore.portable(outside), outside, "вне папки — как есть")
+        self.assertEqual(wstore.existing("media/нет-такого.mp4"), "")
+        s = wstore.Settings()
+        self.assertEqual((s.break_image, s.eyes_media), ("media/Фон.jpg", "media/Гимнастика для глаз.mp4"))
+        self.assertEqual(wstore.APP_DIR.name, "webinar_timer")
 
     def test_media_roundtrip(self):
         p = plan_from({"start": "11:00", "schedule": [{"name": "Зарядка", "min": 5, "media": "C:/v/eyes.mp4"}]})

@@ -1,0 +1,14 @@
+{
+  "demo_screen": "27GL850",
+  "control_screen": "LG HDR 4K",
+  "break_image": "media/Фон.jpg",
+  "eyes_media": "media/Гимнастика для глаз.mp4",
+  "heads_up_min": 1,
+  "manual_break_min": 10,
+  "note_pos": "1342,30",
+  "player_pos": "532,774",
+  "sound": false,
+  "windows_toast": false,
+  "current_plan": "2eb5412c56dd",
+  "window_geometry": "AdnQywADAAAAAAD+AAAAQwAABa0AAAMvAAAA/gAAAGAAAAWtAAADLwAAAAAAAAAABqsAAAD+AAAAYAAABa0AAAMv"
+}

@@ -1,6 +1,17 @@
 # --- Рабочие данные пользователя (образцы, настройки, журнал) ---
 data/
 
+# Таймер вебинара: шаблоны и настройки едут с папкой и хранятся в git (резервная копия);
+# журнал, блокировка, копия .bak и значок — у каждого свои
+!webinar_timer/data/
+webinar_timer/data/logs/
+webinar_timer/data/*.bak
+webinar_timer/data/webinar.ico
+webinar_timer/webinar.ico
+# медиа (видео, фон, шрифт) копируются вместе с папкой, но в git не кладутся — большие файлы
+webinar_timer/media/*
+!webinar_timer/media/README.md
+
 # --- Python ---
 __pycache__/
 *.py[cod]

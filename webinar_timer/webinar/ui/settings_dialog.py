@@ -11,7 +11,7 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QFileDialog, QForm
                                QLineEdit, QPushButton, QSpinBox, QVBoxLayout)
 
 from ..model import DEMO_OFF, Activity, Segment
-from ..store import Settings
+from ..store import MEDIA_DIR, Settings, existing, portable, resolve
 from . import screens
 from .editor import finish_on_enter
 from .notify import Notifier, parse_pos
@@ -52,8 +52,8 @@ class SettingsDialog(QDialog):
         test_note.clicked.connect(self._test_note)
         test_break = QPushButton("Проба заставки (10 с)")
         test_break.clicked.connect(self._test_break)
-        reset = QPushButton("Сбросить позицию напоминаний")
-        reset.setToolTip("Напоминания снова в правом верхнем углу монитора управления")
+        reset = QPushButton("Сбросить позиции напоминаний и пульта")
+        reset.setToolTip("Напоминания — снова в правом верхнем углу монитора управления, пульт видео — внизу по центру")
         reset.clicked.connect(self._reset_pos)
         for b in (ident, test_note, test_break):
             probe.addWidget(b)
@@ -99,7 +99,7 @@ class SettingsDialog(QDialog):
             super().keyPressEvent(e)
 
     def _reset_pos(self) -> None:
-        self.s.note_pos = ""
+        self.s.note_pos = self.s.player_pos = ""
         if hasattr(self, "_notifier"):
             self._notifier.anchor = None
             self._notifier.layout()
@@ -120,10 +120,10 @@ class SettingsDialog(QDialog):
         return edit
 
     def _pick(self, edit: QLineEdit, title: str, filt: str) -> None:
-        start = str(Path(edit.text()).parent) if edit.text() else ""
+        start = str(Path(resolve(edit.text())).parent) if edit.text() else str(MEDIA_DIR)
         path, _ = QFileDialog.getOpenFileName(self, title.rstrip(":"), start, filt)
         if path:
-            edit.setText(path)
+            edit.setText(portable(path))   # из папки media — относительным путём: папку можно перенести
 
     def _collect(self) -> Settings:
         s = self.s
@@ -149,7 +149,8 @@ class SettingsDialog(QDialog):
     def _test_break(self) -> None:
         s = self._collect()
         now = datetime.now()
-        o = BreakOverlay(screens.demo_screen(s), now + timedelta(seconds=10), datetime.now, s.break_image, "Перерыв")
+        o = BreakOverlay(screens.demo_screen(s), now + timedelta(seconds=10), datetime.now, existing(s.break_image),
+                         "Перерыв")
         o.show()
         o.raise_()
         self._keep([o])

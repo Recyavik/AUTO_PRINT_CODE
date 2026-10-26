@@ -1,0 +1,182 @@
+{
+  "version": 1,
+  "saved": 1793004070.8131788,
+  "plans": [
+    {
+      "id": "2eb5412c56dd",
+      "title": "Вебинар 1Т (Первая пара)",
+      "start": "11:00",
+      "part_min": 45,
+      "schedule": [
+        {
+          "name": "Приветствие",
+          "demo": "on",
+          "min": 1,
+          "remind": false
+        },
+        {
+          "name": "Целеполагание",
+          "demo": "off",
+          "min": 5,
+          "remind": true
+        },
+        {
+          "name": "Теория",
+          "demo": "on",
+          "min": 14,
+          "remind": true
+        },
+        {
+          "name": "ЗАРЯДКА ДЛЯ ГЛАЗ",
+          "demo": "off",
+          "min": 5,
+          "remind": true
+        },
+        {
+          "name": "Теория",
+          "demo": "on",
+          "min": 15,
+          "remind": true
+        },
+        {
+          "name": "Выводы",
+          "demo": "off",
+          "min": 5,
+          "remind": true
+        },
+        {
+          "name": "ПЕРЕРЫВ",
+          "demo": "none",
+          "min": 10,
+          "remind": true
+        },
+        {
+          "name": "Разбор СР прошлого занятия",
+          "demo": "on",
+          "min": 7
+        },
+        {
+          "name": "Слайды заданий",
+          "demo": "on",
+          "min": 10,
+          "remind": true
+        },
+        {
+          "name": "ЗАРЯДКА ДЛЯ ГЛАЗ",
+          "demo": "on",
+          "min": 5,
+          "remind": true
+        },
+        {
+          "name": "Тренажёры",
+          "demo": "on",
+          "min": 10,
+          "remind": true
+        },
+        {
+          "name": "ИСР",
+          "demo": "on",
+          "min": 10,
+          "remind": true
+        },
+        {
+          "name": "Выводы",
+          "demo": "off",
+          "min": 3,
+          "remind": true
+        }
+      ]
+    },
+    {
+      "id": "06e7f227c427",
+      "title": "Вебинар 1Т (Первая пара) (копия)",
+      "start": "11:00",
+      "part_min": 45,
+      "schedule": [
+        {
+          "name": "Приветствие",
+          "demo": "on",
+          "min": 1,
+          "remind": false
+        },
+        {
+          "name": "Целеполагание",
+          "demo": "off",
+          "min": 5,
+          "remind": true
+        },
+        {
+          "name": "Слайды практики",
+          "demo": "on",
+          "min": 14,
+          "remind": true
+        },
+        {
+          "name": "ЗАРЯДКА ДЛЯ ГЛАЗ",
+          "demo": "off",
+          "min": 5,
+          "remind": true
+        },
+        {
+          "name": "Теория",
+          "demo": "on",
+          "min": 15,
+          "remind": true
+        },
+        {
+          "name": "Выводы",
+          "demo": "off",
+          "min": 5,
+          "remind": true
+        },
+        {
+          "name": "ПЕРЕРЫВ",
+          "demo": "none",
+          "min": 10,
+          "remind": true
+        },
+        {
+          "name": "Викторина",
+          "demo": "off",
+          "min": 7,
+          "remind": true
+        },
+        {
+          "name": "Разбор СР прошлого занятия",
+          "demo": "off",
+          "min": 5
+        },
+        {
+          "name": "Слайды заданий",
+          "demo": "on",
+          "min": 8,
+          "remind": true
+        },
+        {
+          "name": "Тренажёры",
+          "demo": "on",
+          "min": 7,
+          "remind": true
+        },
+        {
+          "name": "ЗАРЯДКА ДЛЯ ГЛАЗ",
+          "demo": "off",
+          "min": 5,
+          "remind": true
+        },
+        {
+          "name": "ИСР",
+          "demo": "on",
+          "min": 10,
+          "remind": true
+        },
+        {
+          "name": "Выводы",
+          "demo": "off",
+          "min": 3,
+          "remind": true
+        }
+      ]
+    }
+  ]
+}

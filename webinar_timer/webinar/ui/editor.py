@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog, QFil
                                QTimeEdit, QToolButton, QVBoxLayout, QWidget)
 
 from ..model import DEMO_NONE, DEMO_OFF, DEMO_ON, Activity, Plan, parse_time, plan_from, plan_to
+from ..store import MEDIA_DIR, portable, resolve
 
 DEMO_ITEMS = [("ВКЛ", DEMO_ON), ("ВЫКЛ", DEMO_OFF), ("нет", DEMO_NONE)]
 COLS = ["", "Активность", "Демонстрация", "Минуты", "Напомнить", "Перерыв", "На экран", ""]
@@ -290,10 +291,10 @@ class PlanEditor(QDialog):
                                    "у перерыва — фон из настроек")
 
         def choose() -> None:
-            path, _ = QFileDialog.getOpenFileName(self, f"Файл для «{a.name}»", str(Path(a.media).parent) if a.media
-                                                  else "", MEDIA_FILTER)
+            start = str(Path(resolve(a.media)).parent) if a.media else str(MEDIA_DIR)
+            path, _ = QFileDialog.getOpenFileName(self, f"Файл для «{a.name}»", start, MEDIA_FILTER)
             if path:
-                a.media = path
+                a.media = portable(path)
                 self._fill()
 
         def clear() -> None:

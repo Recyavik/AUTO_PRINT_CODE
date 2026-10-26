@@ -4,24 +4,25 @@ from __future__ import annotations
 import copy
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from PySide6.QtCore import QByteArray, QPoint, QPointF, QRectF, Qt, QTime
 from PySide6.QtGui import QAction, QColor, QFontMetrics, QIcon, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import (QFileDialog, QFrame, QGridLayout, QHBoxLayout, QInputDialog, QLabel, QListWidget,
                                QListWidgetItem, QMainWindow, QMenu, QMessageBox, QProgressBar, QPushButton,
-                               QScrollArea, QSystemTrayIcon, QTimeEdit, QVBoxLayout, QWidget)
+                               QScrollArea, QSpinBox, QSystemTrayIcon, QTimeEdit, QVBoxLayout, QWidget)
 
 from .. import APP_NAME, __version__
-from ..model import DEMO_NONE, DEMO_ON, DEMO_TEXT, Plan, Segment, State, default_plan, fmt_left, parse_time, plan_from, \
+from ..model import DEMO_NONE, DEMO_ON, DEMO_TEXT, Activity, Plan, Segment, State, default_plan, fmt_left, parse_time, plan_from, \
     plan_to
 from ..scheduler import Scheduler
-from ..store import PlanStore, Settings
+from ..store import PlanStore, Settings, existing
 from . import screens, style
 from .editor import PlanEditor
 from .notify import Notifier, parse_pos
 from .overlay import BreakOverlay, MediaOverlay
+from .player import BreakPanel, PlayerPanel
 from .settings_dialog import SettingsDialog
 
 log = logging.getLogger("webinar")
@@ -80,6 +81,11 @@ class FitLabel(QLabel):
         width = QFontMetrics(f).horizontalAdvance(self.text() or "0:00:00")
         avail = max(1, self.width() - 8)
         px = max(self.min_px, min(self.max_px, int(self.max_px * avail / max(1, width))))
+        while px > self.min_px:          # ширина растёт не строго пропорционально размеру — проверяем точно
+            f.setPixelSize(px)
+            if QFontMetrics(f).horizontalAdvance(self.text() or "0:00:00") <= avail:
+                break
+            px -= 1
         if px != self.px:
             self.px = px
             self.setStyleSheet(f"{self.css} font-size: {px}px;")
@@ -137,6 +143,8 @@ class MainWindow(QMainWindow):
         self.resize(1200, 720)
         self.overlay: BreakOverlay | None = None
         self.media: MediaOverlay | None = None        # видео/картинка активности на экране демонстрации
+        self.player_panel: PlayerPanel | None = None  # пульт этого видео на мониторе управления
+        self.break_panel: BreakPanel | None = None    # пульт перерыва (вместо карточки с отсчётом)
         self.rows: list[AgendaRow] = []
         self._quitting = False
         self._last_index = -2
@@ -224,6 +232,30 @@ class MainWindow(QMainWindow):
         st.addWidget(self.start_edit, 1)
         st.addWidget(now_btn)
         ll.addLayout(st)
+
+        # перерыв в любой момент: не по расписанию, план не сдвигает
+        br = QHBoxLayout()
+        self.break_btn = QPushButton("☕ Перерыв сейчас")
+        self.break_btn.setToolTip("Заставка перерыва с отсчётом — на экран демонстрации прямо сейчас.\n"
+                                  "Повторное нажатие — убрать заставку.")
+        self.break_btn.clicked.connect(self._toggle_break)
+        self.break_min = QSpinBox()
+        self.break_min.setRange(1, 120)
+        self.break_min.setSuffix(" мин")
+        self.break_min.setMinimumWidth(110)
+        self.break_min.setValue(max(1, min(120, self.settings.manual_break_min)))
+        self.break_min.setToolTip("Сколько длится перерыв")
+        self.break_min.valueChanged.connect(self._save_break_min)
+        br.addWidget(QLabel("Перерыв:"))
+        br.addWidget(self.break_min, 1)
+        ll.addLayout(br)
+        ll.addWidget(self.break_btn)     # во всю ширину: рядом со счётчиком в узкой панели не помещалось
+        self.eyes_btn = QPushButton("👁 Зарядка сейчас")
+        self.eyes_btn.setToolTip("Видео гимнастики для глаз — на экран демонстрации прямо сейчас.\n"
+                                 "Повторное нажатие — убрать. Видео выбирается в ⚙ Настройках.")
+        self.eyes_btn.clicked.connect(self._toggle_eyes)
+        ll.addWidget(self.eyes_btn)
+
         self.run_btn = QPushButton("▶ Вести эфир", objectName="primary")
         self.run_btn.setCheckable(True)
         self.run_btn.setMinimumHeight(44)
@@ -278,6 +310,10 @@ class MainWindow(QMainWindow):
         self.tray_run = QAction("Вести эфир", menu, checkable=True)
         self.tray_run.toggled.connect(self.run_btn.setChecked)
         menu.addAction(self.tray_run)
+        # перерыв в любой момент — прямо из трея, не открывая окно
+        self.tray_break = menu.addMenu("☕ Перерыв сейчас")
+        self.tray_break.aboutToShow.connect(self._fill_tray_break)
+        menu.addAction("👁 Зарядка сейчас", self.start_eyes)
         menu.addAction("Убрать с экрана демонстрации", self._hide_demo)
         menu.addAction("Убрать все напоминания", self.notifier.clear)
         menu.addSeparator()
@@ -414,7 +450,8 @@ class MainWindow(QMainWindow):
         self.settings.save()
 
     def _remind(self, seg: Segment, heads_up: bool) -> None:
-        self.notifier.show(seg, heads_up)
+        if not (seg.activity.breaks and not heads_up and self.break_panel is not None):
+            self.notifier.show(seg, heads_up)      # перерыв уже идёт — у ведущего его пульт, карточка не нужна
         if self.settings.sound:
             _sound()
         if self.settings.windows_toast:
@@ -425,18 +462,31 @@ class MainWindow(QMainWindow):
     def media_of(self, seg: Segment) -> str:
         """Файл активности на экран демонстрации: свой у блока, у зарядки для глаз — из настроек."""
         a = seg.activity
-        path = a.media or (self.settings.eyes_media if a.kind == "eyes" else "")
-        return path if path and Path(path).is_file() else ""
+        return existing(a.media) or (existing(self.settings.eyes_media) if a.kind == "eyes" else "")
 
     def _show_break(self, seg: Segment) -> None:
         self._hide_demo()
-        image = seg.activity.media or self.settings.break_image
+        image = existing(seg.activity.media) or existing(self.settings.break_image)
         self.overlay = BreakOverlay(screens.demo_screen(self.settings), seg.end, self.clock, image, seg.activity.name)
         o = self.overlay
         o.closed.connect(lambda: self.overlay is o and setattr(self, "overlay", None))
         o.show()
         o.raise_()
+        self._show_break_panel(o)
         log.info("Перерыв: заставка до %s", f"{seg.end:%H:%M}")
+
+    def _show_break_panel(self, o: BreakOverlay) -> None:
+        """Пульт перерыва — на монитор управления: отсчёт, пауза, ±1 мин, заново, убрать. Заменяет карточку."""
+        for c in [c for c in self.notifier.cards if c.seg.activity.breaks]:
+            self.notifier.close(c)
+        panel = BreakPanel(o, screens.control_screen(self.settings), parse_pos(self.settings.player_pos))
+        self.break_panel = panel
+        panel.stop_requested.connect(lambda: self.overlay is o and self._hide_break())
+        panel.dropped.connect(self._save_player_pos)
+        o.closed.connect(panel.close)            # заставку убрали — пульт уходит вместе с ней
+        panel.destroyed.connect(lambda: self.break_panel is panel and setattr(self, "break_panel", None))
+        panel.place()
+        panel.show()
 
     def _start_activity(self, seg: Segment) -> None:
         """«Далее ▶» в напоминании: перерыв — заставка, у активности с файлом — файл на экран демонстрации."""
@@ -445,20 +495,102 @@ class MainWindow(QMainWindow):
                 self._show_break(seg)
             return
         path = self.media_of(seg)
-        if not path:
-            return
+        if path:
+            self._show_media(path)
+
+    def _show_media(self, path: str) -> None:
+        """Видео или картинка — на весь экран демонстрации (видео само закроется в конце)."""
         self._hide_demo()
         self.media = MediaOverlay(screens.demo_screen(self.settings), path)
         m = self.media
         m.closed.connect(lambda: self.media is m and setattr(self, "media", None))
         m.show()
         m.raise_()
+        if m.player is not None:
+            self._show_player(m, Path(path).stem)
+        self._sync_break_btn()
         log.info("На экран демонстрации: %s", Path(path).name)
+
+    def _show_player(self, m: MediaOverlay, title: str) -> None:
+        """Пульт видео — на монитор управления: зрители видят только само видео."""
+        panel = PlayerPanel(m.player, m.audio, title, screens.control_screen(self.settings),
+                            parse_pos(self.settings.player_pos))
+        self.player_panel = panel
+        panel.stop_requested.connect(lambda: self.media is m and self._hide_demo())
+        panel.dropped.connect(self._save_player_pos)
+        m.closed.connect(panel.close)            # видео кончилось или его убрали — пульт уходит вместе с ним
+        panel.destroyed.connect(lambda: self.player_panel is panel and setattr(self, "player_panel", None))
+        panel.place()
+        panel.show()
+
+    def _save_player_pos(self, anchor: QPoint) -> None:
+        self.settings.player_pos = f"{anchor.x()},{anchor.y()}"
+        self.settings.save()
+
+    def start_break(self, minutes: int | None = None) -> None:
+        """Перерыв в любой момент: заставка на экран демонстрации, пульт с отсчётом — на монитор управления."""
+        minutes = minutes or self.break_min.value()
+        now = self.clock()
+        seg = Segment(-1, Activity("ПЕРЕРЫВ", DEMO_NONE, minutes, remind=True, is_break=True),
+                      now, now + timedelta(minutes=minutes))
+        self._show_break(seg)
+        log.info("Перерыв вне расписания: %d мин", minutes)
+        self._sync_break_btn()
+
+    def _fill_tray_break(self) -> None:
+        m = self.tray_break
+        m.clear()
+        own = self.break_min.value()
+        m.addAction(f"☕ {own} мин (как в окне)", lambda: self.start_break(own))
+        m.addSeparator()
+        for n in (5, 10, 15, 20):
+            if n != own:
+                m.addAction(f"{n} мин", lambda n=n: self.start_break(n))
+        m.addSeparator()
+        hide = m.addAction("■ Убрать заставку", self._hide_break)
+        hide.setEnabled(self.overlay is not None)
+
+    def start_eyes(self) -> bool:
+        """Зарядка для глаз в любой момент: видео гимнастики — на экран демонстрации. False — видео не найдено."""
+        path = existing(self.settings.eyes_media)
+        if not path:
+            self.tray.showMessage(APP_NAME, "Видео гимнастики не найдено: выберите его в ⚙ Настройки → "
+                                  "«Гимнастика для глаз».", make_icon(), 6000)
+            return False
+        self._show_media(path)
+        log.info("Зарядка вне расписания: %s", Path(path).name)
+        return True
+
+    def _toggle_eyes(self) -> None:
+        if self.media is not None:
+            self._hide_demo()
+        else:
+            self.start_eyes()
+
+    def _toggle_break(self) -> None:
+        if self.overlay is not None:
+            self._hide_break()
+        else:
+            self.start_break()
+
+    def _save_break_min(self, v: int) -> None:
+        self.settings.manual_break_min = v
+        self.settings.save()
+
+    def _sync_break_btn(self) -> None:
+        for btn, on, label in ((self.break_btn, self.overlay is not None, "☕ Перерыв сейчас"),
+                               (self.eyes_btn, self.media is not None, "👁 Зарядка сейчас")):
+            text = "■ Убрать с экрана" if on else label
+            if btn.text() != text:
+                btn.setText(text)
 
     def _hide_break(self) -> None:
         if self.overlay is not None:
             o, self.overlay = self.overlay, None
             o.close()
+        for c in [c for c in self.notifier.cards if c.seg.index == -1]:
+            self.notifier.close(c)       # карточка перерыва «вне расписания» уходит вместе с заставкой
+        self._sync_break_btn()
 
     def _hide_demo(self) -> None:
         """Убрать с экрана демонстрации всё наше: заставку перерыва и файл активности."""
@@ -466,6 +598,7 @@ class MainWindow(QMainWindow):
         if self.media is not None:
             m, self.media = self.media, None
             m.close()
+        self._sync_break_btn()
 
     def _on_finished(self) -> None:
         log.info("Эфир завершён по расписанию")
@@ -485,6 +618,7 @@ class MainWindow(QMainWindow):
         self._on_tick(self.scheduler.state())
 
     def _on_tick(self, st: State) -> None:
+        self._sync_break_btn()   # заставку могли убрать щелчком по ней или из напоминания
         now = self.clock()
         self.clock_lbl.setText(f"{now:%H:%M:%S}")
         self.today.setText(now.strftime("%d.%m.%Y"))

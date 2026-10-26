@@ -33,6 +33,8 @@ def main() -> int:
         sys.stdout.reconfigure(encoding="utf-8")
     steps = [
         ("Python: тесты ядра и интерфейса", [sys.executable, "-m", "unittest", "discover", "-s", "tests", "-p", "test_*.py"], ROOT),
+        ("Python: тесты таймера вебинара", [sys.executable, "-m", "unittest", "discover", "-s", "webinar_timer/tests",
+                                             "-p", "test_*.py"], ROOT),
         ("Эталоны веб-версии совпадают с Python", [sys.executable, "tools/make_web_fixtures.py", "--check"], ROOT),
         ("Веб: типы", [NPM, "run", "typecheck"], WEB),
         ("Веб: тесты (паритет с Python, движок, текстовые блоки)", [NPM, "test"], WEB),

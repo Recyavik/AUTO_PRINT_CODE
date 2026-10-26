@@ -1,7 +1,8 @@
 """Таймер вебинара — запуск: python webinar.py (или webinar.bat).
 
 Повестка эфира по часам, напоминания на мониторе управления, заставка перерыва на мониторе демонстрации.
-Работает отдельно от AutoPrintCode (и рядом с его веб-версией); данные — в data/webinar/.
+Работает отдельно от AutoPrintCode (и рядом с его веб-версией). Папка самодостаточна:
+data/ — шаблоны и настройки, media/ — фон перерыва, видео гимнастики, шрифт Furore.
 """
 from __future__ import annotations
 
@@ -16,7 +17,6 @@ from PySide6.QtWidgets import QApplication, QMessageBox
 from webinar import APP_NAME, __version__
 from webinar.store import DATA_DIR, PlanStore, Settings
 
-APP_ID = "autoprintcode.webinar-timer"
 
 
 def setup_logging() -> None:
@@ -31,8 +31,8 @@ def setup_logging() -> None:
 
 def main() -> int:
     if sys.platform == "win32":
-        from autoprint import taskbar
-        taskbar.set_process_app_id(APP_ID)   # своя кнопка на панели задач, а не «Python»
+        from webinar import taskbar
+        taskbar.set_process_app_id()         # своя кнопка на панели задач, а не «Python»
     app = QApplication(sys.argv)
     app.setApplicationName(APP_NAME)
     app.setQuitOnLastWindowClosed(False)     # закрытое окно — в трее, эфир продолжается
@@ -57,8 +57,8 @@ def main() -> int:
     if sys.platform == "win32":
         ico = DATA_DIR / "webinar.ico"
         if make_icon().pixmap(256).save(str(ico), "ICO"):
-            from autoprint import taskbar
-            taskbar.apply_to_window(int(win.winId()), str(ico), APP_NAME, APP_ID)
+            from webinar import taskbar
+            taskbar.apply_to_window(int(win.winId()), str(ico), APP_NAME)
     code = app.exec()
     lock.unlock()
     return code

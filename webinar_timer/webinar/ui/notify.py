@@ -25,6 +25,14 @@ WIDTH = 330
 GAP = 8
 SNOOZE_MS = 60_000      # «Через 1 мин»
 
+# Фаза карточки → (фон, рамка, цвет полоски и надписи; None — цвет активности).
+# «Скоро» — холодный сине-фиолетовый и янтарь: предстоит, можно закончить мысль;
+# «сейчас» — насыщенный фиолетовый: идёт; «время вышло» — с красным оттенком.
+PHASE_STYLE = {
+    "soon": ("#1C2140", "#34406E", style.AMBER),
+    "now": ("#3A2068", "#5B3A99", None),
+    "over": ("#3A1A2E", "#6E2E4E", style.RED),
+}
 
 def parse_pos(text: str) -> QPoint | None:
     """Позиция столбика из настроек: «x,y» → QPoint; пусто или мусор — None (правый верхний угол)."""
@@ -50,24 +58,11 @@ class Card(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.seg, self.heads_up, self.clock = seg, heads_up, clock
         a = seg.activity
-        color = style.KIND_COLOR.get(a.kind, style.BRAND_BRIGHT)
+        self.phase = ""
 
         frame = QFrame(self)
         frame.setObjectName("notecard")
-        frame.setStyleSheet(f"""
-            QFrame#notecard {{ background: {style.SURFACE2}; border: 1px solid {style.LINE};
-              border-left: 5px solid {color}; border-radius: 12px; }}
-            QLabel {{ background: transparent; color: {style.INK}; }}
-            QLabel#label {{ color: {color}; font-weight: 700; letter-spacing: 1px; font-size: 7.5pt; }}
-            QLabel#name {{ font-size: 12.5pt; font-weight: 700; }}
-            QLabel#sub {{ color: {style.MUTED}; font-size: 8.5pt; }}
-            QLabel#left {{ color: {color}; font-size: 13pt; font-weight: 800; }}
-            QPushButton {{ background: rgba(255,255,255,0.06); border: 1px solid {style.LINE}; border-radius: 7px;
-              padding: 3px 9px; color: {style.INK}; font-weight: 600; font-size: 9pt; }}
-            QPushButton:hover {{ border-color: {style.BRAND}; }}
-            QPushButton#ok {{ background: {style.BRAND}; border-color: {style.BRAND}; color: white; }}
-            QPushButton#ok:hover {{ background: {style.BRAND_BRIGHT}; }}
-        """)
+        self.frame = frame
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
         outer.addWidget(frame)
@@ -138,15 +133,40 @@ class Card(QWidget):
             self._drag_from = None
             self.dropped.emit(self)
 
+    def _apply_phase(self, phase: str) -> None:
+        """Оттенок карточки по фазе: предстоит / идёт / время вышло."""
+        if phase == self.phase:
+            return
+        self.phase = phase
+        bg, border, accent = PHASE_STYLE[phase]
+        color = accent or style.KIND_COLOR.get(self.seg.activity.kind, style.BRAND_BRIGHT)
+        self.frame.setStyleSheet(f"""
+            QFrame#notecard {{ background: {bg}; border: 1px solid {border};
+              border-left: 5px solid {color}; border-radius: 12px; }}
+            QLabel {{ background: transparent; color: {style.INK}; }}
+            QLabel#label {{ color: {color}; font-weight: 700; letter-spacing: 1px; font-size: 7.5pt; }}
+            QLabel#name {{ font-size: 12.5pt; font-weight: 700; }}
+            QLabel#sub {{ color: {style.MUTED}; font-size: 8.5pt; }}
+            QLabel#left {{ color: {color}; font-size: 13pt; font-weight: 800; }}
+            QPushButton {{ background: rgba(255,255,255,0.07); border: 1px solid {border}; border-radius: 7px;
+              padding: 3px 9px; color: {style.INK}; font-weight: 600; font-size: 9pt; }}
+            QPushButton:hover {{ border-color: {style.BRAND_BRIGHT}; }}
+            QPushButton#ok {{ background: {style.BRAND}; border-color: {style.BRAND}; color: white; }}
+            QPushButton#ok:hover {{ background: {style.BRAND_BRIGHT}; }}
+        """)
+
     def refresh(self) -> None:
         now = self.clock()
         if self.heads_up and now < self.seg.start:
+            self._apply_phase("soon")
             self.label.setText("СКОРО")
             self.left.setText(f"через {fmt_left(self.seg.start - now)}")
         elif now < self.seg.end:
+            self._apply_phase("now")
             self.label.setText("СЕЙЧАС · ПОРА ПЕРЕХОДИТЬ" if not self.heads_up else "НАЧАЛОСЬ")
             self.left.setText(f"осталось {fmt_left(self.seg.end - now)}")
         else:
+            self._apply_phase("over")
             self.label.setText("ВРЕМЯ ВЫШЛО")
             self.left.setText("00:00")
 

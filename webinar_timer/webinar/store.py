@@ -1,6 +1,10 @@
-"""Хранилище: шаблоны вебинаров (plans.json) и настройки (settings.json) в data/webinar/.
+"""Хранилище: шаблоны вебинаров (plans.json) и настройки (settings.json) — в папке приложения.
 
-Запись — как у AutoPrintCode: через временный файл с fsync и резервной копией plans.json.bak.
+Папка webinar_timer самодостаточна — её можно скопировать целиком:
+    data/   шаблоны, настройки, журнал
+    media/  фон перерыва, видео гимнастики, шрифт Furore
+Пути к файлам из media/ хранятся относительно папки приложения («media/Фон.jpg»).
+Запись — через временный файл с fsync и резервной копией plans.json.bak.
 """
 from __future__ import annotations
 
@@ -12,16 +16,40 @@ import time
 from dataclasses import asdict, dataclass, fields
 from pathlib import Path
 
-from autoprint.storage import DATA_DIR as APP_DATA_DIR
-
 from .model import Plan, default_plan, plan_from, plan_to
 
+APP_DIR = Path(__file__).resolve().parent.parent       # webinar_timer/
+MEDIA_DIR = APP_DIR / "media"
 # WEBINAR_DATA — другая папка (для тестов, чтобы не трогать рабочие шаблоны)
-DATA_DIR = Path(os.environ.get("WEBINAR_DATA") or APP_DATA_DIR / "webinar")
+DATA_DIR = Path(os.environ.get("WEBINAR_DATA") or APP_DIR / "data")
 PLANS_FILE = DATA_DIR / "plans.json"
 SETTINGS_FILE = DATA_DIR / "settings.json"
 
 log = logging.getLogger(__name__)
+
+
+def resolve(path: str) -> str:
+    """Путь из настроек или шаблона → полный (относительные — от папки приложения). Пусто — пусто."""
+    if not path:
+        return ""
+    p = Path(path)
+    return str(p if p.is_absolute() else APP_DIR / p)
+
+
+def portable(path: str) -> str:
+    """Файл внутри папки приложения — относительным путём («media/Фон.jpg»): папку можно перенести."""
+    if not path:
+        return ""
+    try:
+        return Path(path).resolve().relative_to(APP_DIR).as_posix()
+    except ValueError:
+        return path
+
+
+def existing(path: str) -> str:
+    """Полный путь, если файл есть; иначе пусто (нет файла — встроенный фон, видео не показывается)."""
+    full = resolve(path)
+    return full if full and Path(full).is_file() else ""
 
 
 def _atomic_write(path: Path, data: dict, backup: bool = False) -> None:
@@ -43,10 +71,12 @@ def _atomic_write(path: Path, data: dict, backup: bool = False) -> None:
 class Settings:
     demo_screen: str = ""          # монитор демонстрации (имя QScreen); пусто — основной
     control_screen: str = ""       # монитор управления — сюда уведомления; пусто — не основной, если есть
-    break_image: str = ""          # фон заставки перерыва; пусто — встроенный фон
-    eyes_media: str = ""           # видео/картинка для «Зарядки для глаз», если у блока нет своего файла
+    break_image: str = "media/Фон.jpg"                 # фон заставки перерыва; нет файла — встроенный фон
+    eyes_media: str = "media/Гимнастика для глаз.mp4"  # видео/картинка «Зарядки для глаз» (если у блока нет своего)
     heads_up_min: int = 1          # предупреждать за N минут до активности (0 — не предупреждать)
+    manual_break_min: int = 10     # «Перерыв сейчас» — длительность по умолчанию
     note_pos: str = ""             # куда перетащили напоминания: «x,y» от угла монитора управления; пусто — справа вверху
+    player_pos: str = ""           # куда перетащили пульт видео: «x,y» от угла монитора управления; пусто — внизу по центру
     sound: bool = True             # звук уведомления
     windows_toast: bool = False    # дублировать всплывающим уведомлением Windows (оно на основном мониторе!)
     current_plan: str = ""
