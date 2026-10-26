@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QFileDialog, QForm
 from ..model import DEMO_OFF, Activity, Segment
 from ..store import Settings
 from . import screens
+from .editor import finish_on_enter
 from .notify import Notifier, parse_pos
 from .overlay import BreakOverlay
 
@@ -89,6 +90,13 @@ class SettingsDialog(QDialog):
         foot.addWidget(cancel)
         foot.addWidget(ok)
         lay.addLayout(foot)
+        for b in self.findChildren(QPushButton):   # Enter в поле не жмёт кнопки («Выбрать…», пробы)
+            b.setAutoDefault(False)
+            b.setDefault(False)
+
+    def keyPressEvent(self, e) -> None:
+        if not finish_on_enter(self, e):
+            super().keyPressEvent(e)
 
     def _reset_pos(self) -> None:
         self.s.note_pos = ""

@@ -31,6 +31,25 @@ def _center(w: QWidget) -> QWidget:
     return box
 
 
+def finish_on_enter(dialog: QDialog, e) -> bool:
+    """Enter в поле ввода — закончить ввод: выйти из поля (значение уже записано). True — обработано."""
+    if e.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+        w = dialog.focusWidget()
+        if w is not None:
+            w.clearFocus()
+        e.accept()
+        return True
+    return False
+
+
+def _no_enter_buttons(dialog: QDialog) -> None:
+    """Enter в поле ввода не нажимает кнопки окна. По умолчанию в диалоге Qt Enter жмёт «кнопку
+    по умолчанию» — так Enter в названии активности добавлял новый блок."""
+    for b in dialog.findChildren(QPushButton):
+        b.setAutoDefault(False)
+        b.setDefault(False)
+
+
 class _Handle(QLabel):
     """Ручка «⠿» слева от блока: потянуть мышью — перенести блок на другое место."""
 
@@ -212,6 +231,10 @@ class PlanEditor(QDialog):
         lay.addLayout(foot)
         self._fill()
 
+    def keyPressEvent(self, e) -> None:
+        if not finish_on_enter(self, e):
+            super().keyPressEvent(e)
+
     # ---------------------------------------------------------------- таблица
     def _fill(self) -> None:
         self.table.setRowCount(0)
@@ -253,6 +276,7 @@ class PlanEditor(QDialog):
             delete.setToolTip("Удалить блок")
             delete.clicked.connect(lambda _c=False, i=i: self._remove(i))
             self.table.setCellWidget(i, C_DEL, _center(delete))
+        _no_enter_buttons(self)
         self._refresh_flags()
 
     def _media_cell(self, a: Activity) -> QWidget:

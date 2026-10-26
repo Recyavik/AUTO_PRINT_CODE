@@ -154,7 +154,7 @@ if __name__ == "__main__":
 from webinar import store as wstore  # noqa: E402
 from webinar.ui import screens  # noqa: E402
 from webinar.ui import notify, overlay  # noqa: E402
-from PySide6.QtWidgets import QLabel as QLabel_  # noqa: E402
+from PySide6.QtWidgets import QLabel as QLabel_, QPushButton as QPushButton_  # noqa: E402
 
 from webinar.ui.editor import C_HANDLE, C_MIN, C_NAME, ROW_MIME, PlanEditor  # noqa: E402
 from webinar.ui.main_window import MainWindow  # noqa: E402
@@ -214,6 +214,23 @@ class WindowsTest(_WindowBase):
         self.assertEqual(len(self.win.rows), len(PLAN.schedule))
         self.assertEqual(self.win.hero_label.text(), "ДО НАЧАЛА")
         self.assertEqual(self.win.hero_timer.text(), "02:00")
+
+    def test_layout_fits_narrow_and_wide_window(self):
+        """Отсчёт не обрезается в узком окне, повестка остаётся читаемой, старт виден целиком."""
+        from PySide6.QtGui import QFontMetrics
+        self.clock.t = at("02:00")                           # «До начала 9:00:00» — самый длинный отсчёт
+        self.win.scheduler.poll()
+        for width in (1020, 1700):
+            self.win.resize(width, 800)
+            self.win.show()
+            app.processEvents()
+            t = self.win.hero_timer
+            self.assertLessEqual(QFontMetrics(t.font()).horizontalAdvance(t.text()), t.width(), width)
+            self.assertGreaterEqual(self.win.agenda_scroll.width(), 340, width)
+            e = self.win.start_edit
+            self.assertLess(e.fontMetrics().horizontalAdvance("23:50"), e.lineEdit().width(), "старт виден")
+        self.assertEqual(len(self.win.agenda.findChildren(type(self.win.rows[0]))), len(self.win.rows),
+                         "старых строк повестки не осталось")
 
     def test_reminders_on_control_screen_until_acked(self):
         self.win.run_btn.setChecked(True)
@@ -404,6 +421,32 @@ class EditorTest(unittest.TestCase):
         dlg.json.setPlainText("{плохой")
         dlg._apply_json()
         self.assertIn("Не получилось", dlg.error.text())
+
+    def test_enter_finishes_input(self):
+        """Enter в поле — выход из поля (ввод зафиксирован); блок не добавляется (раньше жал «+ Добавить блок»)."""
+        from PySide6.QtCore import Qt
+        from PySide6.QtTest import QTest
+        dlg = PlanEditor(PLAN)
+        dlg.show()
+        name = dlg.table.cellWidget(1, C_NAME)
+        name.setFocus()
+        QTest.keyClicks(name, " intro")                     # латиница: QTest.keyClicks в PySide падает на кириллице
+        QTest.keyClick(name, Qt.Key.Key_Return)
+        app.processEvents()
+        self.assertEqual((len(dlg.plan.schedule), dlg.isVisible(), dlg.result_plan), (5, True, None))
+        self.assertFalse(name.hasFocus(), "вышли из поля")
+        self.assertEqual(dlg.plan.schedule[1].name, "Зарядка intro", "введённое сохранено")
+        spin = dlg.table.cellWidget(1, C_MIN)
+        spin.setFocus()
+        QTest.keyClick(spin, Qt.Key.Key_Return)
+        self.assertFalse(spin.hasFocus(), "и из счётчика минут")
+        last = dlg.table.cellWidget(4, C_NAME)
+        last.setFocus()
+        QTest.keyClick(last, Qt.Key.Key_Return)
+        self.assertEqual(len(dlg.plan.schedule), 5, "и в последнем блоке Enter ничего не добавляет")
+        settings = SettingsDialog(wstore.Settings())
+        self.assertFalse(any(b.autoDefault() or b.isDefault() for b in settings.findChildren(QPushButton_)))
+        dlg.close()
 
     def test_drag_rows(self):
         """Перенос блоков мышью: вниз, вверх, на своё место; бросок над таблицей — через dropEvent."""

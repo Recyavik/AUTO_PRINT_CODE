@@ -8,7 +8,7 @@ from datetime import datetime
 from pathlib import Path
 
 from PySide6.QtCore import QByteArray, QPoint, QPointF, QRectF, Qt, QTime
-from PySide6.QtGui import QAction, QColor, QIcon, QPainter, QPen, QPixmap
+from PySide6.QtGui import QAction, QColor, QFontMetrics, QIcon, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import (QFileDialog, QFrame, QGridLayout, QHBoxLayout, QInputDialog, QLabel, QListWidget,
                                QListWidgetItem, QMainWindow, QMenu, QMessageBox, QProgressBar, QPushButton,
                                QScrollArea, QSystemTrayIcon, QTimeEdit, QVBoxLayout, QWidget)
@@ -51,6 +51,38 @@ def _sound() -> None:
         winsound.PlaySound("SystemNotification", winsound.SND_ALIAS | winsound.SND_ASYNC)
     except Exception:   # нет звука — не беда
         pass
+
+
+class FitLabel(QLabel):
+    """Крупная надпись (отсчёт), которая уменьшается под ширину карточки, а не обрезается в узком окне."""
+
+    def __init__(self, max_px: int = 130, min_px: int = 28, css: str = "") -> None:
+        super().__init__()
+        self.max_px, self.min_px, self.css = max_px, min_px, css
+        self.px = 0
+        self.setMinimumWidth(1)          # не распирать карточку длинным текстом
+        self._fit()
+
+    def setText(self, text: str) -> None:
+        if text != self.text():
+            super().setText(text)
+            self._fit()
+
+    def resizeEvent(self, e) -> None:
+        super().resizeEvent(e)
+        self._fit()
+
+    def _fit(self) -> None:
+        # размер — через своё оформление: общее (QWidget { font-size }) перекрыло бы setFont
+        f = self.font()
+        f.setPixelSize(self.max_px)
+        f.setWeight(f.Weight.ExtraBold)
+        width = QFontMetrics(f).horizontalAdvance(self.text() or "0:00:00")
+        avail = max(1, self.width() - 8)
+        px = max(self.min_px, min(self.max_px, int(self.max_px * avail / max(1, width))))
+        if px != self.px:
+            self.px = px
+            self.setStyleSheet(f"{self.css} font-size: {px}px;")
 
 
 class AgendaRow(QFrame):
@@ -178,9 +210,11 @@ class MainWindow(QMainWindow):
             b.clicked.connect(fn)
             grid.addWidget(b, i // 2, i % 2)
         ll.addLayout(grid)
+        # надпись — отдельной строкой: в узкой панели рядом с ней поле времени сжималось до одной цифры
+        ll.addWidget(QLabel("Старт сегодня:"))
         st = QHBoxLayout()
-        st.addWidget(QLabel("Старт сегодня:"))
         self.start_edit = QTimeEdit()
+        self.start_edit.setMinimumWidth(130)
         self.start_edit.setDisplayFormat("HH:mm")
         self.start_edit.setToolTip("Время начала эфира сегодня (в шаблоне сохраняется кнопкой «Изменить»)")
         self.start_edit.timeChanged.connect(self._apply_plan)
@@ -200,7 +234,7 @@ class MainWindow(QMainWindow):
 
         # ---- в центре: текущий блок
         hero = QFrame(objectName="card")
-        hero.setMinimumWidth(380)
+        hero.setMinimumWidth(240)        # отсчёт сам уменьшается — карточке хватает и узкой
         hl = QVBoxLayout(hero)
         hl.setContentsMargins(30, 26, 30, 26)
         hl.addStretch(1)
@@ -209,14 +243,15 @@ class MainWindow(QMainWindow):
         self.hero_name = QLabel()
         self.hero_name.setWordWrap(True)
         self.hero_name.setStyleSheet("font-size: 26pt; font-weight: 700;")
-        self.hero_timer = QLabel()
-        self.hero_timer.setStyleSheet(f"font-size: 72pt; font-weight: 800; color: {style.BRAND_BRIGHT};")
+        self.hero_timer = FitLabel(max_px=130, css=f"font-weight: 800; color: {style.BRAND_BRIGHT};")
         self.hero_sub = QLabel(objectName="muted")
         self.hero_bar = QProgressBar()
         self.hero_bar.setTextVisible(False)
         self.hero_bar.setRange(0, 1000)
         self.hero_demo = QLabel()
         self.hero_next = QLabel(objectName="muted")
+        for w in (self.hero_sub, self.hero_demo, self.hero_next):
+            w.setWordWrap(True)          # длинные строки переносятся — не отнимают ширину у повестки
         for w in (self.hero_label, self.hero_name, self.hero_timer, self.hero_sub, self.hero_bar, self.hero_demo,
                   self.hero_next):
             hl.addWidget(w)
@@ -232,6 +267,7 @@ class MainWindow(QMainWindow):
         scroll.setWidgetResizable(True)
         scroll.setWidget(self.agenda)
         scroll.setObjectName("card")
+        scroll.setMinimumWidth(340)      # названия блоков повестки должны читаться и в узком окне
         self.agenda_scroll = scroll
         body.addWidget(scroll, 5)
 
@@ -439,6 +475,7 @@ class MainWindow(QMainWindow):
         while self.agenda_lay.count():
             w = self.agenda_lay.takeAt(0).widget()
             if w:
+                w.setParent(None)        # убрать сразу: иначе старые строки мелькают поверх новых до удаления
                 w.deleteLater()
         self.rows = [AgendaRow(s) for s in self.scheduler.segs]
         for r in self.rows:
