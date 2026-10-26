@@ -8,42 +8,49 @@
       "name": "Приветствие",
       "demo": "on",
       "min": 1,
-      "remind": false
+      "remind": false,
+      "locked": true
     },
     {
       "name": "Целеполагание",
       "demo": "off",
       "min": 3,
-      "remind": true
+      "remind": true,
+      "locked": true
     },
     {
       "name": "Викторина",
       "demo": "on",
-      "min": 7
+      "min": 7,
+      "locked": true
     },
     {
       "name": "Слайды практики",
       "demo": "on",
       "min": 9,
-      "remind": true
+      "remind": true,
+      "locked": true
     },
     {
       "name": "ЗАРЯДКА ДЛЯ ГЛАЗ",
       "demo": "off",
       "min": 5,
-      "remind": true
+      "remind": true,
+      "locked": true
     },
     {
       "name": "Тренажёр кода",
       "demo": "on",
       "min": 10,
-      "remind": true
+      "remind": true,
+      "locked": true
     },
     {
       "name": "ИСР",
       "demo": "on",
       "min": 10,
-      "remind": true
+      "remind": true,
+      "locked": true
     },
     {
       "name": "ПЕРЕРЫВ",
@@ -55,57 +62,69 @@
       "name": "Задание проектого часа",
       "demo": "on",
       "min": 2,
-      "remind": true
+      "remind": true,
+      "locked": true
     },
     {
       "name": "Слайды проектного задания",
-      "demo": "off",
-      "min": 8
+      "demo": "none",
+      "min": 8,
+      "locked": true
     },
     {
       "name": "План проекта (модуль проектов)",
       "demo": "on",
       "min": 5,
-      "remind": true
+      "remind": true,
+      "locked": true
     },
     {
       "name": "Кан-бан доска с задачами",
       "demo": "on",
-      "min": 3
+      "min": 3,
+      "locked": true
     },
     {
       "name": "ЗАРЯДКА ДЛЯ ГЛАЗ",
       "demo": "off",
       "min": 5,
-      "remind": true
+      "remind": true,
+      "locked": true
     },
     {
       "name": "Разработка (модуль проектов)",
       "demo": "on",
       "min": 8,
-      "remind": true
+      "remind": true,
+      "locked": true
     },
     {
       "name": "Совместная работа (модуль проектов)",
       "demo": "on",
-      "min": 7
+      "min": 7,
+      "remind": true,
+      "locked": true
     },
     {
       "name": "Git",
       "demo": "on",
-      "min": 1
+      "min": 1,
+      "remind": true,
+      "locked": true
     },
     {
       "name": "Форма проектного часа",
       "demo": "on",
       "min": 2,
-      "remind": true
+      "remind": true,
+      "locked": true
     },
     {
       "name": "Выводы",
       "demo": "off",
       "min": 4,
-      "remind": true
+      "remind": true,
+      "locked": true
     }
   ],
   "lessons": [

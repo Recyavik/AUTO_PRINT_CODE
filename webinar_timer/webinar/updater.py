@@ -1,0 +1,137 @@
+"""Обновления «Таймера вебинара» из GitHub Releases.
+
+Релиз таймера — тег «webinar-v1.3.0» в репозитории; к нему приложен лёгкий установщик
+«webinar-timer-update-1.3.0.exe» (программа без видео, фона и шрифта: они у пользователя уже стоят).
+Теги AutoPrintCode («v0.6.3») сюда не попадают, а его программа обновлений не видит теги таймера.
+
+Проверка и скачивание — в фоновом потоке (CheckThread, DownloadThread), окно не подвисает.
+Установка — тихим запуском установщика: он закрывает таймер, ставит новую версию (шаблоны и настройки
+пользователя не трогает) и запускает таймер снова. Обновляется только установленная версия (exe);
+из исходников — git pull.
+"""
+from __future__ import annotations
+
+import json
+import logging
+import re
+import subprocess
+import sys
+import tempfile
+import urllib.request
+from dataclasses import dataclass
+from pathlib import Path
+
+from PySide6.QtCore import QThread, Signal
+
+from . import __version__
+
+log = logging.getLogger(__name__)
+
+REPO = "Recyavik/AUTO_PRINT_CODE"
+API = f"https://api.github.com/repos/{REPO}/releases?per_page=30"
+TAG_PREFIX = "webinar-v"
+ASSET_RE = re.compile(r"^webinar-timer-update-.*\.exe$", re.IGNORECASE)
+TIMEOUT = 15
+
+
+@dataclass
+class Release:
+    version: str
+    notes: str
+    asset_url: str
+    size: int
+    page_url: str
+
+
+def version_key(v: str) -> tuple[int, ...] | None:
+    """«1.2.0» → (1, 2, 0, 0, 0, 0) — одной длины, чтобы «1.2» == «1.2.0»; не версия — None."""
+    if not re.fullmatch(r"\d+(\.\d+){0,5}", v.strip()):
+        return None
+    nums = tuple(int(x) for x in v.strip().split("."))
+    return nums + (0,) * (6 - len(nums))
+
+
+def is_newer(v: str, current: str = __version__) -> bool:
+    new, cur = version_key(v), version_key(current)
+    return new is not None and cur is not None and new > cur
+
+
+def pick_latest(releases: list[dict]) -> Release | None:
+    """Самый новый релиз таймера с лёгким установщиком (черновики и пре-релизы — мимо)."""
+    best: Release | None = None
+    for r in releases:
+        tag = str(r.get("tag_name", ""))
+        if not tag.startswith(TAG_PREFIX) or r.get("draft") or r.get("prerelease"):
+            continue
+        ver = tag[len(TAG_PREFIX):]
+        asset = next((a for a in r.get("assets", []) if ASSET_RE.match(str(a.get("name", "")))), None)
+        if version_key(ver) is None or asset is None:
+            continue
+        if best is None or version_key(ver) > version_key(best.version):
+            best = Release(ver, str(r.get("body") or ""), str(asset.get("browser_download_url", "")),
+                           int(asset.get("size") or 0), str(r.get("html_url", "")))
+    return best
+
+
+def fetch_latest() -> Release | None:
+    req = urllib.request.Request(API, headers={"Accept": "application/vnd.github+json",
+                                               "User-Agent": f"webinar-timer/{__version__}"})
+    with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
+        return pick_latest(json.loads(resp.read().decode("utf-8")))
+
+
+def can_update() -> bool:
+    """Обновляется только установленная версия (exe), не запуск из исходников."""
+    return bool(getattr(sys, "frozen", False))
+
+
+def install(setup: Path) -> None:
+    """Тихая установка: установщик сам закроет таймер, поставит новую версию и запустит её."""
+    log.info("Установка обновления: %s", setup.name)
+    subprocess.Popen([str(setup), "/SILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/CLOSEAPPLICATIONS"],
+                     close_fds=True)
+
+
+class CheckThread(QThread):
+    """Проверить, есть ли версия новее. found(Release | None) — None, если обновлений нет."""
+    found = Signal(object)
+    failed = Signal(str)
+
+    def run(self) -> None:
+        try:
+            r = fetch_latest()
+        except Exception as e:      # сеть, GitHub, разбор ответа — для пользователя одно: «не удалось»
+            log.warning("Проверка обновлений: %s", e)
+            self.failed.emit(str(e))
+            return
+        self.found.emit(r if r is not None and is_newer(r.version) else None)
+
+
+class DownloadThread(QThread):
+    """Скачать установщик обновления во временную папку. progress(0…100), done(путь)."""
+    progress = Signal(int)
+    done = Signal(object)
+    failed = Signal(str)
+
+    def __init__(self, release: Release, parent=None) -> None:
+        super().__init__(parent)
+        self.release = release
+
+    def run(self) -> None:
+        dest = Path(tempfile.gettempdir()) / f"webinar-timer-update-{self.release.version}.exe"
+        try:
+            req = urllib.request.Request(self.release.asset_url,
+                                         headers={"User-Agent": f"webinar-timer/{__version__}"})
+            with urllib.request.urlopen(req, timeout=TIMEOUT) as resp, open(dest, "wb") as f:
+                total = int(resp.headers.get("Content-Length") or self.release.size or 0)
+                got = 0
+                while chunk := resp.read(1 << 16):
+                    f.write(chunk)
+                    got += len(chunk)
+                    if total:
+                        self.progress.emit(min(100, got * 100 // total))
+        except Exception as e:
+            log.warning("Скачивание обновления: %s", e)
+            self.failed.emit(str(e))
+            return
+        self.done.emit(dest)

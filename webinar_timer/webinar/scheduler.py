@@ -62,6 +62,11 @@ class Scheduler(QObject):
         self._timer.start()
         self.poll()
 
+    def rearm(self) -> None:
+        """Эфир идёт, но начинается заново с текущего места (старт с выбранной активности): о ней — напомнить."""
+        self._reset()
+        self.poll()
+
     def stop(self) -> None:
         self.running = False
         self._reset()

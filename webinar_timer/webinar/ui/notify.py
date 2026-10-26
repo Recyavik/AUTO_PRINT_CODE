@@ -1,10 +1,12 @@
 """Напоминания на мониторе управления: карточки поверх всех окон в правом верхнем углу.
 
 Карточка не забирает фокус (печать и демонстрация продолжаются) и висит, пока её не уберут:
-ведущий может закончить мысль и только потом перейти к зарядке. Кнопки:
-  «⏰ 1 мин»       — спрятать и напомнить снова через минуту;
-  «Закрыть»       — убрать напоминание;
-  «Далее ▶»       — начать активность: её файл (видео гимнастики, картинка) — на экран демонстрации.
+ведущий может закончить мысль и только потом перейти к зарядке. Сверху — что происходит
+(«СКОРО НАЧНЁТСЯ · через 00:59», «ИДЁТ СЕЙЧАС · осталось 02:10», «ВРЕМЯ ВЫШЛО»). Кнопки:
+  «▶ Показать видео» / «▶ Показать картинку» / «☕ Начать перерыв» — только если активности есть что
+      показать на экране демонстрации (видео гимнастики, картинка, заставка перерыва);
+  «⏰ Напомнить через минуту» — спрятать и показать снова через минуту;
+  «✓ Понятно»                 — убрать напоминание.
 Несколько карточек — столбиком. Карточку можно перетащить мышью (за любое место, кроме кнопок):
 столбик переедет туда, позиция запоминается относительно монитора управления.
 """
@@ -21,7 +23,7 @@ from ..model import DEMO_TEXT, Segment, fmt_left
 from . import style
 
 MARGIN = 16
-WIDTH = 330
+WIDTH = 360
 GAP = 8
 SNOOZE_MS = 60_000      # «Через 1 мин»
 
@@ -44,13 +46,14 @@ def parse_pos(text: str) -> QPoint | None:
 
 
 class Card(QWidget):
-    """Одно напоминание. heads_up=True — «через N мин», иначе — «сейчас»."""
-    acked = Signal(object)          # «Закрыть» — сама карточка
-    snoozed = Signal(object)        # «Через 1 мин»
-    next = Signal(object)           # «Далее ▶»
+    """Одно напоминание. heads_up=True — «через N мин», иначе — «сейчас».
+    action — надпись кнопки действия («▶ Показать видео», «☕ Начать перерыв»); пусто — кнопки нет."""
+    acked = Signal(object)          # «✓ Понятно» — сама карточка
+    snoozed = Signal(object)        # «⏰ Напомнить через минуту»
+    next = Signal(object)           # кнопка действия: показать файл активности или начать перерыв
     dropped = Signal(object)        # карточку перетащили и отпустили
 
-    def __init__(self, seg: Segment, heads_up: bool, clock: Callable[[], datetime]) -> None:
+    def __init__(self, seg: Segment, heads_up: bool, clock: Callable[[], datetime], action: str = "") -> None:
         super().__init__(None, Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint
                          | Qt.WindowType.Tool | Qt.WindowType.WindowDoesNotAcceptFocus)
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
@@ -87,23 +90,26 @@ class Card(QWidget):
         top.addStretch(1)
         lay.addLayout(top)
 
+        lay.addSpacing(4)
+        if action:                  # главное — что сделать сейчас: отдельной строкой во всю ширину
+            act = QPushButton(action, objectName="ok")
+            act.setToolTip("Заставка перерыва — на экран демонстрации" if a.breaks
+                           else "На экран демонстрации — зрителям")
+            act.setCursor(Qt.CursorShape.ArrowCursor)
+            act.clicked.connect(lambda: self.next.emit(self))
+            lay.addWidget(act)
         row = QHBoxLayout()
-        snooze = QPushButton("⏰ 1 мин")
-        snooze.setToolTip("Спрятать и напомнить снова через минуту")
+        snooze = QPushButton("⏰ Напомнить через минуту")
+        snooze.setToolTip("Спрятать карточку и показать её снова через минуту")
         snooze.clicked.connect(lambda: self.snoozed.emit(self))
-        close = QPushButton("Закрыть")
+        close = QPushButton("✓ Понятно")
         close.setToolTip("Убрать напоминание")
         close.clicked.connect(lambda: self.acked.emit(self))
-        nxt = QPushButton("Далее ▶", objectName="ok")
-        nxt.setToolTip("Начать: файл активности (видео гимнастики, картинка) — на экран демонстрации"
-                       if not a.breaks else "Начать перерыв: заставка — на экран демонстрации")
-        nxt.clicked.connect(lambda: self.next.emit(self))
-        for w in (snooze, close, nxt):
-            w.setCursor(Qt.CursorShape.ArrowCursor)
         for w in (snooze, close):
-            row.addWidget(w)
+            w.setCursor(Qt.CursorShape.ArrowCursor)
+        row.addWidget(snooze)
         row.addStretch(1)
-        row.addWidget(nxt)
+        row.addWidget(close)
         lay.addLayout(row)
 
         self.setFixedWidth(WIDTH)
@@ -144,24 +150,25 @@ class Card(QWidget):
             QPushButton {{ background: rgba(255,255,255,0.07); border: 1px solid {border}; border-radius: 7px;
               padding: 3px 9px; color: {style.INK}; font-weight: 600; font-size: 9pt; }}
             QPushButton:hover {{ border-color: {style.BRAND_BRIGHT}; }}
-            QPushButton#ok {{ background: {style.BRAND}; border-color: {style.BRAND}; color: white; }}
+            QPushButton#ok {{ background: {style.BRAND}; border-color: {style.BRAND}; color: white;
+              padding: 5px 9px; font-size: 10pt; }}
             QPushButton#ok:hover {{ background: {style.BRAND_BRIGHT}; }}
         """)
 
     def refresh(self) -> None:
         now = self.clock()
-        if self.heads_up and now < self.seg.start:
+        if now < self.seg.start:
             self._apply_phase("soon")
-            self.label.setText("СКОРО")
+            self.label.setText("СКОРО НАЧНЁТСЯ")
             self.left.setText(f"через {fmt_left(self.seg.start - now)}")
         elif now < self.seg.end:
             self._apply_phase("now")
-            self.label.setText("СЕЙЧАС · ПОРА ПЕРЕХОДИТЬ" if not self.heads_up else "НАЧАЛОСЬ")
+            self.label.setText("ИДЁТ СЕЙЧАС")
             self.left.setText(f"осталось {fmt_left(self.seg.end - now)}")
         else:
             self._apply_phase("over")
             self.label.setText("ВРЕМЯ ВЫШЛО")
-            self.left.setText("00:00")
+            self.left.setText("закончилась")
 
 
 class Notifier:
@@ -176,6 +183,8 @@ class Notifier:
         # показывать ли карточку (окно таймера: идёт перерыв — у ведущего пульт, карточка «сейчас» не нужна)
         self.accepts: Callable[[Segment, bool], bool] = lambda seg, heads_up: True
         self.on_next: Callable[[Segment], None] = lambda seg: None
+        # надпись кнопки действия для активности («▶ Показать видео»…); пусто — показать нечего, кнопки нет
+        self.action_of: Callable[[Segment], str] = lambda seg: ""
         self._snoozed: list[QTimer] = []
 
     def show(self, seg: Segment, heads_up: bool) -> Card | None:
@@ -184,7 +193,7 @@ class Notifier:
             self.close(c)
         if not self.accepts(seg, heads_up):
             return None
-        card = Card(seg, heads_up, self.clock)
+        card = Card(seg, heads_up, self.clock, self.action_of(seg))
         card.acked.connect(self.close)
         card.snoozed.connect(self.snooze)
         card.next.connect(self._next)

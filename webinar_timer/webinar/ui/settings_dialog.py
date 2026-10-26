@@ -5,11 +5,12 @@ import copy
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from PySide6.QtCore import Qt
-from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QFileDialog, QFormLayout, QHBoxLayout, QLabel,
-                               QLineEdit, QPushButton, QSpinBox, QVBoxLayout)
+from PySide6.QtCore import Qt, Signal
+from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QFileDialog, QFormLayout, QGroupBox, QHBoxLayout,
+                               QLabel, QLineEdit, QPushButton, QSpinBox, QVBoxLayout)
 from shiboken6 import isValid
 
+from .. import __version__, updater
 from ..model import DEMO_OFF, Activity, Segment
 from ..store import MEDIA_DIR, Settings, existing, portable, resolve
 from . import screens
@@ -20,9 +21,16 @@ from .overlay import BreakOverlay
 
 
 class SettingsDialog(QDialog):
-    def __init__(self, settings: Settings, parent=None) -> None:
+    install_started = Signal()          # запущен установщик обновления — таймеру пора закрыться
+
+    def __init__(self, settings: Settings, parent=None, release=None, is_live=lambda: False) -> None:
+        """release — уже найденное обновление (из автопроверки); is_live() — идёт ли эфир."""
         super().__init__(parent)
+        self.release, self.is_live = release, is_live
+        self._thread = None
         self.setWindowTitle("Настройки таймера")
+        # кнопка «Развернуть»: на весь экран и обратно к прежнему размеру (и двойной щелчок по заголовку)
+        self.setWindowFlag(Qt.WindowType.WindowMaximizeButtonHint, True)
         # модально только для главного окна: карточки напоминаний и заставка остаются нажимаемыми
         # (по умолчанию exec() блокирует щелчки во все окна программы — кнопки пробы не нажимались)
         self.setWindowModality(Qt.WindowModality.WindowModal)
@@ -65,7 +73,7 @@ class SettingsDialog(QDialog):
         self.image = self._file_row(form, "Фон перерыва:", self.s.break_image,
                                     "без картинки — встроенный фиолетовый фон", "Картинки (*.png *.jpg *.jpeg *.bmp *.webp)")
         self.eyes = self._file_row(form, "Гимнастика для глаз:", self.s.eyes_media,
-                                   "видео или картинка — по «Далее» в напоминании о зарядке",
+                                   "видео или картинка — кнопкой «▶ Показать видео» в напоминании о зарядке",
                                    "Видео и картинки (*.mp4 *.mov *.avi *.mkv *.webm *.wmv *.m4v *.png *.jpg *.jpeg)")
 
         self.lesson = LessonLengthEdit()
@@ -87,6 +95,7 @@ class SettingsDialog(QDialog):
         self.toast.setChecked(self.s.windows_toast)
         form.addRow(self.toast)
         lay.addLayout(form)
+        self._build_updates(lay)
 
         foot = QHBoxLayout()
         foot.addStretch(1)
@@ -142,6 +151,7 @@ class SettingsDialog(QDialog):
         s.lesson_min = self.lesson.value()
         s.sound = self.sound.isChecked()
         s.windows_toast = self.toast.isChecked()
+        s.auto_update_check = self.auto_update.isChecked()
         return s
 
     def _test_note(self) -> None:
@@ -171,6 +181,79 @@ class SettingsDialog(QDialog):
                 w.close()
         self._probe.clear()
         super().done(r)
+
+    # ---------------------------------------------------------------- обновления
+    def _build_updates(self, lay: QVBoxLayout) -> None:
+        box = QGroupBox("Обновления")
+        bl = QVBoxLayout(box)
+        row = QHBoxLayout()
+        row.addWidget(QLabel(f"Установлена версия {__version__}"))
+        row.addStretch(1)
+        self.check_btn = QPushButton("Проверить обновления")
+        self.check_btn.clicked.connect(self.check_updates)
+        self.install_btn = QPushButton(objectName="primary")
+        self.install_btn.clicked.connect(self.install_update)
+        self.install_btn.hide()
+        row.addWidget(self.check_btn)
+        row.addWidget(self.install_btn)
+        bl.addLayout(row)
+        self.update_status = QLabel(objectName="hint")
+        self.update_status.setWordWrap(True)
+        bl.addWidget(self.update_status)
+        self.auto_update = QCheckBox("Проверять обновления автоматически — сообщу, когда выйдет новая версия")
+        self.auto_update.setChecked(self.s.auto_update_check)
+        bl.addWidget(self.auto_update)
+        lay.addWidget(box)
+        if not updater.can_update():
+            self.check_btn.setEnabled(False)
+            self.update_status.setText("Обновления ставятся в установленной версии таймера. "
+                                       "Запуск из исходников обновляется через git pull.")
+        elif self.release is not None:
+            self._show_release(self.release)
+
+    def check_updates(self) -> None:
+        self.check_btn.setEnabled(False)
+        self.update_status.setText("Проверяю…")
+        self._thread = updater.CheckThread(self)
+        self._thread.found.connect(self._show_release)
+        self._thread.failed.connect(lambda e: self._update_failed("Не удалось проверить обновления", e))
+        self._thread.start()
+
+    def _show_release(self, rel) -> None:
+        self.check_btn.setEnabled(True)
+        self.release = rel
+        if rel is None:
+            self.update_status.setText("Установлена последняя версия.")
+            self.install_btn.hide()
+            return
+        notes = rel.notes.strip()
+        self.update_status.setText(f"Доступна версия {rel.version}." + (f"\n{notes}" if notes else ""))
+        self.install_btn.setText(f"⬇ Установить {rel.version}")
+        self.install_btn.show()
+
+    def _update_failed(self, what: str, err: str) -> None:
+        self.check_btn.setEnabled(True)
+        self.install_btn.setEnabled(True)
+        self.update_status.setText(f"{what}: {err}. Проверьте интернет и попробуйте ещё раз.")
+
+    def install_update(self) -> None:
+        """Скачать и поставить. Во время эфира — нет: установка закрывает таймер."""
+        if self.is_live():
+            self.update_status.setText("Идёт эфир — обновление можно поставить после него "
+                                       "(или остановите эфир). Установка закрывает таймер на полминуты.")
+            return
+        self.install_btn.setEnabled(False)
+        self.update_status.setText("Скачиваю обновление…")
+        self._thread = updater.DownloadThread(self.release, self)
+        self._thread.progress.connect(lambda p: self.update_status.setText(f"Скачиваю обновление… {p}%"))
+        self._thread.failed.connect(lambda e: self._update_failed("Не удалось скачать обновление", e))
+        self._thread.done.connect(self._run_installer)
+        self._thread.start()
+
+    def _run_installer(self, path) -> None:
+        self.update_status.setText("Устанавливаю — таймер закроется и откроется уже обновлённым.")
+        updater.install(path)
+        self.install_started.emit()
 
     def result_settings(self) -> Settings:
         return self._collect()

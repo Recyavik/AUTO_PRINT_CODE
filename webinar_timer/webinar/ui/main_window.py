@@ -7,14 +7,14 @@ import logging
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from PySide6.QtCore import QByteArray, QPoint, QPointF, QRectF, Qt, QTime
+from PySide6.QtCore import QByteArray, QPoint, QPointF, QRectF, Qt, QTime, QTimer, Signal
 from PySide6.QtGui import QAction, QColor, QFontMetrics, QIcon, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import (QFileDialog, QFrame, QGridLayout, QHBoxLayout, QInputDialog, QLabel, QListWidget,
                                QListWidgetItem, QMainWindow, QMenu, QMessageBox, QProgressBar, QPushButton,
                                QScrollArea, QSpinBox, QSystemTrayIcon, QTimeEdit, QVBoxLayout, QWidget)
 from shiboken6 import isValid
 
-from .. import APP_NAME, __version__
+from .. import APP_NAME, __version__, updater
 from ..model import DEMO_NONE, DEMO_ON, DEMO_TEXT, Activity, Plan, Segment, State, default_plan, fmt_left, lessons, \
     parse_time, plan_from, plan_to
 from ..scheduler import Scheduler
@@ -23,7 +23,7 @@ from . import screens, style
 from .editor import PlanEditor
 from .lessons import LessonPanel, TimelineBar
 from .notify import Notifier, parse_pos
-from .overlay import BreakOverlay, MediaOverlay
+from .overlay import BreakOverlay, MediaOverlay, is_video
 from .player import BreakPanel, PlayerPanel
 from .settings_dialog import SettingsDialog
 
@@ -94,9 +94,14 @@ class FitLabel(QLabel):
 
 
 class AgendaRow(QFrame):
+    start_here = Signal(object)         # «▶ Начать эфир с этой активности» — Segment
+
     def __init__(self, seg: Segment) -> None:
         super().__init__()
         self.seg = seg
+        self.setToolTip("Двойной щелчок — начать эфир с этой активности")
+        self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.customContextMenuRequested.connect(self._menu)
         a = seg.activity
         lay = QHBoxLayout(self)
         lay.setContentsMargins(14, 8, 14, 8)
@@ -116,6 +121,14 @@ class AgendaRow(QFrame):
         for w in (self.bell, self.demo, self.dur):
             lay.addWidget(w)
         self.set_mode("")
+
+    def mouseDoubleClickEvent(self, _e) -> None:
+        self.start_here.emit(self.seg)
+
+    def _menu(self, pos) -> None:
+        m = QMenu(self)
+        m.addAction("▶ Начать эфир с этой активности", lambda: self.start_here.emit(self.seg))
+        m.exec(self.mapToGlobal(pos))
 
     def set_mode(self, mode: str) -> None:
         """mode: now | past | next | ""."""
@@ -161,12 +174,13 @@ class MainWindow(QMainWindow):
         self.scheduler.break_started.connect(self._show_break)
         self.scheduler.finished.connect(self._on_finished)
         self.notifier = Notifier(lambda: screens.control_screen(self.settings), clock)
-        # перерыв уже идёт — у ведущего его пульт, карточка «сейчас» не нужна (и после «⏰ 1 мин» тоже)
+        # перерыв уже идёт — у ведущего его пульт, карточка «сейчас» не нужна (и после «Напомнить через минуту»)
         self.notifier.accepts = lambda seg, heads_up: not (seg.activity.breaks and not heads_up
                                                            and self.break_panel is not None)
         self.notifier.anchor = parse_pos(settings.note_pos)
         self.notifier.on_moved = self._save_note_pos
         self.notifier.on_next = self._start_activity
+        self.notifier.action_of = self._action_label
 
         self._build()
         self._build_tray()
@@ -174,6 +188,14 @@ class MainWindow(QMainWindow):
         if settings.window_geometry:
             self.restoreGeometry(QByteArray.fromBase64(settings.window_geometry.encode()))
         self.scheduler.watch()   # табло идёт всегда; напоминания — только когда эфир ведётся
+        self._resume_live()
+        # обновления: через 10 с после запуска и раз в сутки — только сообщить, ставит пользователь
+        self.update_release = None
+        self._update_check = None
+        QTimer.singleShot(10_000, self._auto_check_updates)
+        self._update_timer = QTimer(self)
+        self._update_timer.timeout.connect(self._auto_check_updates)
+        self._update_timer.start(24 * 3600 * 1000)
 
     # ================================================================ интерфейс
     def _build(self) -> None:
@@ -194,7 +216,11 @@ class MainWindow(QMainWindow):
         self.status = QLabel()
         gear = QPushButton("⚙ Настройки")
         gear.clicked.connect(self.open_settings)
-        for w in (self.today, self.clock_lbl, self.status, gear):
+        self.update_btn = QPushButton(objectName="primary")
+        self.update_btn.setToolTip("Вышла новая версия таймера — подробности и установка в ⚙ Настройки")
+        self.update_btn.clicked.connect(self.open_settings)
+        self.update_btn.hide()
+        for w in (self.today, self.clock_lbl, self.status, self.update_btn, gear):
             head.addWidget(w)
         outer.addLayout(head)
         # весь эфир: уроки и перерывы в масштабе времени, рядом — сколько прошло и сколько осталось
@@ -376,6 +402,7 @@ class MainWindow(QMainWindow):
         self.scheduler.set_plan(today)
         if running:
             self.scheduler.start()
+            self._save_live()            # другое время старта — помнить и его
         self._rebuild_agenda()
 
     def _save_plans(self, select: str = "") -> None:
@@ -452,6 +479,50 @@ class MainWindow(QMainWindow):
                 QMessageBox.warning(self, "Экспорт", f"Не получилось: {e}")
 
     # ================================================================ эфир
+    def start_from(self, seg: Segment) -> None:
+        """Начать эфир с активности seg: время старта — так, чтобы она начиналась сейчас; напоминание о ней — сразу."""
+        now = self.clock()
+        before = sum(a.min for a in self.scheduler.plan.schedule[:seg.index])
+        start = now.replace(second=0, microsecond=0) - timedelta(minutes=before)
+        if start.date() != now.date():
+            QMessageBox.information(self, APP_NAME, "Эфир с этой активности начался бы вчера — выберите активность позже.")
+            return
+        log.info("Эфир с активности «%s» (старт %s)", seg.activity.name, f"{start:%H:%M}")
+        self.start_edit.setTime(QTime(start.hour, start.minute))      # → _apply_plan
+        if self.run_btn.isChecked():
+            self.scheduler.rearm()       # эфир уже шёл — заново с этого места: напомнить о выбранной активности
+        else:
+            self.run_btn.setChecked(True)
+        self._save_live()
+
+    def _save_live(self) -> None:
+        """Запомнить идущий эфир — чтобы после перезапуска таймера продолжить его, а не начинать сначала."""
+        p = self.scheduler.plan
+        live = (f"{p.id}|{self.start_edit.time().toString('HH:mm')}|{self.clock():%Y-%m-%d}"
+                if self.run_btn.isChecked() and p is not None else "")
+        if live != self.settings.live:
+            self.settings.live = live
+            self.settings.save()
+
+    def _resume_live(self) -> None:
+        """Таймер перезапустили во время эфира — продолжить тот же эфир (шаблон и время старта), если он не кончился."""
+        try:
+            pid, start, day = self.settings.live.split("|")
+            h, m = parse_time(start)
+        except ValueError:
+            return
+        now = self.clock()
+        p = self.store.get(pid)
+        if p is None or day != f"{now:%Y-%m-%d}":
+            return
+        end = now.replace(hour=h, minute=m, second=0, microsecond=0) + timedelta(minutes=p.total_min)
+        if now >= end:
+            return
+        self._fill_plans(pid)
+        self.start_edit.setTime(QTime(h, m))
+        self.run_btn.setChecked(True)
+        log.info("Эфир продолжен после перезапуска: «%s», старт %s", p.title, start)
+
     def _on_run(self, on: bool) -> None:
         self.tray_run.blockSignals(True)
         self.tray_run.setChecked(on)
@@ -465,6 +536,8 @@ class MainWindow(QMainWindow):
             self.scheduler.stop()
             self.notifier.clear()
             self._hide_demo()
+            self._on_tick(self.scheduler.state())     # табло — сразу в покой
+        self._save_live()
 
     def _save_note_pos(self, anchor: QPoint | None) -> None:
         self.settings.note_pos = f"{anchor.x()},{anchor.y()}" if anchor is not None else ""
@@ -486,7 +559,7 @@ class MainWindow(QMainWindow):
 
     def _show_break(self, seg: Segment) -> None:
         if self.overlay is not None and seg.index >= 0 and self._break_index == seg.index:
-            return      # этот перерыв уже на экране (начали заранее — «Далее ▶»): пауза и ±мин ведущего остаются
+            return      # этот перерыв уже на экране (начали заранее — «☕ Начать перерыв»): пауза и ±мин остаются
         self._hide_demo()
         self._break_index = seg.index
         image = existing(seg.activity.media) or existing(self.settings.break_image)
@@ -511,8 +584,17 @@ class MainWindow(QMainWindow):
         panel.place()
         panel.show()
 
+    def _action_label(self, seg: Segment) -> str:
+        """Кнопка действия в напоминании — только если активности есть что показать зрителям."""
+        if seg.activity.breaks:
+            return "☕ Начать перерыв"
+        path = self.media_of(seg)
+        if not path:
+            return ""
+        return "▶ Показать видео" if is_video(path) else "▶ Показать картинку"
+
     def _start_activity(self, seg: Segment) -> None:
-        """«Далее ▶» в напоминании: перерыв — заставка, у активности с файлом — файл на экран демонстрации."""
+        """Кнопка действия в напоминании: перерыв — заставка, у активности с файлом — файл на экран демонстрации."""
         if seg.activity.breaks:
             if self.overlay is None:
                 self._show_break(seg)
@@ -644,6 +726,8 @@ class MainWindow(QMainWindow):
                 w.deleteLater()
         segs = self.scheduler.segs
         self.rows = [AgendaRow(s) for s in segs]
+        for r in self.rows:
+            r.start_here.connect(self.start_from)
         # каждый урок — своя панель с заголовком; перерывы — между панелями
         self.lesson_panels = []
         panel = None
@@ -677,6 +761,9 @@ class MainWindow(QMainWindow):
         if segs[0].start.date() != now.date() and not self.run_btn.isChecked():
             self._apply_plan()           # наступил новый день (таймер ночевал в трее) — повестка на сегодня
             return
+        if not self.run_btn.isChecked():
+            self._show_idle(segs)        # эфир не идёт — табло стоит: без отсчёта и «текущего» блока
+            return
         self.overall.set_now(now)
         begin, end = segs[0].start, segs[-1].end
         if now < begin:
@@ -691,7 +778,6 @@ class MainWindow(QMainWindow):
         for p in self.lesson_panels:
             p.set_state("now" if st.index >= 0 and p.contains(st.index) else
                         ("past" if now >= p.segs[-1].end else ""))
-        running = self.run_btn.isChecked()
         for i, r in enumerate(self.rows):
             mode = "now" if i == st.index else ("past" if now >= r.seg.end else
                                                 ("next" if (st.phase == "before" and i == 0) or i == st.index + 1
@@ -735,18 +821,65 @@ class MainWindow(QMainWindow):
             self.hero_demo.setText("")
             self.hero_next.setText("")
             pill = ("Завершено", style.MUTED)
-        if not running and st.phase != "after":
-            pill = (pill[0] + " · напоминания выкл.", style.MUTED)
-        self.status.setText(f"<span style='color:{pill[1]}; font-weight:600'>● {pill[0]}</span>")
+        self._set_status(*pill)
+
+    def _set_status(self, text: str, color: str) -> None:
+        self.status.setText(f"<span style='color:{color}; font-weight:600'>● {text}</span>")
         tip = f"{APP_NAME}: {self.hero_name.text()} · {self.hero_timer.text()}"
         if self.tray.toolTip() != tip:
             self.tray.setToolTip(tip)
 
+    def _show_idle(self, segs: list[Segment]) -> None:
+        """Эфир не идёт (не включали или остановили): шаблон в покое — без отсчёта, подсветки и заполнения полосы."""
+        begin, end = segs[0].start, segs[-1].end
+        self.overall.set_now(None)
+        text = f"всего {fmt_left(end - begin)} · {begin:%H:%M}–{end:%H:%M}"
+        if self.overall_lbl.text() != text:
+            self.overall_lbl.setText(text)
+        for p in self.lesson_panels:
+            p.set_state("")
+        for r in self.rows:
+            if getattr(r, "_mode", None) != "":
+                r._mode = ""
+                r.set_mode("")
+        self._last_index = -2            # при включении — прокрутить к текущему блоку
+        self.hero_label.setText("ЭФИР НЕ ИДЁТ")
+        self.hero_name.setText(self.scheduler.plan.title)
+        self.hero_timer.setText(fmt_left(end - begin))
+        self.hero_sub.setText(f"Старт в {begin:%H:%M} · всего {self.scheduler.plan.total_min} мин")
+        self.hero_bar.setValue(0)
+        self.hero_demo.setText("")
+        self.hero_next.setText("Начать: «▶ Вести эфир» — по расписанию, двойной щелчок по активности — с неё")
+        self._set_status("Эфир не идёт", style.MUTED)
+
     # ================================================================ окно и выход
+    def _auto_check_updates(self) -> None:
+        if not (self.settings.auto_update_check and updater.can_update()) or self._update_check is not None:
+            return
+        self._update_check = updater.CheckThread(self)
+        self._update_check.found.connect(self._on_update_found)
+        self._update_check.finished.connect(lambda: setattr(self, "_update_check", None))
+        self._update_check.start()
+
+    def _on_update_found(self, rel) -> None:
+        if rel is None:
+            return
+        first = self.update_release is None or self.update_release.version != rel.version
+        self.update_release = rel
+        self.update_btn.setText(f"⬆ Обновление {rel.version}")
+        self.update_btn.show()
+        if first:
+            self.tray.showMessage(APP_NAME, f"Вышла версия {rel.version}. Установить — ⚙ Настройки → «Обновления».",
+                                  make_icon(), 8000)
+            log.info("Доступно обновление %s", rel.version)
+
     def open_settings(self) -> None:
         before = copy.deepcopy(self.settings)
-        dlg = SettingsDialog(self.settings, self)
+        dlg = SettingsDialog(self.settings, self, self.update_release, self.run_btn.isChecked)
+        dlg.install_started.connect(self.quit_app)     # установщик закроет и снова откроет таймер
         ok = dlg.exec()
+        if dlg.release is not None:
+            self._on_update_found(dlg.release)
         dlg.deleteLater()
         if ok:
             # только то, что поменяли в окне: карточки и пульт могли передвинуть, пока оно было открыто

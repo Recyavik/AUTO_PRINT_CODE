@@ -7,11 +7,12 @@ import json
 from pathlib import Path
 
 from PySide6.QtCore import QMimeData, QPoint, QRect, Qt, QTime, QTimer, Signal
-from PySide6.QtGui import QColor, QDrag, QPainter, QPen
-from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog, QFileDialog, QFrame, QHBoxLayout,
-                               QHeaderView, QInputDialog, QLabel, QLineEdit, QListWidget, QListWidgetItem,
-                               QPlainTextEdit, QPushButton, QSpinBox, QTableWidget, QTimeEdit, QToolButton,
+from PySide6.QtGui import QColor, QDrag, QIntValidator, QPainter, QPen
+from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog, QFileDialog, QFrame,
+                               QHBoxLayout, QHeaderView, QInputDialog, QLabel, QLineEdit, QListWidget, QListWidgetItem,
+                               QMenu, QPlainTextEdit, QPushButton, QTableWidget, QTimeEdit, QToolButton,
                                QVBoxLayout, QWidget)
+from shiboken6 import isValid
 
 from ..model import (DEMO_NONE, DEMO_OFF, DEMO_ON, Activity, Plan, parse_time, plan_from, plan_to, reorder_lessons,
                      split_lessons)
@@ -58,13 +59,14 @@ def _no_enter_buttons(dialog: QDialog) -> None:
 class _Handle(QLabel):
     """Ручка «⠿» слева от блока: потянуть мышью — перенести блок на другое место."""
 
-    def __init__(self, row: int) -> None:
-        super().__init__("⠿")
-        self.row = row
+    def __init__(self, row: int, locked: bool = False) -> None:
+        super().__init__("🔒" if locked else "⠿")
+        self.row, self.locked = row, locked
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.setCursor(Qt.CursorShape.OpenHandCursor)
-        self.setToolTip("Потяните, чтобы перенести блок")
-        self.setStyleSheet("font-size: 15pt; color: #9C8FBC; padding: 0 6px;")
+        self.setCursor(Qt.CursorShape.ArrowCursor if locked else Qt.CursorShape.OpenHandCursor)
+        self.setToolTip("Тайминг урока зафиксирован — «Разморозить» на полосе «Уроки» (правая кнопка мыши)"
+                        if locked else "Потяните, чтобы перенести блок")
+        self.setStyleSheet(f"font-size: {'11' if locked else '15'}pt; color: #9C8FBC; padding: 0 6px;")
         self._press: QPoint | None = None
 
     def mousePressEvent(self, e) -> None:
@@ -75,7 +77,7 @@ class _Handle(QLabel):
                 table.select(self.row)
 
     def mouseMoveEvent(self, e) -> None:
-        if self._press is None or (e.position().toPoint() - self._press).manhattanLength() \
+        if self.locked or self._press is None or (e.position().toPoint() - self._press).manhattanLength() \
                 < QApplication.startDragDistance():
             return
         self._press = None
@@ -94,6 +96,71 @@ class _Handle(QLabel):
 
 LINE_COLOR = QColor(242, 182, 75, 128)        # границы уроков — золотые, прозрачность 50 %
 SELECT_COLOR = QColor(110, 175, 255, 150)     # рамка выбранного блока
+
+
+class _Minutes(QLineEdit):
+    """Минуты блока: только целое число с клавиатуры (↑/↓ — ±1). Без стрелок и колёсика: колёсико мыши
+    прокручивает таблицу. Обычное поле ввода, а не QSpinBox: тот без стрелок в PySide6 6.12 сжимал текст до 1 px.
+    Сверх maximum() (свободное место в уроке) не вводится — лишнее обрезается."""
+    valueChanged = Signal(int)
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._min, self._max, self._value = 1, 600, 1
+        self.setValidator(QIntValidator(0, 9999, self))
+        self.setMinimumWidth(56)
+        self.setText("1")
+        self.textEdited.connect(self._typed)
+        self.editingFinished.connect(lambda: self.setValue(self._parse(self._value)))
+
+    def value(self) -> int:
+        return self._value
+
+    def maximum(self) -> int:
+        return self._max
+
+    def setRange(self, lo: int, hi: int) -> None:
+        self._min, self._max = lo, hi
+        self.setValue(self._value)
+
+    def setMaximum(self, hi: int) -> None:
+        self.setRange(self._min, hi)
+
+    def setValue(self, v: int) -> None:
+        v = max(self._min, min(self._max, v))
+        if self.text() != str(v):
+            self.setText(str(v))
+        if v != self._value:
+            self._value = v
+            self.valueChanged.emit(v)
+
+    def stepUp(self) -> None:
+        self.setValue(self._value + 1)
+
+    def stepDown(self) -> None:
+        self.setValue(self._value - 1)
+
+    def _parse(self, default: int) -> int:
+        return int(self.text()) if self.text().isdigit() else default
+
+    def _typed(self, _text: str) -> None:
+        v = self._parse(0)
+        if self._min <= v <= self._max and v != self._value:
+            self._value = v
+            self.valueChanged.emit(v)
+        elif v > self._max:                 # больше, чем свободно в уроке, — сразу до предела
+            self.setValue(self._max)
+
+    def keyPressEvent(self, e) -> None:
+        if e.key() == Qt.Key.Key_Up:
+            self.stepUp()
+        elif e.key() == Qt.Key.Key_Down:
+            self.stepDown()
+        else:
+            super().keyPressEvent(e)
+
+    def wheelEvent(self, e) -> None:
+        e.ignore()
 
 
 class _LessonLines(QWidget):
@@ -211,6 +278,7 @@ class _LessonStrip(QListWidget):
     двойной щелчок — название урока."""
     reordered = Signal(list)            # новый порядок: исходные номера уроков (с 0)
     rename = Signal(int)                # номер урока (с 0)
+    lock = Signal(int, bool)            # номер урока, зафиксировать (True) / разморозить
 
     def __init__(self) -> None:
         super().__init__()
@@ -221,9 +289,26 @@ class _LessonStrip(QListWidget):
         self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.setFixedHeight(46)
         self.setSpacing(3)
-        self.setToolTip("Двойной щелчок — название урока. Перетащите урок, чтобы поменять уроки местами: "
+        self.setToolTip("Двойной щелчок — название урока. Правая кнопка — зафиксировать тайминг урока "
+                        "(урок не редактируется) или разморозить. Перетащите урок, чтобы поменять уроки местами: "
                         "блоки урока переезжают вместе, перерывы остаются на своих местах")
         self.itemDoubleClicked.connect(lambda it: self.rename.emit(it.data(Qt.ItemDataRole.UserRole)))
+        self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.customContextMenuRequested.connect(self._menu)
+        self.locked: list[bool] = []
+
+    def _menu(self, pos) -> None:
+        it = self.itemAt(pos)
+        if it is None:
+            return
+        i = it.data(Qt.ItemDataRole.UserRole)
+        m = QMenu(self)
+        m.addAction("✎ Название урока…", lambda: self.rename.emit(i))
+        if self.locked[i]:
+            m.addAction("🔓 Разморозить тайминг", lambda: self.lock.emit(i, False))
+        else:
+            m.addAction("🔒 Зафиксировать тайминг", lambda: self.lock.emit(i, True))
+        m.exec(self.viewport().mapToGlobal(pos))
         self.setStyleSheet(f"""
             QListWidget {{ background: transparent; border: none; }}
             QListWidget::item {{ background: rgba(110,175,255,0.10); border: 1px solid rgba(110,175,255,0.35);
@@ -231,7 +316,8 @@ class _LessonStrip(QListWidget):
             QListWidget::item:selected {{ background: rgba(110,175,255,0.25); }}
         """)
 
-    def set_lessons(self, labels: list[str]) -> None:
+    def set_lessons(self, labels: list[str], locked: list[bool]) -> None:
+        self.locked = locked
         if [self.item(i).text() for i in range(self.count())] == labels:
             return
         self.clear()
@@ -253,6 +339,8 @@ class PlanEditor(QDialog):
         break_min — перерыв перед уроком, который добавляет «+ Добавить урок»."""
         super().__init__(parent)
         self.setWindowTitle("Шаблон вебинара")
+        # кнопка «Развернуть»: на весь экран и обратно к прежнему размеру (и двойной щелчок по заголовку)
+        self.setWindowFlag(Qt.WindowType.WindowMaximizeButtonHint, True)
         # модально только для главного окна: напоминание, пришедшее во время правки, остаётся нажимаемым
         self.setWindowModality(Qt.WindowModality.WindowModal)
         self.resize(820, 640)
@@ -291,6 +379,7 @@ class PlanEditor(QDialog):
         self.lessons_list = _LessonStrip()
         self.lessons_list.reordered.connect(self.reorder_lessons)
         self.lessons_list.rename.connect(self.rename_lesson)
+        self.lessons_list.lock.connect(self.set_lesson_locked)
         lr.addWidget(self.lessons_list, 1)
         lay.addWidget(self.lessons_row)
 
@@ -317,6 +406,9 @@ class PlanEditor(QDialog):
         for b in (add, add_lesson):
             b.setFocusPolicy(Qt.FocusPolicy.NoFocus)    # нажатие не снимает выбор с блока
         row.addStretch(1)
+        self.notice = QLabel(objectName="hint")
+        self.notice.setStyleSheet(f"color: {style.AMBER};")
+        row.addWidget(self.notice)
         self.parts_lbl = QLabel()
         row.addWidget(self.parts_lbl)
         row.addSpacing(16)
@@ -324,7 +416,7 @@ class PlanEditor(QDialog):
         row.addWidget(self.total)
         lay.addLayout(row)
         note = QLabel("Блоки переставляются мышью за «⠿», уроки целиком — на полосе «Уроки» (двойной щелчок по уроку — "
-                      "его название). Новый блок встаёт "
+                      "его название, правая кнопка — зафиксировать тайминг). Новый блок встаёт "
                       "после выбранного (в конец, если ничего не выбрано). «Напомнить» — в начале блока на мониторе управления появится напоминание, оно висит, пока "
                       "его не отметите. «Перерыв» — на экран демонстрации выводится заставка с отсчётом.",
                       objectName="hint")
@@ -395,7 +487,7 @@ class PlanEditor(QDialog):
         self.table.setRowCount(0)
         for i, a in enumerate(self.plan.schedule):
             self.table.insertRow(i)
-            self.table.setCellWidget(i, C_HANDLE, _Handle(i))
+            self.table.setCellWidget(i, C_HANDLE, _Handle(i, a.locked))
             name = QLineEdit(a.name)
             # от названия зависят галочки по умолчанию («перерыв» в названии — перерыв)
             name.textChanged.connect(lambda t, a=a: (setattr(a, "name", t), self._refresh_flags()))
@@ -409,7 +501,7 @@ class PlanEditor(QDialog):
                                                                       self._refresh_flags()))
             self.table.setCellWidget(i, C_DEMO, demo)
 
-            mins = QSpinBox()
+            mins = _Minutes()
             mins.setRange(1, 600)
             mins.setValue(a.min)
             mins.valueChanged.connect(lambda v, a=a: (setattr(a, "min", v), self._sync_total()))
@@ -431,6 +523,9 @@ class PlanEditor(QDialog):
             delete.setToolTip("Удалить блок")
             delete.clicked.connect(lambda _c=False, i=i: self._remove(i))
             self.table.setCellWidget(i, C_DEL, _center(delete))
+            if a.locked:            # урок зафиксирован — блок только для просмотра
+                for col in range(C_NAME, C_DEL + 1):
+                    self.table.cellWidget(i, col).setEnabled(False)
         _no_enter_buttons(self)
         self._refresh_flags()
 
@@ -506,9 +601,10 @@ class PlanEditor(QDialog):
 
     def _fill_lessons(self) -> None:
         groups, _seps = split_lessons(self.plan.schedule)
-        labels = [f"⠿ {n} · {self.plan.lesson_name(n - 1) or 'без названия'} · {sum(a.min for a in g)} мин"
-                  for n, g in enumerate(groups, 1)]
-        self.lessons_list.set_lessons(labels)
+        locked = [all(a.locked for a in g) for g in groups]
+        labels = [f"⠿ {'🔒 ' if lk else ''}{n} · {self.plan.lesson_name(n - 1) or 'без названия'} · "
+                  f"{sum(a.min for a in g)} мин" for n, (g, lk) in enumerate(zip(groups, locked, strict=True), 1)]
+        self.lessons_list.set_lessons(labels, locked)
 
     def _sync_total(self) -> None:
         self._apply_limits()
@@ -535,10 +631,21 @@ class PlanEditor(QDialog):
             return
         self.table.select(self.table.row_of(new))
 
+    def _joins_locked(self, s: list[Activity], i: int) -> bool:
+        """Блок, вставленный в позицию i, вошёл бы в зафиксированный урок (соседний блок урока зафиксирован)."""
+        return any(0 <= j < len(s) and not s[j].breaks and s[j].locked for j in (i - 1, i))
+
+    def _refuse(self, text: str) -> None:
+        self.notice.setText(text)
+        QTimer.singleShot(5000, lambda: isValid(self.notice) and self.notice.setText(""))
+
     def _add(self) -> None:
         """Новый блок — после выбранного; если ничего не выбрано — в конец."""
         sel = self.table.selected
         i = sel + 1 if sel is not None and 0 <= sel < len(self.plan.schedule) else len(self.plan.schedule)
+        if self._joins_locked(self.plan.schedule, i):
+            self._refuse("Урок зафиксирован — новый блок в него не добавить. Разморозьте урок на полосе «Уроки».")
+            return
         self.plan.schedule.insert(i, Activity("Новый блок", DEMO_OFF, 5))
         room = self.plan.room(i)
         if room is not None and room < 0:          # в уроке места мало — сколько осталось, но не меньше 1
@@ -563,6 +670,14 @@ class PlanEditor(QDialog):
         if ok:
             self.set_lesson_name(i, name)
 
+    def set_lesson_locked(self, i: int, on: bool) -> None:
+        """Зафиксировать тайминг урока i (его блоки только для просмотра) или разморозить."""
+        groups, _seps = split_lessons(self.plan.schedule)
+        for a in groups[i]:
+            a.locked = on
+        self.table.select(None)
+        self._fill()
+
     def set_lesson_name(self, i: int, name: str) -> None:
         names = self.plan.lesson_names
         names += [""] * (i + 1 - len(names))
@@ -577,13 +692,19 @@ class PlanEditor(QDialog):
         dst = max(0, min(len(s), dst))
         if dst in (src, src + 1):
             return              # на своё же место
-        block = s.pop(src)
         to = dst - 1 if dst > src else dst
+        rest = s[:src] + s[src + 1:]
+        if s[src].locked or (not s[src].breaks and self._joins_locked(rest, to)):
+            self._refuse("Урок зафиксирован — его блоки не переносятся и в него не добавить. Разморозьте урок.")
+            return
+        block = s.pop(src)
         s.insert(to, block)
         self.table.select(to)
         self._fill()
 
     def _remove(self, i: int) -> None:
+        if self.plan.schedule[i].locked:
+            return
         if len(self.plan.schedule) > 1:
             del self.plan.schedule[i]
             self.table.select(None)

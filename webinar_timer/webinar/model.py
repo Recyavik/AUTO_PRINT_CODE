@@ -31,7 +31,8 @@ class Activity:
     min: int = 5
     remind: bool | None = None      # None — по умолчанию: напоминать обо всём, что идёт без демонстрации
     is_break: bool | None = None    # None — по названию («перерыв»)
-    media: str = ""                 # картинка или видео на экран демонстрации («Далее» в напоминании)
+    media: str = ""                 # картинка или видео на экран демонстрации (кнопка «▶ Показать…» в напоминании)
+    locked: bool = False            # тайминг урока зафиксирован: блок не редактируется в шаблоне
 
     @property
     def breaks(self) -> bool:
@@ -136,7 +137,7 @@ def activity_from(d: dict, i: int) -> Activity:
     remind = d.get("remind") if isinstance(d.get("remind"), bool) else None
     is_break = d.get("break") if isinstance(d.get("break"), bool) else None
     media = str(d.get("media") or "").strip()
-    return Activity(name, demo, max(1, round(minutes)), remind, is_break, media)
+    return Activity(name, demo, max(1, round(minutes)), remind, is_break, media, d.get("locked") is True)
 
 
 def plan_from(d: dict, title: str = "Вебинар") -> Plan:
@@ -169,6 +170,8 @@ def activity_to(a: Activity) -> dict:
         d["break"] = a.is_break
     if a.media:
         d["media"] = a.media
+    if a.locked:
+        d["locked"] = True
     return d
 
 

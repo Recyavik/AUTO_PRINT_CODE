@@ -271,6 +271,55 @@ class StoreTest(unittest.TestCase):
         self.assertTrue(st.plans)
 
 
+class UpdaterTest(unittest.TestCase):
+    """Обновления из GitHub Releases — без сети: ответ GitHub подставлен."""
+
+    def test_versions(self):
+        from webinar import updater
+        self.assertEqual(updater.version_key("1.2"), updater.version_key("1.2.0"))
+        self.assertTrue(updater.is_newer("1.10.0", "1.9.3"))
+        self.assertFalse(updater.is_newer("1.2.0", "1.2.0"))
+        self.assertFalse(updater.is_newer("мусор", "1.0.0"))
+
+    def test_pick_latest_timer_release_only(self):
+        from webinar import updater
+        asset = lambda v: {"name": f"webinar-timer-update-{v}.exe", "size": 60_000_000,  # noqa: E731
+                           "browser_download_url": f"https://x/{v}.exe"}
+        releases = [
+            {"tag_name": "v0.9.0", "assets": [asset("0.9.0")]},                        # AutoPrintCode — мимо
+            {"tag_name": "webinar-v1.5.0", "draft": True, "assets": [asset("1.5.0")]},  # черновик — мимо
+            {"tag_name": "webinar-v1.4.0", "assets": []},                               # без установщика — мимо
+            {"tag_name": "webinar-v1.3.0", "body": "Новое", "html_url": "https://r/1.3.0", "assets": [asset("1.3.0")]},
+            {"tag_name": "webinar-v1.2.5", "assets": [asset("1.2.5")]},
+        ]
+        r = updater.pick_latest(releases)
+        self.assertEqual((r.version, r.notes, r.asset_url), ("1.3.0", "Новое", "https://x/1.3.0.exe"))
+        self.assertIsNone(updater.pick_latest([{"tag_name": "v0.6.3"}]))
+
+    def test_settings_updates_section(self):
+        from webinar import updater
+        dlg = SettingsDialog(wstore.Settings())
+        self.assertFalse(dlg.check_btn.isEnabled(), "из исходников — обновление через git")
+        self.assertIn("git pull", dlg.update_status.text())
+        self.assertTrue(dlg.auto_update.isChecked(), "автопроверка — по умолчанию включена")
+        dlg.auto_update.setChecked(False)
+        self.assertFalse(dlg.result_settings().auto_update_check)
+
+        rel = updater.Release("9.9.0", "Что нового: всё", "https://x/9.9.0.exe", 1, "https://r")
+        orig = updater.can_update
+        updater.can_update = lambda: True
+        try:
+            live = SettingsDialog(wstore.Settings(), release=rel, is_live=lambda: True)
+        finally:
+            updater.can_update = orig
+        self.assertFalse(live.install_btn.isHidden())
+        self.assertEqual(live.install_btn.text(), "⬇ Установить 9.9.0")
+        self.assertIn("Что нового: всё", live.update_status.text())
+        live.install_update()                               # идёт эфир — не ставить
+        self.assertIn("Идёт эфир", live.update_status.text())
+        self.assertIsNone(live._thread, "скачивание не началось")
+
+
 class _WindowBase(unittest.TestCase):
     """Главное окно с подменными часами (10:58) и тестовым шаблоном PLAN."""
 
@@ -297,14 +346,35 @@ class WindowsTest(_WindowBase):
     def test_agenda_and_start_time(self):
         self.win.start_edit.setTime(self.win.start_edit.time().fromString("11:00", "HH:mm"))
         self.assertEqual(len(self.win.rows), len(PLAN.schedule))
+        self.win.run_btn.setChecked(True)
         self.assertEqual(self.win.hero_label.text(), "ДО НАЧАЛА")
         self.assertEqual(self.win.hero_timer.text(), "02:00")
+
+    def test_stopped_broadcast_board_stands_still(self):
+        """Эфир не идёт или остановлен — табло стоит: без отсчёта, подсветки текущего блока и заполнения полосы."""
+        self.clock.t = at("11:05")                           # по часам идёт «ПРЕЗЕНТАЦИЯ»
+        self.win.scheduler.poll()
+        idle = ("ЭФИР НЕ ИДЁТ", "16:00")
+        self.assertEqual((self.win.hero_label.text(), self.win.hero_timer.text()), idle)
+        self.assertEqual({r._mode for r in self.win.rows}, {""}, "ни один блок не «идёт»")
+        self.assertIsNone(self.win.overall.now, "полоса эфира пустая")
+        self.assertEqual(self.win.overall_lbl.text(), "всего 16:00 · 11:00–11:16")
+        self.assertIn("Эфир не идёт", self.win.status.text())
+        self.win.run_btn.setChecked(True)
+        self.assertEqual(self.win.hero_label.text(), "СЕЙЧАС")
+        self.assertEqual(self.win.rows[2]._mode, "now")
+        self.win.run_btn.setChecked(False)                   # «■ Остановить эфир»
+        self.assertEqual((self.win.hero_label.text(), self.win.hero_timer.text()), idle, "сразу, без ожидания")
+        self.clock.t = at("11:06")
+        self.win.scheduler.poll()
+        self.assertEqual(self.win.hero_timer.text(), "16:00", "и дальше не тикает")
+        self.assertEqual({r._mode for r in self.win.rows}, {""})
 
     def test_layout_fits_narrow_and_wide_window(self):
         """Отсчёт не обрезается в узком окне, повестка остаётся читаемой, старт виден целиком."""
         from PySide6.QtGui import QFontMetrics
         self.clock.t = at("02:00")                           # «До начала 9:00:00» — самый длинный отсчёт
-        self.win.scheduler.poll()
+        self.win.run_btn.setChecked(True)
         for width in (1020, 1700):
             self.win.resize(width, 800)
             self.win.show()
@@ -454,6 +524,7 @@ class WindowsTest(_WindowBase):
         self.assertEqual([len(p.findChildren(type(self.win.rows[0]))) for p in panels], [3, 1])
         brk = self.win.rows[3]
         self.assertNotIsInstance(brk.parent(), LessonPanel, "перерыв — между панелями, не внутри")
+        self.win.run_btn.setChecked(True)
         self.assertEqual(self.win.overall_lbl.text(), "до начала 02:00 · всего 16:00")
         self.clock.t = at("11:05", 30)
         self.win.scheduler.poll()
@@ -523,7 +594,9 @@ class WindowsTest(_WindowBase):
         self.clock.t = self.clock.t + timedelta(days=1)
         self.win.scheduler.poll()
         self.assertEqual(self.win.scheduler.segs[0].start, first + timedelta(days=1))
-        self.assertEqual(self.win.hero_label.text(), "ДО НАЧАЛА")
+        self.assertEqual(self.win.hero_sub.text().split(" · ")[0], "Старт в 11:00")
+        self.win.run_btn.setChecked(True)
+        self.assertEqual(self.win.hero_label.text(), "ДО НАЧАЛА", "сегодняшний эфир — ещё впереди")
 
     def test_settings_save_keeps_positions_moved_meanwhile(self):
         """Пока открыты настройки, передвинули пульт — «Сохранить» не откатывает его место."""
@@ -539,6 +612,75 @@ class WindowsTest(_WindowBase):
         finally:
             SettingsDialog.exec = orig
         self.assertEqual((self.win.settings.player_pos, self.win.settings.heads_up_min), ("10,20", 3))
+
+    def test_start_from_selected_activity(self):
+        """Двойной щелчок по активности — эфир с неё: старт пересчитан, эфир включён, напоминание о ней — сразу."""
+        self.clock.t = at("15:30", 20)
+        row = self.win.rows[1]                               # «Зарядка» (после «Приветствия» 2 мин)
+        row.mouseDoubleClickEvent(None)
+        self.assertEqual(self.win.start_edit.time().toString("HH:mm"), "15:28")
+        self.assertTrue(self.win.run_btn.isChecked(), "эфир включён")
+        self.assertEqual(self.win.scheduler.state().index, 1, "идёт выбранная активность")
+        self.assertEqual([(c.seg.activity.name, c.heads_up) for c in self.win.notifier.cards], [("Зарядка", False)])
+        self.win.notifier.clear()
+        self.win.rows[1].start_here.emit(self.win.rows[1].seg)   # во время эфира — ещё раз с того же места
+        self.assertEqual([c.seg.activity.name for c in self.win.notifier.cards], ["Зарядка"], "напомнило снова")
+
+    def test_live_broadcast_resumes_after_restart(self):
+        """Таймер перезапустили во время эфира — эфир продолжается с тем же стартом, а не сначала."""
+        self.clock.t = at("11:03")
+        self.win.run_btn.setChecked(True)
+        self.assertEqual(wstore.Settings.load().live, f"{PLAN.id}|11:00|2026-10-26")
+        again = MainWindow(self.store, wstore.Settings.load(), self.clock)
+        again.scheduler._timer.stop()
+        try:
+            self.assertTrue(again.run_btn.isChecked(), "эфир продолжен")
+            self.assertEqual(again.start_edit.time().toString("HH:mm"), "11:00")
+            self.assertEqual(again.scheduler.state().index, 1)
+        finally:
+            again.run_btn.setChecked(False)
+            again.quit_app()
+        self.assertEqual(wstore.Settings.load().live, "", "остановили — продолжать нечего")
+        self.clock.t = at("12:00")                           # эфир (11:00–11:16) уже кончился
+        s = wstore.Settings.load()
+        s.live = f"{PLAN.id}|11:00|2026-10-26"
+        late = MainWindow(self.store, s, self.clock)
+        late.scheduler._timer.stop()
+        self.assertFalse(late.run_btn.isChecked(), "кончившийся эфир не продолжается")
+        late.quit_app()
+
+    def test_reminder_card_texts_and_action_button(self):
+        """Карточка понятная: что происходит и сколько; кнопка действия — только если есть что показать."""
+        from PySide6.QtWidgets import QPushButton
+        from PySide6.QtGui import QColor, QImage
+        img = Path(wstore.DATA_DIR) / "eyes_card.png"
+        q = QImage(16, 9, QImage.Format.Format_RGB32)
+        q.fill(QColor("green"))
+        q.save(str(img))
+        self.win.settings.eyes_media = str(img)
+        self.win.run_btn.setChecked(True)
+        self.walk(at("11:01"))                               # за минуту до «Зарядки» (11:02)
+        card = self.win.notifier.cards[0]
+        buttons = lambda c: [b.text() for b in c.findChildren(QPushButton)]   # noqa: E731
+        self.assertEqual((card.label.text(), card.left.text()), ("СКОРО НАЧНЁТСЯ", "через 01:00"))
+        self.assertEqual(buttons(card), ["▶ Показать картинку", "⏰ Напомнить через минуту", "✓ Понятно"])
+        self.clock.t = at("11:03")
+        card.refresh()
+        self.assertEqual((card.label.text(), card.left.text()), ("ИДЁТ СЕЙЧАС", "осталось 02:00"))
+        self.clock.t = at("11:06")
+        card.refresh()
+        self.assertEqual((card.label.text(), card.left.text()), ("ВРЕМЯ ВЫШЛО", "закончилась"))
+        plain = self.win.notifier.show(self.win.scheduler.segs[4], False)   # «Выводы» — показывать нечего
+        self.assertEqual(buttons(plain), ["⏰ Напомнить через минуту", "✓ Понятно"], "без лишней кнопки")
+        brk = self.win.notifier.show(self.win.scheduler.segs[3], True)      # «скоро перерыв»
+        self.assertIn("☕ Начать перерыв", buttons(brk))
+
+    def test_update_found_shows_header_button(self):
+        from webinar import updater
+        self.assertTrue(self.win.update_btn.isHidden())
+        self.win._on_update_found(updater.Release("9.9.0", "", "https://x", 1, ""))
+        self.assertFalse(self.win.update_btn.isHidden())
+        self.assertEqual(self.win.update_btn.text(), "⬆ Обновление 9.9.0")
 
     def test_video_has_player_on_control_monitor(self):
         """У видео — пульт на мониторе управления (у картинки — нет); «Убрать» — видео и пульт уходят вместе."""
@@ -815,6 +957,57 @@ class ButtonsAndMediaTest(_WindowBase):
         one = PlanEditor(Plan("y", "11:00", [Activity("a", DEMO_ON, 5)]), lesson_min=45)
         self.assertEqual(one.lessons_list.count(), 1, "один урок — тоже можно назвать")
 
+    def test_lock_lesson_timing(self):
+        """«Зафиксировать тайминг»: блоки урока только для просмотра, не двигаются, внутрь не вставить; разморозить —
+        снова можно. Фиксация хранится в шаблоне и едет с уроком при перестановке."""
+        from PySide6.QtCore import QPoint, QPointF, Qt
+        from PySide6.QtGui import QWheelEvent
+        from PySide6.QtTest import QTest
+        p = Plan("x", "11:00", [Activity("a1", DEMO_ON, 20), Activity("a2", DEMO_ON, 25),
+                                Activity("ПЕРЕРЫВ", DEMO_NONE, 10, is_break=True), Activity("b1", DEMO_ON, 30)])
+        dlg = PlanEditor(p, lesson_min=45)
+        mins = dlg.table.cellWidget(0, C_MIN)
+        mins.show()
+        app.processEvents()
+        self.assertGreater(mins.width(), 40, "число видно (QSpinBox без стрелок в PySide6 6.12 сжимался до 1 px)")
+        wheel = QWheelEvent(QPointF(5, 5), QPointF(5, 5), QPoint(0, 0), QPoint(0, 120), Qt.MouseButton.NoButton,
+                            Qt.KeyboardModifier.NoModifier, Qt.ScrollPhase.NoScrollPhase, False)
+        app.sendEvent(mins, wheel)
+        self.assertEqual(mins.value(), 20, "колёсико мыши не меняет минуты")
+        QTest.keyClick(mins, Qt.Key.Key_Up)
+        self.assertEqual(dlg.plan.schedule[0].min, 20, "урок заполнен (20 + 25 = 45) — больше нельзя")
+        QTest.keyClick(mins, Qt.Key.Key_Down)
+        self.assertEqual(dlg.plan.schedule[0].min, 19, "↓ — минус минута")
+        mins.selectAll()
+        QTest.keyClicks(mins, "99")
+        self.assertEqual((mins.text(), dlg.plan.schedule[0].min), ("20", 20), "больше свободного — до предела")
+        dlg.set_lesson_locked(0, True)
+        names = lambda: [a.name for a in dlg.plan.schedule]            # noqa: E731
+        self.assertFalse(dlg.table.cellWidget(0, C_MIN).isEnabled(), "минуты не правятся")
+        self.assertFalse(dlg.table.cellWidget(1, C_NAME).isEnabled())
+        self.assertTrue(dlg.table.cellWidget(3, C_MIN).isEnabled(), "другой урок — правится")
+        self.assertEqual(dlg.table.cellWidget(0, C_HANDLE).text(), "🔒")
+        self.assertTrue(dlg.lessons_list.item(0).text().startswith("⠿ 🔒 1"))
+        dlg.table.select(0)
+        dlg._add()
+        self.assertEqual(names(), ["a1", "a2", "ПЕРЕРЫВ", "b1"], "внутрь зафиксированного урока — нельзя")
+        self.assertIn("зафиксирован", dlg.notice.text())
+        dlg.move_row(0, 4)                                   # блок зафиксированного урока — не переносится
+        dlg.move_row(3, 1)                                   # и внутрь него — тоже
+        dlg._remove(0)
+        self.assertEqual(names(), ["a1", "a2", "ПЕРЕРЫВ", "b1"])
+        dlg.reorder_lessons([1, 0])                          # переставить уроки целиком — можно
+        self.assertEqual(names(), ["b1", "ПЕРЕРЫВ", "a1", "a2"])
+        self.assertEqual([a.locked for a in dlg.plan.schedule], [False, False, True, True], "замок — с уроком")
+        dlg._save()
+        again = plan_from(plan_to(dlg.result_plan))
+        self.assertEqual([a.locked for a in again.schedule], [False, False, True, True], "сохраняется в шаблоне")
+        dlg.set_lesson_locked(1, False)                      # разморозить
+        self.assertTrue(dlg.table.cellWidget(2, C_MIN).isEnabled())
+        dlg.table.select(2)
+        dlg._add()
+        self.assertEqual(names(), ["b1", "ПЕРЕРЫВ", "a1", "Новый блок", "a2"], "после разморозки — снова можно")
+
     def test_own_lesson_length_in_editor(self):
         """У шаблона может быть своя продолжительность урока; «Как в настройках» — из общих настроек."""
         p = Plan("x", "11:00", [Activity("a", DEMO_ON, 50)])
@@ -892,7 +1085,7 @@ class SettingsSaveTest(unittest.TestCase):
                 card = notify.Card(segments(PLAN, DAY)[1], False, datetime.now)
                 card.show()
                 card.acked.connect(lambda c: result.setdefault("clicked", True))
-                btn = next(b for b in card.findChildren(QPushButton) if b.text() == "Закрыть")
+                btn = next(b for b in card.findChildren(QPushButton) if b.text() == "✓ Понятно")
                 QTest.mouseClick(card.windowHandle(), Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier,
                                  btn.mapTo(card, btn.rect().center()))
                 card.close()

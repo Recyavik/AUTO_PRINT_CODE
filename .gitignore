@@ -46,6 +46,8 @@ tests/pages/package-lock.json
 
 # --- Дистрибутив таймера для коллег (собирает tools/build_webinar_dist.py; сотни МБ) ---
 INSTALL/*.exe
+INSTALL/*.json
+INSTALL/*/
 
 # --- Временное и служебное ---
 *.log

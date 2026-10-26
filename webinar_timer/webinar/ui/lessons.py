@@ -141,7 +141,8 @@ class TimelineBar(QWidget):
         self._tip()
         self.update()
 
-    def set_now(self, now: datetime) -> None:
+    def set_now(self, now: datetime | None) -> None:
+        """Сейчас — закрасить прошедшее и поставить отметку; None — эфир не идёт, полоса пустая."""
         self.now = now
         self.update()
 

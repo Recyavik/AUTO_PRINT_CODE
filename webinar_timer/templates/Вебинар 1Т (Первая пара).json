@@ -8,37 +8,43 @@
       "name": "Приветствие",
       "demo": "on",
       "min": 1,
-      "remind": false
+      "remind": false,
+      "locked": true
     },
     {
       "name": "Целеполагание",
       "demo": "off",
       "min": 5,
-      "remind": true
+      "remind": true,
+      "locked": true
     },
     {
       "name": "Теория",
       "demo": "on",
       "min": 14,
-      "remind": true
+      "remind": true,
+      "locked": true
     },
     {
       "name": "ЗАРЯДКА ДЛЯ ГЛАЗ",
       "demo": "off",
       "min": 5,
-      "remind": true
+      "remind": true,
+      "locked": true
     },
     {
       "name": "Теория",
       "demo": "on",
       "min": 15,
-      "remind": true
+      "remind": true,
+      "locked": true
     },
     {
       "name": "Выводы",
       "demo": "off",
       "min": 5,
-      "remind": true
+      "remind": true,
+      "locked": true
     },
     {
       "name": "ПЕРЕРЫВ",
@@ -49,37 +55,43 @@
     {
       "name": "Разбор СР прошлого занятия",
       "demo": "on",
-      "min": 7
+      "min": 7,
+      "locked": true
     },
     {
       "name": "Слайды заданий",
       "demo": "on",
       "min": 10,
-      "remind": true
+      "remind": true,
+      "locked": true
     },
     {
       "name": "ЗАРЯДКА ДЛЯ ГЛАЗ",
       "demo": "on",
       "min": 5,
-      "remind": true
+      "remind": true,
+      "locked": true
     },
     {
       "name": "Тренажёры",
       "demo": "on",
       "min": 10,
-      "remind": true
+      "remind": true,
+      "locked": true
     },
     {
       "name": "ИСР",
       "demo": "on",
       "min": 10,
-      "remind": true
+      "remind": true,
+      "locked": true
     },
     {
       "name": "Выводы",
       "demo": "off",
       "min": 3,
-      "remind": true
+      "remind": true,
+      "locked": true
     }
   ],
   "lessons": [

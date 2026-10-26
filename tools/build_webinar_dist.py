@@ -1,25 +1,34 @@
-"""Дистрибутив «Таймера вебинара» для коллег: самораспаковывающийся архив в INSTALL/.
+"""Дистрибутив «Таймера вебинара» для коллег: мастер установки в INSTALL/.
 
-    python tools/build_webinar_dist.py
+    python tools/build_webinar_dist.py                              — собрать
+    python tools/build_webinar_dist.py --publish --notes "Что нового"  — собрать и выложить обновление на GitHub
 
 Python на компьютере коллеги не нужен: PyInstaller собирает «Таймер вебинара.exe» вместе с Python и PySide6
-(окна, видео, звук). Рядом с exe — media/ (фон, видео гимнастики, шрифт), templates/, data/ (шаблоны и
-настройки без привязки к этому компьютеру: мониторы и места окон у коллеги свои) и «Создать ярлык на рабочем
-столе.bat». Всё упаковывается 7-Zip в самораспаковывающийся .exe: коллега запускает его, выбирает папку —
-и запускает таймер.
+(окна, видео, звук). Рядом с exe — media/ (фон, видео гимнастики, шрифт) и templates/ (шаблоны для первого
+запуска). Inno Setup (tools/webinar_setup.iss) делает из этого мастер установки «Установка — Таймер вебинара
+<версия>.exe»: папка, ярлыки в «Пуске» и на рабочем столе, удаление через «Программы и компоненты», без прав
+администратора. Папки data/ в установщике нет: обновление поверх не трогает шаблоны и настройки пользователя.
+Шаблоны лежат и отдельными файлами в INSTALL/ — для «Импорт JSON» у тех, у кого таймер уже установлен.
 
-Для сборки нужны Python 3.10–3.13 (обычный, не «t» без GIL) и 7-Zip. Окружение сборки (PySide6, PyInstaller)
-создаётся само в build/webinar/venv и переиспользуется.
+Обновления: собирается и лёгкий установщик build/webinar/webinar-timer-update-<версия>.exe (без видео, фона и
+шрифта — они у пользователя уже стоят). --publish выкладывает его на GitHub как Release «webinar-v<версия>»;
+таймер находит его в ⚙ Настройки → «Обновления» (или сам, если включена автопроверка) и ставит по кнопке.
+Нужен GitHub CLI с входом в аккаунт (gh auth login); всё должно быть закоммичено и отправлено.
+
+Для сборки нужны Python 3.10–3.13 (обычный, не «t» без GIL) и Inno Setup 6 (winget install JRSoftware.InnoSetup).
+Окружение сборки (PySide6, PyInstaller) создаётся само в build/webinar/venv и переиспользуется. Перед сборкой
+в нём прогоняются тесты таймера: версии PySide6 различаются поведением (в 6.12 иначе сжимается поле-счётчик),
+проверяем именно то, что войдёт в exe.
 """
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import shutil
 import stat
 import subprocess
 import sys
-import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -28,21 +37,17 @@ BUILD = ROOT / "build" / "webinar"
 VENV = BUILD / "venv"
 OUT = ROOT / "INSTALL"
 NAME = "Таймер вебинара"
+ISS = ROOT / "tools" / "webinar_setup.iss"
+REPO = "Recyavik/AUTO_PRINT_CODE"
 
-# у коллеги — свои мониторы и окна
-MACHINE_SETTINGS = {"demo_screen": "", "control_screen": "", "window_geometry": "", "note_pos": "",
-                    "player_pos": ""}
-# ярлык без кириллицы в командной строке: имя ярлыка — по имени exe, путь — из %~dp0
-SHORTCUT_BAT = """@echo off
-set "APPDIR=%~dp0"
-powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-  "$exe = Get-ChildItem -LiteralPath $env:APPDIR -Filter '*.exe' | Select-Object -First 1;" ^
-  "$lnk = Join-Path ([Environment]::GetFolderPath('Desktop')) ($exe.BaseName + '.lnk');" ^
-  "$s = (New-Object -ComObject WScript.Shell).CreateShortcut($lnk);" ^
-  "$s.TargetPath = $exe.FullName; $s.WorkingDirectory = $env:APPDIR; $s.IconLocation = $exe.FullName; $s.Save()"
-if errorlevel 1 (echo Не получилось создать ярлык & pause & exit /b 1)
-echo Ярлык создан на рабочем столе.
-timeout /t 3 >nul
+# Тесты в окружении сборки. Итог — сразу, без выгрузки Qt: после десятков окон тестов PySide6 6.12 падает
+# или зависает при выходе из Python (сам таймер закрывается чисто, и с видео тоже — проверено).
+TEST_RUNNER = """
+import ctypes, sys, unittest
+r = unittest.main(module=None, exit=False, argv=["t", "discover", "-s", sys.argv[1], "-p", "test_*.py"])
+sys.stdout.flush(); sys.stderr.flush()
+k = ctypes.windll.kernel32
+k.TerminateProcess(k.GetCurrentProcess(), 0 if r.result.wasSuccessful() else 1)
 """
 
 
@@ -51,11 +56,27 @@ def run(cmd: list, **kw) -> None:
     subprocess.run([str(c) for c in cmd], check=True, **kw)
 
 
-def find_7z() -> Path:
-    for p in (shutil.which("7z"), r"C:\Program Files\7-Zip\7z.exe", r"C:\Program Files (x86)\7-Zip\7z.exe"):
+def run_tests(py: Path) -> None:
+    """Тесты таймера в окружении сборки. Итог — по их собственному выводу («Ran N tests … OK»): процесс Python
+    с PySide6 6.12 иногда падает уже после итога, при выгрузке Qt, — это не провал тестов."""
+    r = subprocess.run([str(py), "-c", TEST_RUNNER, str(APP / "tests")], cwd=ROOT, capture_output=True,
+                       text=True, encoding="utf-8", errors="replace")
+    lines = (r.stdout + r.stderr).rstrip().splitlines()
+    for line in lines[-4:]:
+        print("   ", line)
+    last = lines[-1] if lines else ""
+    if r.returncode != 0 and not (last == "OK" or last.startswith("OK (")):
+        for line in lines:
+            print("   ", line)
+        raise SystemExit("Тесты не прошли — дистрибутив не собран")
+
+
+def find_iscc() -> Path:
+    for p in (shutil.which("ISCC"), Path(os.environ.get("LOCALAPPDATA", "")) / "Programs/Inno Setup 6/ISCC.exe",
+              r"C:\Program Files (x86)\Inno Setup 6\ISCC.exe", r"C:\Program Files\Inno Setup 6\ISCC.exe"):
         if p and Path(p).is_file():
             return Path(p)
-    raise SystemExit("Не найден 7-Zip (7z.exe) — установите его с https://www.7-zip.org/")
+    raise SystemExit("Не найден Inno Setup 6 (ISCC.exe) — winget install JRSoftware.InnoSetup")
 
 
 def version() -> str:
@@ -103,57 +124,90 @@ def build_exe(py: Path) -> Path:
     return dist / NAME
 
 
+def ordered_templates() -> list[Path]:
+    """Экспорты из templates/ — в том же порядке, что в списке шаблонов у автора (остальные — по алфавиту)."""
+    order = {}
+    try:
+        mine = json.loads((APP / "data" / "plans.json").read_text(encoding="utf-8-sig"))["plans"]
+        order = {p.get("id"): i for i, p in enumerate(mine)}
+    except (OSError, ValueError, KeyError, TypeError):
+        pass
+
+    def key(f: Path) -> tuple:
+        pid = json.loads(f.read_text(encoding="utf-8-sig")).get("id")
+        return order.get(pid, len(order)), f.name
+    return sorted((APP / "templates").glob("*.json"), key=key)
+
+
 def stage(app_dir: Path) -> None:
-    """Рядом с exe — медиа, шаблоны, данные и ярлык."""
-    for name in ("media", "templates"):
-        # без атрибутов исходника: «только чтение» мешал бы пересборке и распаковке поверх
-        shutil.copytree(APP / name, app_dir / name, dirs_exist_ok=True, copy_function=shutil.copyfile)
-    data = app_dir / "data"
-    data.mkdir(exist_ok=True)
-    if (APP / "data" / "plans.json").is_file():
-        shutil.copy2(APP / "data" / "plans.json", data / "plans.json")
-    settings_file = APP / "data" / "settings.json"
-    if settings_file.is_file():
-        s = json.loads(settings_file.read_text(encoding="utf-8-sig"))
-        s.update({k: v for k, v in MACHINE_SETTINGS.items() if k in s})
-        (data / "settings.json").write_text(json.dumps(s, ensure_ascii=False, indent=2), encoding="utf-8")
-    # cmd читает .bat в кодировке консоли (cp866) — так русские сообщения видны без chcp
-    (app_dir / "Создать ярлык на рабочем столе.bat").write_bytes(
-        SHORTCUT_BAT.replace("\n", "\r\n").encode("cp866"))
-
-
-def pack(app_dir: Path) -> Path:
-    seven = find_7z()
-    sfx = seven.parent / "7z.sfx"
-    if not sfx.is_file():
-        raise SystemExit(f"Нет модуля самораспаковки {sfx}")
+    """Рядом с exe — медиа и шаблоны. Папки data нет: обновление поверх не трогает данные пользователя
+    (его шаблоны, настройки, журнал). Шаблоны — в templates/ (новая установка берёт их при первом запуске)
+    и отдельными файлами в INSTALL/ — для «Импорт JSON» у тех, у кого таймер уже стоит."""
+    # без атрибутов исходника: «только чтение» мешал бы пересборке и обновлению
+    shutil.copytree(APP / "media", app_dir / "media", dirs_exist_ok=True, copy_function=shutil.copyfile)
+    templates = app_dir / "templates"
+    templates.mkdir(exist_ok=True)
     OUT.mkdir(exist_ok=True)
-    exe = OUT / f"{NAME} {version()}.exe"
-    with tempfile.TemporaryDirectory(prefix="webinar-dist-") as tmp:
-        archive = Path(tmp) / "app.7z"
-        # видео уже сжато — сильное сжатие не поможет, только замедлит
-        run([seven, "a", "-t7z", "-mx=5", "-bso0", "-bsp0", archive, app_dir.name], cwd=app_dir.parent)
-        with open(Path(tmp) / "out.exe", "wb") as out:
-            for part in (sfx, archive):
-                with open(part, "rb") as f:
-                    shutil.copyfileobj(f, out)
-        shutil.move(Path(tmp) / "out.exe", exe)        # временная папка может быть на другом диске
-    return exe
+    for n, f in enumerate(ordered_templates(), 1):
+        shutil.copyfile(f, templates / f"{n}. {f.name}")    # номер — порядок в списке при первом запуске
+        shutil.copyfile(f, OUT / f.name)
+
+
+def pack(app_dir: Path, update: bool = False) -> Path:
+    """Мастер установки (Inno Setup) из папки с exe: полный — в INSTALL/, лёгкий для обновлений — в build/webinar/."""
+    ver = version()
+    out = BUILD if update else OUT
+    run([find_iscc(), "/Q", f"/DAppVersion={ver}", f"/DSourceDir={app_dir}", f"/DOutDir={out}",
+         f"/DIcon={APP / 'webinar.ico'}", *(["/DUpdate=1"] if update else []), ISS])
+    return out / (f"webinar-timer-update-{ver}.exe" if update else f"Установка — {NAME} {ver}.exe")
+
+
+def find_gh() -> Path:
+    for p in (shutil.which("gh"), r"C:\Program Files\GitHub CLI\gh.exe"):
+        if p and Path(p).is_file():
+            return Path(p)
+    raise SystemExit("Не найден GitHub CLI — winget install GitHub.cli, затем gh auth login")
+
+
+def publish(asset: Path, notes: str) -> None:
+    """Release «webinar-v<версия>» с лёгким установщиком — его найдут таймеры у пользователей."""
+    gh, ver = find_gh(), version()
+    tag = f"webinar-v{ver}"
+    if subprocess.run([str(gh), "auth", "status"], capture_output=True).returncode != 0:
+        raise SystemExit("Сначала войдите в GitHub: gh auth login")
+    if subprocess.run(["git", "status", "--porcelain", "--untracked-files=no"], cwd=ROOT,
+                      capture_output=True, text=True).stdout.strip():
+        raise SystemExit("Есть незакоммиченные изменения — сначала коммит и push, потом публикация")
+    if subprocess.run([str(gh), "release", "view", tag, "-R", REPO], capture_output=True).returncode == 0:
+        raise SystemExit(f"Release {tag} уже есть — поднимите версию в webinar_timer/webinar/__init__.py")
+    run([gh, "release", "create", tag, asset, "-R", REPO, "--target", "main",
+         "--title", f"{NAME} {ver}", "--notes", notes or f"Обновление: {NAME} {ver}"])
+    print(f"Опубликовано: https://github.com/{REPO}/releases/tag/{tag}")
 
 
 def main() -> None:
     if sys.stdout.encoding.lower() != "utf-8":
         sys.stdout.reconfigure(encoding="utf-8")
-    print("1/4 Окружение сборки")
+    ap = argparse.ArgumentParser(description="Дистрибутив «Таймера вебинара»")
+    ap.add_argument("--publish", action="store_true", help="выложить обновление на GitHub (Release webinar-v<версия>)")
+    ap.add_argument("--notes", default="", help="что нового — текст для Release и окна обновления")
+    args = ap.parse_args()
+    print("1/5 Окружение сборки")
     py = venv_python()
-    print("2/4 Сборка exe (PyInstaller)")
+    print("2/5 Тесты — на тех же версиях Python и PySide6, что войдут в exe")
+    run_tests(py)
+    print("3/5 Сборка exe (PyInstaller)")
     app_dir = build_exe(py)
-    print("3/4 Медиа, шаблоны, данные, ярлык")
+    print("4/5 Медиа и шаблоны")
     stage(app_dir)
-    print("4/4 Самораспаковывающийся архив")
+    print("5/5 Мастер установки (Inno Setup): полный и лёгкий для обновлений")
     exe = pack(app_dir)
+    upd = pack(app_dir, update=True)
     files = sum(1 for p in app_dir.rglob("*") if p.is_file())
     print(f"Готово: {exe} ({exe.stat().st_size / 2**20:.0f} МБ, файлов внутри: {files})")
+    print(f"Обновление: {upd} ({upd.stat().st_size / 2**20:.0f} МБ)")
+    if args.publish:
+        publish(upd, args.notes)
 
 
 if __name__ == "__main__":
