@@ -78,7 +78,7 @@ QToolButton:hover {{ border-color: {g['LINE']}; background: {g['HOVER']}; }}
 QToolButton:checked {{ background: {g['SELECT']}; border-color: {g['BRAND']}; }}
 QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox, QTextEdit, QTextBrowser {{ background: {g['TINT']};
   border: 1px solid {g['LINE']}; border-radius: 7px; padding: 3px 6px; color: {g['INK']};
-  selection-background-color: {g['BRAND']}; selection-color: {g['ON_BRAND']}; }}
+  selection-background-color: {g['INK']}; selection-color: {g['TINT']}; }}
 QLineEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus, QComboBox:focus, QTextEdit:focus {{
   border-color: {g['BRAND_BRIGHT']}; }}
 QComboBox QAbstractItemView {{ background: {g['SURFACE']}; border: 1px solid {g['LINE']}; color: {g['INK']};

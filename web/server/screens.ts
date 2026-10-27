@@ -38,7 +38,7 @@ const SW_SHOWNORMAL = 1;
 const DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 = -4;
 
 type Rect = { left: number; top: number; right: number; bottom: number };
-export interface Monitor { id: string; label: string; primary: boolean; monitor: Rect; work: Rect }
+interface Monitor { id: string; label: string; primary: boolean; monitor: Rect; work: Rect }
 
 /** Координаты в настоящих пикселях на каждом мониторе — иначе при масштабе 150–225 % окно уедет мимо. */
 export function enableDpiAwareness(): void {
@@ -152,7 +152,7 @@ export function identifyMonitors(ms = 2500): void {
 /** Скрипт PowerShell со значками для мониторов (отдельно — чтобы проверять без показа).
  *  Мониторы находятся по имени устройства («\.\DISPLAY1»), границы берутся в координатах самого PowerShell —
  *  так значок встаёт по центру при любом масштабе экрана (225 % на 4K и т. п.). */
-export function identifyScript(mons: Pick<Monitor, "id" | "primary">[], ms: number): string {
+function identifyScript(mons: Pick<Monitor, "id" | "primary">[], ms: number): string {
   const items = mons.map((m, i) => `@{n='${i + 1}';dev='${m.id.replace(/'/g, "''")}';note='${m.primary ? "основной" : ""}'}`).join(",");
   return `
 Add-Type -AssemblyName System.Windows.Forms, System.Drawing

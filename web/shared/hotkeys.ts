@@ -1,9 +1,9 @@
 // Хоткеи в формате «Ctrl+Shift+F12» (как QKeySequence.toString() в Python-версии) ↔ (модификаторы, VK).
 
-export const MOD_ALT = 0x0001;
-export const MOD_CONTROL = 0x0002;
-export const MOD_SHIFT = 0x0004;
-export const MOD_WIN = 0x0008;
+const MOD_ALT = 0x0001;
+const MOD_CONTROL = 0x0002;
+const MOD_SHIFT = 0x0004;
+const MOD_WIN = 0x0008;
 
 const NAMED_KEYS: Record<string, number> = {
   SPACE: 0x20, PAUSE: 0x13, INS: 0x2d, INSERT: 0x2d, DEL: 0x2e, DELETE: 0x2e,

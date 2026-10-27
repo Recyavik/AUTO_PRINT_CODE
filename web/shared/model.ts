@@ -1,7 +1,7 @@
 // Модель данных — тот же формат JSON, что у Python-версии (data/templates.json, data/settings.json),
 // поэтому образцы и настройки переносятся между версиями без конвертации.
 
-export const PROFILE_PLAIN = "plain";
+const PROFILE_PLAIN = "plain";
 export const PROFILE_IDE = "ide";
 export const PROFILE_TERMINAL = "terminal";
 export const PROFILES: Record<string, string> = {
@@ -20,7 +20,7 @@ export const SOUND_STYLES: Record<string, string> = {
   cream: "Механическая, глухая («thock»)",
   blue: "Механическая, щелчковая (Kailh Box Jade)",
 };
-export const LEGACY_SOUND_STYLES: Record<string, string> = { soft: "office", mechanical: "brown", typewriter: "blue" };
+const LEGACY_SOUND_STYLES: Record<string, string> = { soft: "office", mechanical: "brown", typewriter: "blue" };
 
 export interface Settings {
   hotkey_toggle: string;
@@ -125,8 +125,19 @@ export function mergeSettings(raw: Record<string, unknown>): Settings {
   }
   s.sound_style = LEGACY_SOUND_STYLES[s.sound_style] ?? s.sound_style;
   if (!(s.sound_style in SOUND_STYLES)) s.sound_style = DEFAULT_SETTINGS.sound_style;
+  // числа — в тех же пределах, что в окне настроек: испорченный settings.json не должен ломать печать
+  for (const [k, [lo, hi]] of Object.entries(NUM_LIMITS) as [keyof Settings, [number, number]][]) {
+    const v = s[k] as number;
+    (s as Record<string, unknown>)[k] = Number.isFinite(v) ? Math.min(hi, Math.max(lo, v)) : DEFAULT_SETTINGS[k];
+  }
   return s;
 }
+
+const NUM_LIMITS: Partial<Record<keyof Settings, [number, number]>> = {
+  cpm: [30, 3000], jitter: [0, 90], newline_pause_ms: [0, 3000], punct_pause_ms: [0, 1000], tab_width: [1, 8],
+  key_gap_ms: [5, 200], typo_per_100_words: [0, 30], think_pause_s: [0, 10], sound_volume: [0, 100],
+  hotkey_start_delay_ms: [0, 3000], button_countdown_s: [0, 10],
+};
 
 export const BLOCK_MARKDOWN = "markdown";
 export const BLOCK_CODE = "code";
@@ -160,7 +171,7 @@ export interface Template {
   updated: number;       // секунды, как time.time() в Python
 }
 
-export function newId(): string {
+function newId(): string {
   const a = new Uint8Array(6);
   crypto.getRandomValues(a);
   return Array.from(a, (b) => b.toString(16).padStart(2, "0")).join("");
@@ -174,7 +185,7 @@ export function makeTemplate(title: string, blocks: Block[] = []): Template {
   return { title, blocks, active_block: "", id: newId(), updated: Date.now() / 1000 };
 }
 
-export function blockFrom(d: Record<string, unknown>): Block {
+function blockFrom(d: Record<string, unknown>): Block {
   const b = makeBlock(String(d.type ?? BLOCK_CODE));
   for (const k of Object.keys(b) as (keyof Block)[]) {
     if (d[k] !== undefined) (b as unknown as Record<string, unknown>)[k] = d[k];
@@ -288,7 +299,7 @@ export type ClientMsg =
   | { t: "cmd"; cmd: "toggle" | "restart" | "stop"; fromButton?: boolean }
   | { t: "block"; d: number }
   | { t: "placeWindow"; token: string }   // token — невидимая метка в заголовке именно этого окна
-  | { t: "identifyMonitors" }            // «Определить»: показать номера мониторов                 // страница открылась: поставить её окно на выбранный монитор
+  | { t: "identifyMonitors" }            // «Определить»: показать номера мониторов
   | { t: "pauseHotkeys"; on: boolean }   // окно настроек: отпустить хоткеи, чтобы их можно было нажать
   | { t: "shutdown" }                    // выключить помощника (он работает без окна)
   | { t: "autostart"; on: boolean };     // запуск помощника при входе в Windows

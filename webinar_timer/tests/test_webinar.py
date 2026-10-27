@@ -308,7 +308,7 @@ class UpdaterTest(unittest.TestCase):
         dlg.auto_update.setChecked(False)
         self.assertFalse(dlg.result_settings().auto_update_check)
 
-        rel = updater.Release("9.9.0", "Что нового: всё", "https://x/9.9.0.exe", 1, "https://r")
+        rel = updater.Release("9.9.0", "Что нового: всё", "https://x/9.9.0.exe", 1)
         orig = updater.can_update
         updater.can_update = lambda: True
         try:
@@ -331,7 +331,7 @@ class _WindowBase(unittest.TestCase):
             f.unlink()
         self.clock = FakeClock(at("10:58"))
         self.store = wstore.PlanStore()
-        self.store.plans = [PLAN]
+        self.store.plans = [copy.deepcopy(PLAN)]      # «Старт» сохраняется в шаблон — общий PLAN не портить
         self.win = MainWindow(self.store, wstore.Settings(), self.clock)
         self.win.scheduler._timer.stop()            # время двигает тест
 
@@ -343,6 +343,68 @@ class _WindowBase(unittest.TestCase):
             self.clock.t += timedelta(seconds=15)
             self.win.scheduler.poll()
 
+
+
+class StartTimeSavedTest(_WindowBase):
+    """«Старт» сразу сохраняется в выбранном шаблоне: виден в списке и переживает перезапуск таймера."""
+
+    def setUp(self):
+        super().setUp()
+        a, b = copy.deepcopy(PLAN), copy.deepcopy(PLAN)   # общий PLAN не трогаем
+        a.id, a.title, a.start = "a", "Первая пара", "11:00"
+        b.id, b.title, b.start = "b", "Вторая пара", "13:00"
+        self.store.plans = [a, b]
+        self.win._fill_plans("a")
+
+    def set_start(self, hhmm: str):
+        self.win.start_edit.setTime(self.win.start_edit.time().fromString(hhmm, "HH:mm"))
+
+    def test_saved_to_template_and_list(self):
+        self.set_start("21:00")
+        self.win._start_save.timeout.emit()                 # прошли 0,6 с
+        self.assertEqual(self.store.get("a").start, "21:00")
+        self.assertIn("21:00 ·", self.win.plans.currentItem().text())
+        again = wstore.PlanStore()                           # перезапуск: шаблоны читаются с диска
+        self.assertEqual(again.get("a").start, "21:00")
+
+    def test_switch_template_right_away_keeps_time_in_its_template(self):
+        self.set_start("21:30")
+        self.win.plans.setCurrentRow(1)                      # сразу другой шаблон — до отложенного сохранения
+        self.assertEqual(self.store.get("a").start, "21:30", "время — в тот шаблон, где его меняли")
+        self.assertEqual(self.store.get("b").start, "13:00", "другой шаблон не задет")
+        self.assertEqual(self.win.start_edit.time().toString("HH:mm"), "13:00")
+
+    def test_close_right_after_change_saves(self):
+        self.set_start("20:15")
+        self.win.quit_app()
+        self.assertEqual(wstore.PlanStore().get("a").start, "20:15")
+
+    def test_start_from_activity_does_not_change_template(self):
+        """«Начать эфир с этой активности» сдвигает старт только для этого эфира — в шаблоне обычное время."""
+        self.clock.t = at("11:23")
+        self.win.start_from(self.win.scheduler.segs[1])
+        self.win._start_save.timeout.emit()
+        self.assertTrue(self.win.run_btn.isChecked())
+        self.assertNotEqual(self.win.start_edit.time().toString("HH:mm"), "11:00")
+        self.assertEqual(self.store.get("a").start, "11:00")
+
+    def test_live_start_edit_applied_once_after_editing(self):
+        """Во время эфира правка «Старта» применяется по окончании правки, а не на каждом шаге стрелки."""
+        self.win.run_btn.setChecked(True)
+        applied = []
+        self.win.scheduler.set_plan = lambda plan, f=self.win.scheduler.set_plan: (applied.append(plan.start), f(plan))[1]
+        for hhmm in ("11:01", "11:02", "11:03"):
+            self.set_start(hhmm)
+        self.assertEqual(applied, [], "пока правят — эфир по-прежнему по старому времени")
+        self.win._start_save.timeout.emit()
+        self.assertTrue(applied and set(applied) == {"11:03"}, f"только итоговое время, без 11:01 и 11:02: {applied}")
+
+    def test_copy_template_during_broadcast_keeps_it_running(self):
+        self.win.run_btn.setChecked(True)
+        self.win.duplicate_plan()
+        self.assertTrue(self.win.run_btn.isChecked(), "эфир не остановлен")
+        self.assertEqual(self.win.current_plan().id, "a", "выбранным остался шаблон эфира")
+        self.assertEqual(len(self.store.plans), 3)
 
 
 class WindowsTest(_WindowBase):
@@ -707,7 +769,7 @@ class WindowsTest(_WindowBase):
     def test_update_found_shows_header_button(self):
         from webinar import updater
         self.assertTrue(self.win.update_btn.isHidden())
-        self.win._on_update_found(updater.Release("9.9.0", "", "https://x", 1, ""))
+        self.win._on_update_found(updater.Release("9.9.0", "", "https://x", 1))
         self.assertFalse(self.win.update_btn.isHidden())
         self.assertEqual(self.win.update_btn.text(), "⬆ Обновление 9.9.0")
 

@@ -4,9 +4,9 @@ import { useSyncExternalStore } from "react";
 import type { Block, ClientMsg, EngineStatus, ServerMsg, Settings, Template } from "../../shared/model.ts";
 import { sounds } from "./sound.ts";
 
-export interface Toast { id: number; text: string; level: "info" | "warn" }
+interface Toast { id: number; text: string; level: "info" | "warn" }
 
-export interface AppState {
+interface AppState {
   connected: boolean;
   everConnected: boolean;
   stopped: boolean;            // помощник выключен кнопкой ⏻ — не переподключаться
@@ -87,7 +87,10 @@ function onMessage(m: ServerMsg): void {
   switch (m.t) {
     case "hello": {
       // правки, которые не дошли до помощника (связь пропадала), важнее его копии — досылаем
-      const templates = m.templates.map((t) => pending.get(t.id)?.template ?? t);
+      let templates = m.templates.map((t) => pending.get(t.id)?.template ?? t)
+        .filter((t) => !offline.deleted.has(t.id));
+      for (const t of offline.added.values()) if (!templates.some((x) => x.id === t.id)) templates = [...templates, t];
+      const settings = offline.settings ? { ...m.settings, ...offline.settings } : m.settings;
       if (!placed) {
         // один раз за открытие страницы (не при переподключении): окно — на выбранный монитор.
         // Небольшая пауза — заголовок вкладки с меткой AutoPrintCode должен успеть появиться
@@ -96,9 +99,11 @@ function onMessage(m: ServerMsg): void {
         const ownWindow = matchMedia("(display-mode: standalone)").matches || !window.toolbar.visible;
         if (m.settings.start_screen && ownWindow) setTimeout(() => send({ t: "placeWindow", token: WINDOW_TOKEN }), 400);
       }
-      set({ monitors: m.monitors ?? [], stopped: false, autostart: m.autostart, connected: true, everConnected: true, version: m.version, settings: m.settings, templates, engine: m.engine });
+      set({ monitors: m.monitors ?? [], stopped: false, autostart: m.autostart, connected: true, everConnected: true, version: m.version, settings, templates, engine: m.engine });
+      flushOffline(m.templates);
+      if (hotkeysPausedHere) send({ t: "pauseHotkeys", on: true });
       flushAll();
-      sounds.configure(m.settings);
+      sounds.configure(settings);
       if (m.hotkeysFailed) toast(`Не удалось занять хоткеи: ${m.hotkeysFailed}. Смените их в настройках.`, "warn");
       break;
     }
@@ -171,16 +176,32 @@ function flushAll(): void {
   for (const id of [...pending.keys()]) flushTemplate(id);
 }
 
+// Что не удалось отправить без связи: новые образцы, удаления, настройки — досылается при переподключении
+// (иначе «hello» с копией помощника затёр бы их на странице).
+const offline = { added: new Map<string, Template>(), deleted: new Set<string>(), settings: null as Partial<Settings> | null };
+
+function flushOffline(serverTemplates: Template[]): void {
+  for (const t of offline.added.values()) {
+    if (!serverTemplates.some((x) => x.id === t.id)) send({ t: "saveTemplate", template: t });
+  }
+  for (const id of offline.deleted) send({ t: "deleteTemplate", id });
+  if (offline.settings) send({ t: "settings", settings: offline.settings });
+  offline.added.clear();
+  offline.deleted.clear();
+  offline.settings = null;
+}
+
 export function addTemplate(t: Template, open = true): void {
   set({ templates: [...state.templates, t] });
-  send({ t: "saveTemplate", template: t });
+  if (!send({ t: "saveTemplate", template: t })) offline.added.set(t.id, t);
   if (open) openTab(t.id);
 }
 
 export function deleteTemplate(id: string): void {
   pending.delete(id);
+  offline.added.delete(id);
   set({ templates: state.templates.filter((t) => t.id !== id) });
-  send({ t: "deleteTemplate", id });
+  if (!send({ t: "deleteTemplate", id })) offline.deleted.add(id);
   const s = state.settings!;
   if (s.open_tabs.includes(id)) closeTab(id);
 }
@@ -190,7 +211,7 @@ export function updateSettings(patch: Partial<Settings>): void {
   const settings = { ...state.settings, ...patch };
   set({ settings });
   sounds.configure(settings);
-  send({ t: "settings", settings: patch });
+  if (!send({ t: "settings", settings: patch })) offline.settings = { ...offline.settings, ...patch };
 }
 
 export function openTab(id: string): void {
@@ -243,7 +264,10 @@ export function shutdownHelper(): void {
   set({ stopped: true });
 }
 
+let hotkeysPausedHere = false;   // открыто окно настроек — после переподключения попросить снова
+
 export function pauseHotkeys(on: boolean): void {
+  hotkeysPausedHere = on;
   send({ t: "pauseHotkeys", on });
 }
 

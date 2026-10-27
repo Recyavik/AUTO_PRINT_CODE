@@ -8,10 +8,10 @@ const kernel32 = koffi.load("kernel32.dll");
 const advapi32 = koffi.load("advapi32.dll");
 const winmm = koffi.load("winmm.dll");
 
-export const INPUT_KEYBOARD = 1;
-export const KEYEVENTF_EXTENDEDKEY = 0x0001;
-export const KEYEVENTF_KEYUP = 0x0002;
-export const KEYEVENTF_UNICODE = 0x0004;
+const INPUT_KEYBOARD = 1;
+const KEYEVENTF_EXTENDEDKEY = 0x0001;
+const KEYEVENTF_KEYUP = 0x0002;
+const KEYEVENTF_UNICODE = 0x0004;
 
 export const VK_BACK = 0x08;
 export const VK_TAB = 0x09;
@@ -22,8 +22,8 @@ export const VK_MENU = 0x12;
 export const VK_ESCAPE = 0x1b;
 export const VK_END = 0x23;
 export const VK_HOME = 0x24;
-export const VK_LWIN = 0x5b;
-export const VK_RWIN = 0x5c;
+const VK_LWIN = 0x5b;
+const VK_RWIN = 0x5c;
 
 // Клавиши, которым нужен флаг EXTENDEDKEY (иначе Windows считает их цифровым блоком).
 const EXTENDED = new Set([VK_HOME, VK_END, 0x25, 0x26, 0x27, 0x28, 0x2e, 0x21, 0x22, 0x2d]);
@@ -121,7 +121,7 @@ export function foregroundWindow(): number {
   return Number(GetForegroundWindow());
 }
 
-export function windowPid(hwnd: number): number {
+function windowPid(hwnd: number): number {
   const pid = [0];
   GetWindowThreadProcessId(hwnd, pid);
   return pid[0];
@@ -135,7 +135,7 @@ export function windowTitle(hwnd: number): string {
   return buf.toString("utf16le", 0, got * 2);
 }
 
-export function windowProcessName(hwnd: number): string {
+function windowProcessName(hwnd: number): string {
   const pid = windowPid(hwnd);
   if (!pid) return "?";
   const h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid);
@@ -187,7 +187,7 @@ export function windowElevated(hwnd: number): boolean {
   }
 }
 
-export function windowClass(hwnd: number): string {
+function windowClass(hwnd: number): string {
   if (!hwnd) return "";
   const buf = Buffer.alloc(512);
   const n = GetClassNameW(hwnd, buf, 256);

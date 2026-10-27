@@ -8,9 +8,9 @@
 import { langSpec, stripComments } from "./comments.ts";
 import { BLOCK_CODE, type Block, langNear, PROFILE_SHORT, type Settings, type Template, typingSlice } from "./model.ts";
 
-export const PRINT_MARKDOWN = "markdown";
-export const PRINT_PLAIN = "plain";
-export const PRINT_COMMENT = "comment";
+const PRINT_MARKDOWN = "markdown";
+const PRINT_PLAIN = "plain";
+const PRINT_COMMENT = "comment";
 export const PRINT_MODES: Record<string, string> = {
   [PRINT_MARKDOWN]: "как Markdown",
   [PRINT_PLAIN]: "простым текстом",
@@ -72,7 +72,7 @@ function inline(s: string): string {
   return res;
 }
 
-export function markdownToPlain(text: string): string {
+function markdownToPlain(text: string): string {
   const lines: string[] = [];
   let fence = "";
   let para = false;   // предыдущая строка — текст абзаца (не код, не пустая)
@@ -111,7 +111,7 @@ export function markdownToPlain(text: string): string {
 }
 
 /** Простой текст, закомментированный для языка lang (неизвестный язык → «#»). */
-export function asComment(text: string, lang: string): string {
+function asComment(text: string, lang: string): string {
   const lines = markdownToPlain(text).split("\n");
   const [marks, blocks] = langSpec(lang) ?? [["#"], []];
   if (marks.length) return lines.map((l) => (l ? `${marks[0]} ${l}` : marks[0])).join("\n");

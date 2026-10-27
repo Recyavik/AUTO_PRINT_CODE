@@ -25,6 +25,13 @@ const typedField = StateField.define<DecorationSet>({
   provide: (f) => EditorView.decorations.from(f),
 });
 
+// ---- выделение (то, что напечатается) — инверсией: цвета текста и фона меняются местами.
+// Обычное выделение CodeMirror — подложка под текстом, цвета подсветки синтаксиса на ней теряются в любой теме.
+const invertedSelection = EditorView.decorations.compute(["selection"], (state) => {
+  const r = state.selection.main;
+  return r.empty ? Decoration.none : Decoration.set([Decoration.mark({ class: "cm-printsel" }).range(r.from, r.to)]);
+});
+
 const langCache = new Map<string, Promise<Extension | null>>();
 function loadLang(name: string): Promise<Extension | null> {
   let p = langCache.get(name);
@@ -75,6 +82,7 @@ export function CodeEditor({ value, lang, sel, zoom, typed, onChange, onSelectio
 
   const extensions = useMemo(() => [
     typedField,
+    invertedSelection,
     EditorView.lineWrapping,
     EditorView.theme({ "&": { fontSize: `${(13.5 * zoom) / 100}px` } }),
     ...(langExt ? [langExt] : []),

@@ -53,6 +53,9 @@ def main() -> int:
     from autoprint.ui.main_window import STATE_COLORS, MainWindow, save_ico
     from autoprint.typer import IDLE
     settings = Settings.load()
+    from autoprint import storage
+    if storage.settings_warning:
+        QMessageBox.warning(None, APP_NAME, storage.settings_warning)
     theme.apply(settings.theme)              # тема — до создания окон
     app.setStyleSheet(theme.APP_QSS)
     win = MainWindow(settings, store)

@@ -1078,7 +1078,7 @@ class MainWindow(QMainWindow):
         self._show_update_button(rel)
         if manual:
             self.open_update_dialog()
-        elif self.settings.update_mode in (MODE_DOWNLOAD, MODE_AUTO) and self.updates.can_install:
+        elif self.settings.update_mode in (MODE_DOWNLOAD, MODE_AUTO):
             self.updates.download(rel)   # сообщим, когда будет готово
         elif not self._busy_typing():
             self._notify(f"Доступна новая версия {rel.version}. Нажмите «⬆» в строке состояния.", tray=True)

@@ -34,6 +34,10 @@ CLEAR_BEFORE = set(")]}\"'`")
 
 log = logging.getLogger(__name__)
 
+class _Cancelled(Exception):
+    """Печать остановили посреди служебных нажатий — поток выходит."""
+
+
 IDLE, COUNTDOWN, RUNNING, PAUSED, FINISHED = "idle", "countdown", "running", "paused", "finished"
 _PAUSED_WHILE_PREPARING = object()   # _prepare: пока шёл отсчёт или ждали окно, поставили на паузу
 
@@ -119,6 +123,7 @@ class TypingEngine(QObject):
         # консоль не сообщает её честно
         self._keys_hwnd = 0
         self._layout = 0          # какую раскладку мы последней попросили
+        self._local = threading.local()   # поколение прогона у каждого потока печати своё
         self._layout_orig = 0     # вернуть по окончании
         self._profile = ""        # окно, выбранное у блока; пусто — как в настройках
 
@@ -211,7 +216,7 @@ class TypingEngine(QObject):
         self._run.set()  # разбудить поток, чтобы он увидел смену поколения
         t = self._thread
         if t and t.is_alive() and t is not threading.current_thread():
-            t.join(1.0)
+            t.join(3.0)
         self._thread = None
         self._run.clear()
 
@@ -311,7 +316,8 @@ class TypingEngine(QObject):
         self._terminal = profile == PROFILE_TERMINAL or (profile == PROFILE_IDE and w.is_terminal_window(hwnd))
         if self._terminal and w.needs_real_keys(hwnd):
             if self._keys_hwnd != hwnd:
-                self._keys_hwnd, self._layout, self._layout_orig = hwnd, 0, w.window_layout(hwnd)
+                self._keys_hwnd, self._layout_orig = hwnd, w.window_layout(hwnd)
+            self._layout = 0      # после паузы раскладку могли сменить вручную — не полагаться на прежнюю
             log.info("Windows PowerShell в консоли — печать клавишами раскладки")
         else:
             self._keys_hwnd = 0
@@ -326,6 +332,22 @@ class TypingEngine(QObject):
         return hwnd
 
     def _worker(self, gen: int, delay: float, countdown: int) -> None:
+        self._local.gen = gen
+        try:
+            self._run_job(gen, delay, countdown)
+        except _Cancelled:
+            pass                                   # остановили посреди служебных нажатий
+        except Exception as e:                     # неожиданная ошибка — пауза, а не «печатает» навсегда
+            log.exception("Ошибка печати на %d/%d", self._pos, len(self._units))
+            self._auto_pause(gen)
+            self.message.emit(f"Ошибка печати: {e}")
+        finally:
+            try:
+                self._restore_layout()             # и после «Стоп» раскладка консоли возвращается
+            except Exception:
+                pass
+
+    def _run_job(self, gen: int, delay: float, countdown: int) -> None:
         target = self._prepare(gen, delay, countdown)
         if target is None:
             with self._lock:
@@ -369,11 +391,12 @@ class TypingEngine(QObject):
                 self._auto_pause(gen)
                 self.message.emit(f"Ошибка ввода: {e}")
                 continue
+            if not self._alive(gen):
+                return                             # остановили, пока печаталась единица — позицию не трогаем
             self._pos += 1
             self.progress.emit(unit.src_end, total)
             if not self._sleep(gen, self._delay_after(unit)):
                 return
-        self._restore_layout()
         if self._alive(gen):
             self._set_state(FINISHED)
             log.info("Набор завершён: %d единиц", len(self._units))
@@ -406,39 +429,46 @@ class TypingEngine(QObject):
                 self._clear_right()
                 if s.esc_before_enter:
                     w.tap(w.VK_ESCAPE)
-                    time.sleep(self._gap())
+                    self._gap_sleep()
             w.tap(w.VK_RETURN)
             self.sound.emit("enter")
             if ide:
-                time.sleep(self._gap() * 2)  # дать редактору вставить автоотступ
+                self._gap_sleep(2)  # дать редактору вставить автоотступ
                 w.tap(w.VK_HOME, w.VK_SHIFT)
-                time.sleep(self._gap())
+                self._gap_sleep()
                 w.type_char(" ")
-                time.sleep(self._gap())
+                self._gap_sleep()
                 w.tap(w.VK_BACK)
-                time.sleep(self._gap())
+                self._gap_sleep()
         elif u.kind == "cleanup":
             if ide:
                 self._clear_right()
 
     def _clear_right(self) -> None:
         w.tap(w.VK_END, w.VK_SHIFT)
-        time.sleep(self._gap())
+        self._gap_sleep()
         w.type_char(" ")
-        time.sleep(self._gap())
+        self._gap_sleep()
         w.tap(w.VK_BACK)
-        time.sleep(self._gap())
+        self._gap_sleep()
 
     def _gap(self) -> float:
         return max(5, self.settings.key_gap_ms) / 1000
 
+    def _gap_sleep(self, mult: float = 1.0) -> None:
+        """Пауза между служебными нажатиями. Печать остановили («Стоп», «Сначала», другой блок) —
+        выходим сразу: иначе старый поток допечатал бы начатое вместе с новым и сдвинул позицию."""
+        time.sleep(self._gap() * mult)
+        if not self._alive(getattr(self._local, "gen", self._gen)):
+            raise _Cancelled
+
     def _fast(self, text: str) -> None:
         for ch in text:
             self._char(ch)
-            time.sleep(self._gap())
+            self._gap_sleep()
 
     def _char(self, ch: str) -> None:
-        if not self._keys_hwnd:
+        if not self._keys_hwnd or ord(ch[0]) > 0xFFFF:   # символ вне BMP клавишей не набрать — Юникодом
             w.type_char(ch)
             return
         # текущая раскладка, иначе первая, где есть такая клавиша (как человек переключает Alt+Shift)

@@ -253,13 +253,18 @@ class MainWindow(QMainWindow):
             grid.addWidget(b, i // 2, i % 2)
         ll.addLayout(grid)
         # надпись — отдельной строкой: в узкой панели рядом с ней поле времени сжималось до одной цифры
-        ll.addWidget(QLabel("Старт сегодня:"))
+        ll.addWidget(QLabel("Старт:"))
         st = QHBoxLayout()
         self.start_edit = QTimeEdit()
         self.start_edit.setMinimumWidth(130)
         self.start_edit.setDisplayFormat("HH:mm")
-        self.start_edit.setToolTip("Время начала эфира сегодня (в шаблоне сохраняется кнопкой «Изменить»)")
-        self.start_edit.timeChanged.connect(self._apply_plan)
+        self.start_edit.setToolTip("Время начала эфира — сразу сохраняется в выбранном шаблоне")
+        self.start_edit.timeChanged.connect(self._on_start_changed)
+        # время старта сохраняется в шаблон с короткой задержкой: стрелки и колёсико меняют его шаг за шагом
+        self._start_save = QTimer(self)
+        self._start_save.setSingleShot(True)
+        self._start_save.setInterval(600)
+        self._start_save.timeout.connect(self._save_start)
         now_btn = QPushButton("Сейчас")
         now_btn.setToolTip("Начать эфир с текущей минуты")
         now_btn.clicked.connect(lambda: self.start_edit.setTime(QTime(self.clock().hour, self.clock().minute)))
@@ -376,6 +381,9 @@ class MainWindow(QMainWindow):
             self._on_plan_selected()
 
     def _on_plan_selected(self, *_a) -> None:
+        if self._start_save.isActive():
+            new = self.current_plan()
+            self._save_start(new.id if new else "")   # время прежнего шаблона — сохранить; выбран остаётся новый
         p = self.current_plan()
         if p is None:
             return
@@ -388,8 +396,42 @@ class MainWindow(QMainWindow):
         self.start_edit.blockSignals(False)
         self._apply_plan()
 
+    def _on_start_changed(self, *_a) -> None:
+        p = self.current_plan()
+        # запомнить, чьё это время: шаблон могут переключить раньше, чем сработает отложенное сохранение
+        self._start_pending = (p.id, self.start_edit.time().toString("HH:mm")) if p else None
+        if not self.run_btn.isChecked():
+            self._apply_plan()       # эфир не идёт — табло сразу показывает новое время
+        # во время эфира — только по окончании правки (_save_start): иначе стрелка вверх с 11:00 до 11:10
+        # «прошла» бы через каждую минуту — лишние напоминания, а то и заставка перерыва у зрителей
+        self._start_save.start()
+
+    def _save_start(self, select: str = "") -> None:
+        """Время из поля «Старт» — в шаблон (одно время на шаблон); список шаблонов показывает новое.
+        select — какой шаблон выделить после (при переключении — уже новый)."""
+        self._start_save.stop()
+        pending, self._start_pending = getattr(self, "_start_pending", None), None
+        if not pending:
+            return
+        if self.run_btn.isChecked():
+            self._apply_plan()
+        p = self.store.get(pending[0])
+        if p is None or p.start == pending[1]:
+            return
+        p.start = pending[1]
+        self._save_plans(select or self.settings.current_plan)
+        log.info("Время старта «%s» сохранено в шаблоне: %s", p.title, p.start)
+
+    def _set_start_quiet(self, h: int, m: int) -> None:
+        """Время старта для этого эфира, без записи в шаблон: «начать с активности», продолжение после
+        перезапуска. В шаблоне остаётся обычное время — иначе его навсегда сдвинул бы старт с середины."""
+        self.start_edit.blockSignals(True)
+        self.start_edit.setTime(QTime(h, m))
+        self.start_edit.blockSignals(False)
+        self._apply_plan()
+
     def _apply_plan(self, *_a) -> None:
-        """План на сегодня: шаблон + время старта из поля «Старт сегодня»."""
+        """План на сегодня: шаблон + время старта из поля «Старт»."""
         p = self.current_plan()
         if p is None:
             return
@@ -403,6 +445,9 @@ class MainWindow(QMainWindow):
         self._rebuild_agenda()
 
     def _save_plans(self, select: str = "") -> None:
+        live = self.scheduler.plan
+        if self.run_btn.isChecked() and live is not None and self.store.get(live.id) is not None:
+            select = live.id         # эфир идёт — выбранным остаётся его шаблон (смена шаблона остановила бы эфир)
         try:
             self.store.save()
         except OSError as e:
@@ -417,10 +462,12 @@ class MainWindow(QMainWindow):
             p.title = title.strip()
             self.store.plans.append(p)
             self._save_plans(p.id)
-            self.edit_plan()
+            self.edit_plan(p)        # именно новый: во время эфира выбранным остаётся шаблон эфира
 
-    def edit_plan(self) -> None:
-        p = self.current_plan()
+    def edit_plan(self, plan: Plan | None = None) -> None:
+        if self._start_save.isActive():
+            self._save_start()
+        p = plan or self.current_plan()
         if p is None:
             return
         dlg = PlanEditor(p, self, self.settings.lesson_min, self.settings.manual_break_min)
@@ -485,7 +532,7 @@ class MainWindow(QMainWindow):
             QMessageBox.information(self, APP_NAME, "Эфир с этой активности начался бы вчера — выберите активность позже.")
             return
         log.info("Эфир с активности «%s» (старт %s)", seg.activity.name, f"{start:%H:%M}")
-        self.start_edit.setTime(QTime(start.hour, start.minute))      # → _apply_plan
+        self._set_start_quiet(start.hour, start.minute)
         if self.run_btn.isChecked():
             self.scheduler.rearm()       # эфир уже шёл — заново с этого места: напомнить о выбранной активности
         else:
@@ -516,7 +563,7 @@ class MainWindow(QMainWindow):
         if now >= end:
             return
         self._fill_plans(pid)
-        self.start_edit.setTime(QTime(h, m))
+        self._set_start_quiet(h, m)
         self.run_btn.setChecked(True)
         log.info("Эфир продолжен после перезапуска: «%s», старт %s", p.title, start)
 
@@ -940,6 +987,8 @@ class MainWindow(QMainWindow):
         self.activateWindow()
 
     def closeEvent(self, e) -> None:
+        if self._start_save.isActive():
+            self._save_start()           # время старта изменили только что — не потерять
         self.settings.window_geometry = bytes(self.saveGeometry().toBase64()).decode()
         self.settings.save()
         if not self._quitting and self.tray.isVisible():

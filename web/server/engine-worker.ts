@@ -31,8 +31,8 @@ export type EngineEvent =
   | { e: "message"; text: string }
   | { e: "sound"; kind: "key" | "space" | "enter" }
   | { e: "finished" }
-  | { e: "preparing"; on: boolean }
-  | { e: "dry"; key: string }          // только в «сухом» режиме тестов: что было бы нажато   // отсчёт, задержка хоткея, ожидание отпускания Ctrl/Alt/Shift
+  | { e: "preparing"; on: boolean }   // отсчёт, задержка хоткея, ожидание отпускания Ctrl/Alt/Shift
+  | { e: "dry"; key: string }          // только в «сухом» режиме тестов: что было бы нажато
   | { e: "log"; level: "info" | "warn" | "error"; text: string };
 
 const { port, ctrl: ctrlBuf, ownTitleMark, requireTitle, dryRun } = workerData as {
@@ -97,6 +97,12 @@ function start(delay: number, countdown: number): void {
   }
   if (state === "paused") return resume(delay, countdown);
   if (state === "running" || state === "countdown") return;
+  if (inRun && run) {
+    // идёт подготовка (задержка хоткея, ждём отпускания Ctrl/Alt), а состояние ещё «готов»:
+    // повторное нажатие «старт/пауза» — отмена, а не новый старт с начала
+    run = false;
+    return;
+  }
   if (state === "finished") pos = 0;
   cancel();
   run = true;
@@ -168,7 +174,12 @@ let received = 0;   // сколько команд получено; ctrl[0] —
 function drain(): void {
   for (let m = receiveMessageOnPort(port); m; m = receiveMessageOnPort(port)) {
     received++;
-    handle(m.message as EngineCmd);
+    try {
+      handle(m.message as EngineCmd);
+    } catch (err) {
+      // одна неудачная команда (например, невозможные настройки) не должна ронять весь поток печати
+      log(`Команда «${(m.message as EngineCmd).c}» не выполнена: ${(err as Error).stack ?? err}`, "error");
+    }
   }
 }
 
@@ -223,7 +234,14 @@ function think(myGen: number, seconds: number): boolean {
 
 /** Ожидание, которое обрывают и пауза, и остановка. false — оборвали. */
 function waitRun(myGen: number, seconds: number): boolean {
-  return sleep(myGen, seconds) && run;
+  // пауза — сразу, а не по окончании секунды отсчёта или задержки хоткея (до 3 с)
+  const end = now() + seconds;
+  for (;;) {
+    if (!run) return false;
+    const left = end - now();
+    if (left <= 0) return true;
+    if (!sleep(myGen, Math.min(left, 0.05))) return false;
+  }
 }
 
 /** Ждёт, пока отпустят Ctrl/Alt/Shift/Win после хоткея (иначе «а» превратится в Ctrl+A).
@@ -475,6 +493,11 @@ for (;;) {
     } finally {
       w.highResTimer(false);
       inRun = false;
+      try {
+        restoreLayout();   // стоп или «сначала» посреди печати — раскладка консоли всё равно возвращается
+      } catch {
+        // окно уже закрыто — возвращать некому
+      }
     }
   }
 }

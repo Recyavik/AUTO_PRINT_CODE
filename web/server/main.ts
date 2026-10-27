@@ -78,7 +78,11 @@ let engine!: Engine;
 let input!: InputHooks;
 const clients = new Set<WebSocket>();
 let hotkeysFailed = "";
-type Job = { tid: string; bid: string; base: number; text: string; profile: string };
+// units — настройки, из которых строятся единицы печати: сменили их на паузе — это уже другое задание
+type Job = { tid: string; bid: string; base: number; text: string; profile: string; units: string };
+
+const unitsKey = () => JSON.stringify([s.profile, s.tab_width, s.indent_with_tab, s.fast_indent, s.human_typing,
+  s.typo_per_100_words, s.think_pause_s]);
 let job: Job | null = null;
 
 function send(ws: WebSocket, msg: ServerMsg): void {
@@ -99,7 +103,8 @@ function engineStatus(): EngineStatus {
 
 const notify = (text: string, level: "info" | "warn" = "info") => broadcast({ t: "notify", text, level });
 
-let hotkeysPaused = false;
+// страницы, у которых открыто окно настроек: пока есть хоть одна — хоткеи отпущены (их можно нажать в поле)
+const hotkeysPausedBy = new Set<WebSocket>();
 let appliedBindings = "";
 // Хоткеи держатся, только пока открыта страница: помощник работает без окна, и иначе, закрыв окно,
 // не понять, почему хоткеи заняты (например, для настольной версии). Посреди печати — не отпускаем.
@@ -127,7 +132,7 @@ function refreshPageOpen(): void {
 function applySettings(): void {
   engine.setSettings(s);
   // хоткеи перерегистрируются, только если они изменились (ползунок громкости шлёт настройки на каждом шаге)
-  const bindings = hotkeysPaused || !pageOpen ? {} : Object.fromEntries(HOTKEYS.map(([k]) => [k, String(s[k] ?? "")]));
+  const bindings = hotkeysPausedBy.size > 0 || !pageOpen ? {} : Object.fromEntries(HOTKEYS.map(([k]) => [k, String(s[k] ?? "")]));
   const key = JSON.stringify(bindings);
   if (key === appliedBindings) return;
   appliedBindings = key;
@@ -149,11 +154,11 @@ function jobForArmed(): Job | null {
   const block = a.t.blocks.find((b) => b.id === a.bid)!;
   const [text, base] = typingText(a.t, block, s);
   if (!text.trim()) return null;
-  return { tid: a.t.id, bid: block.id, base, text, profile: block.profile in PROFILES ? block.profile : "" };
+  return { tid: a.t.id, bid: block.id, base, text, profile: block.profile in PROFILES ? block.profile : "", units: unitsKey() };
 }
 
 const sameJob = (a: Job | null) => !!(a && job && a.tid === job.tid && a.bid === job.bid && a.base === job.base &&
-  a.text === job.text && a.profile === job.profile);
+  a.text === job.text && a.profile === job.profile && a.units === job.units);
 
 function loadJob(j: Job): void {
   job = j;
@@ -345,7 +350,8 @@ function onClient(ws: WebSocket, msg: ClientMsg): void {
       }
       break;
     case "pauseHotkeys":
-      hotkeysPaused = msg.on;
+      if (msg.on) hotkeysPausedBy.add(ws);
+      else hotkeysPausedBy.delete(ws);
       applySettings();
       break;
   }
@@ -456,8 +462,7 @@ wss.on("connection", (ws) => {
   ws.on("close", () => {
     clients.delete(ws);
     refreshPageOpen();
-    if (hotkeysPaused) {   // страница закрылась с открытыми настройками — вернуть хоткеи
-      hotkeysPaused = false;
+    if (hotkeysPausedBy.delete(ws)) {   // страница закрылась с открытыми настройками — вернуть хоткеи
       applySettings();
     }
   });

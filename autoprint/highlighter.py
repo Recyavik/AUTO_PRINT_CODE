@@ -17,7 +17,7 @@ LANGUAGES = ["python", "javascript", "typescript", "html", "css", "sql", "java",
 # (код выделяется), цвета подсветки — тёмные, читаемые на светлом. set_editor_theme() переключает на лету.
 EDITOR_THEMES = {
     "dark": {
-        "EDITOR_BG": "#1e2229", "EDITOR_FG": "#d7dae0", "EDITOR_LINE": "#2a2f38", "EDITOR_SEL": "#264f78",
+        "EDITOR_BG": "#1e2229", "EDITOR_FG": "#d7dae0", "EDITOR_LINE": "#2a2f38",
         "EDITOR_GUTTER": "#5c6370", "EDITOR_GUTTER_SEL": "#e5c07b",
         "STYLE": [
             (Comment, "#7f848e", False, True),
@@ -34,7 +34,7 @@ EDITOR_THEMES = {
         ],
     },
     "light": {
-        "EDITOR_BG": "#CEC3E2", "EDITOR_FG": "#241A38", "EDITOR_LINE": "#C3B6DB", "EDITOR_SEL": "#A994DA",
+        "EDITOR_BG": "#CEC3E2", "EDITOR_FG": "#241A38", "EDITOR_LINE": "#C3B6DB",
         "EDITOR_GUTTER": "#7A6F96", "EDITOR_GUTTER_SEL": "#7A3FE0",
         "STYLE": [
             (Comment, "#6C6386", False, True),
@@ -51,7 +51,7 @@ EDITOR_THEMES = {
         ],
     },
 }
-EDITOR_BG = EDITOR_FG = EDITOR_LINE = EDITOR_SEL = EDITOR_GUTTER = EDITOR_GUTTER_SEL = ""
+EDITOR_BG = EDITOR_FG = EDITOR_LINE = EDITOR_GUTTER = EDITOR_GUTTER_SEL = ""
 _FORMATS: list = []
 
 

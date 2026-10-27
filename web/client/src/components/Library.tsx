@@ -7,7 +7,7 @@ import {
 import { addTemplate, deleteTemplate, openTab, toast, updateTemplate, useApp } from "../api.ts";
 import { Menu, type MenuItem } from "./Menu.tsx";
 
-export function download(name: string, content: string, type = "application/json"): void {
+function download(name: string, content: string, type = "application/json"): void {
   const a = document.createElement("a");
   a.href = URL.createObjectURL(new Blob([content], { type }));
   a.download = name;
@@ -17,7 +17,7 @@ export function download(name: string, content: string, type = "application/json
 
 const safeName = (s: string) => s.replace(/[\\/:*?"<>|]+/g, "_").trim() || "образец";
 
-export function exportTemplate(t: Template, fmt: "ipynb" | "json"): void {
+function exportTemplate(t: Template, fmt: "ipynb" | "json"): void {
   download(`${safeName(t.title)}.${fmt}`, fmt === "ipynb" ? exportIpynb(t) : exportJson(t));
 }
 

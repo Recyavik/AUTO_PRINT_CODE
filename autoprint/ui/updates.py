@@ -42,10 +42,6 @@ class UpdateManager(QObject):
         self.applied = False
         self._cancel = False
 
-    @property
-    def can_install(self) -> bool:
-        return True     # исходники — git или архив; собранная версия — установщиком из релиза
-
     # ---- проверка
     def check_due(self) -> bool:
         s = self.settings
@@ -86,7 +82,7 @@ class UpdateManager(QObject):
 
     # ---- загрузка
     def download(self, rel: Release) -> None:
-        if self.downloading or not self.can_install:
+        if self.downloading:
             return
         if self.staged and self.staged[0].version == rel.version:
             self.ready.emit(rel)

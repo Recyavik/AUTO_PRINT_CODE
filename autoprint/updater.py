@@ -35,7 +35,6 @@ log = logging.getLogger("autoprint.update")
 
 REPO = "Recyavik/AUTO_PRINT_CODE"
 API = f"https://api.github.com/repos/{REPO}"
-RELEASES_PAGE = f"https://github.com/{REPO}/releases"
 GIT_URL = f"https://github.com/{REPO}.git"
 
 UPDATES_DIR = DATA_DIR / "updates"
@@ -44,6 +43,8 @@ LAST_UPDATE_FILE = UPDATES_DIR / "last_update.json"
 
 # что из архива не копируется в папку программы
 SKIP_TOP = {"data", ".git", ".github", ".venv", "venv", "env", "build", "dist"}
+# на любом уровне: данные пользователя (data/ у каждой программы — webinar_timer/data, web/data) и служебное
+SKIP_ANY = {"data", "__pycache__", ".venv", "venv", "node_modules"}
 
 MODE_SOURCE = "source"   # исходники, скачанные архивом — замена файлов
 MODE_GIT = "git"         # git-клон — обновление через git
@@ -107,7 +108,9 @@ def _git(*args: str, timeout: float = 120) -> str:
 
 
 def _git_local_changes() -> bool:
-    return bool(_git("status", "--porcelain", "--untracked-files=no").strip())
+    """Свои правки в файлах программы. Папки data (шаблоны таймера и т. п.) не в счёт: их меняет сама работа
+    программ. Если обновление их затронет, git откажется сам — данные не перезапишутся."""
+    return bool(_git("status", "--porcelain", "--untracked-files=no", "--", ".", ":(exclude,glob)**/data/**").strip())
 
 
 def git_stage(rel: Release) -> Path:
@@ -178,7 +181,6 @@ class Release:
     tag: str            # 'v0.3.8'
     name: str
     notes: str          # описание релиза (Markdown)
-    page_url: str
     zip_url: str
     published: str      # '2026-10-07'
     prerelease: bool = False
@@ -197,8 +199,7 @@ def fetch_latest(include_prerelease: bool = False) -> Release | None:
         setup = next((a.get("browser_download_url", "") for a in r.get("assets") or []
                       if INSTALLER_RE.match(str(a.get("name", "")))), "")
         rels.append(Release(
-            version=tag.lstrip("vV"), tag=tag, name=r.get("name") or tag, notes=r.get("body") or "",
-            page_url=r.get("html_url") or f"{RELEASES_PAGE}/tag/{tag}",
+            version=_tag_version(tag), tag=tag, name=r.get("name") or tag, notes=r.get("body") or "",
             zip_url=f"https://github.com/{REPO}/archive/refs/tags/{tag}.zip",
             published=(r.get("published_at") or "")[:10], prerelease=bool(r.get("prerelease")),
             installer_url=setup))
@@ -212,9 +213,14 @@ def fetch_latest(include_prerelease: bool = False) -> Release | None:
             if key is None or (key[1][0] == 0 and not include_prerelease):   # key[1][0] == 0 — бета
                 continue
             rels.append(Release(
-                version=tag.lstrip("vV"), tag=tag, name=tag, notes="", page_url=f"https://github.com/{REPO}/tree/{tag}",
+                version=_tag_version(tag), tag=tag, name=tag, notes="",
                 zip_url=f"https://github.com/{REPO}/archive/refs/tags/{tag}.zip", published=""))
     return max(rels, key=lambda r: parse_version(r.tag), default=None)
+
+
+def _tag_version(tag: str) -> str:
+    """Номер версии из тега: «v0.6.8» → «0.6.8»; опечатка «v.0.6.8» / «v-0.6.8» — тоже «0.6.8»."""
+    return tag.lstrip("vV").lstrip(".-_ ")
 
 
 def download(rel: Release, progress: Callable[[int, int], None] | None = None,
@@ -358,7 +364,7 @@ def _files(root: Path) -> set[str]:
     out = set()
     for p in root.rglob("*"):
         rel = p.relative_to(root)
-        if p.is_file() and rel.parts[0] not in SKIP_TOP and "__pycache__" not in rel.parts:
+        if p.is_file() and rel.parts[0] not in SKIP_TOP and not SKIP_ANY.intersection(rel.parts):
             out.add(rel.as_posix())
     return out
 

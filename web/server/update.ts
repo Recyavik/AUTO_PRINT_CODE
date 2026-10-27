@@ -11,7 +11,7 @@ import { DATA_DIR, WEB_DIR } from "./store.ts";
 const API = "https://api.github.com/repos/Recyavik/AUTO_PRINT_CODE/releases?per_page=30";
 const ASSET = /^autoprintcode-web-update-(\d+(?:\.\d+)*)\.exe$/i;
 
-export interface UpdateInfo {
+interface UpdateInfo {
   current: string;
   latest: string | null;   // версия новее текущей или null
   notes: string;
@@ -29,7 +29,7 @@ export function isNewer(v: string, current: string): boolean {
   return false;
 }
 
-export const installedCopy = (): boolean => fs.existsSync(path.join(WEB_DIR, "unins000.exe"));
+const installedCopy = (): boolean => fs.existsSync(path.join(WEB_DIR, "unins000.exe"));
 
 /** Самый новый релиз с установщиком веб-версии (черновики и пре-релизы — мимо). */
 export function pickLatest(releases: { tag_name?: string; draft?: boolean; prerelease?: boolean; body?: string;
@@ -37,7 +37,8 @@ export function pickLatest(releases: { tag_name?: string; draft?: boolean; prere
   let best: Found | null = null;
   for (const r of releases) {
     // опечатка в имени тега при создании релиза: «v.0.6.8», «v-0.6.8» — номер тот же
-    const m = /^v[.\-_ ]?(\d.*)$/i.exec(r.tag_name ?? "");
+    // номер — только цифры и точки: он попадает в имя файла и командную строку установщика
+    const m = /^v[.\-_ ]?(\d+(?:\.\d+)*)$/i.exec(r.tag_name ?? "");
     if (r.draft || r.prerelease || !m) continue;
     const asset = (r.assets ?? []).find((a) => ASSET.test(a.name ?? ""));
     if (!asset?.browser_download_url) continue;

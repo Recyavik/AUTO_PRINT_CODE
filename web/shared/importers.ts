@@ -25,7 +25,7 @@ function cellText(cell: Record<string, unknown>): string {
   return nl(Array.isArray(src) ? src.join("") : String(src)).replace(/\n+$/, "");
 }
 
-export function importIpynb(name: string, content: string): Template {
+function importIpynb(name: string, content: string): Template {
   const nb = JSON.parse(content);
   if (!Array.isArray(nb.cells)) throw new Error("Это не тетрадка Jupyter (нет поля cells). Поддерживается формат nbformat 4.");
   const meta = nb.metadata ?? {};
@@ -41,7 +41,7 @@ export function importIpynb(name: string, content: string): Template {
   return build(stem(name), cells, lang);
 }
 
-export function importMarkdown(name: string, content: string): Template {
+function importMarkdown(name: string, content: string): Template {
   const text = nl(content);
   const fence = /^```[ \t]*([\w+#.-]*)[^\n]*\n([\s\S]*?)^```[ \t]*$/gm;
   const cells: Cell[] = [];
@@ -71,7 +71,7 @@ function uncomment(lines: string[]): string {
 
 /** .py: ячейки «# %%» (VS Code, Spyder, Jupytext) — по ячейке на блок, «# %% [markdown]» — пояснение.
  *  Без разметки — весь файл одним блоком кода. */
-export function importPython(name: string, content: string): Template {
+function importPython(name: string, content: string): Template {
   const text = nl(content.replace(/^﻿/, ""));
   const lines = text.split("\n");
   const marks = lines.flatMap((ln, i) => (PY_CELL.test(ln) ? [i] : []));
@@ -86,7 +86,7 @@ export function importPython(name: string, content: string): Template {
   return build(stem(name), cells, "python");
 }
 
-export function importJson(_name: string, content: string): Template {
+function importJson(_name: string, content: string): Template {
   const raw = JSON.parse(content);
   return freshIds(templateFrom(raw.autoprintcode_template ?? raw));
 }

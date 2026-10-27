@@ -7,7 +7,7 @@ from PySide6.QtWidgets import (QApplication, QComboBox, QFrame, QHBoxLayout, QLa
                                QMenu, QSizePolicy, QStackedWidget, QTextBrowser, QToolButton, QVBoxLayout)
 
 from ..highlighter import LANGUAGES
-from ..storage import BLOCK_CODE, BLOCK_MARKDOWN, PROFILE_SHORT, PROFILES, ROLES, Block
+from ..storage import BLOCK_CODE, BLOCK_MARKDOWN, PROFILE_SHORT, PROFILES, ROLES, Block, cp_to_u16, u16_len, u16_to_cp
 from ..textprint import PRINT_MODES, find_selection
 from .code_editor import CodeEditor, code_font
 
@@ -231,7 +231,8 @@ class MarkdownBlockWidget(BlockWidget):
         sel = []
         if c.hasSelection():
             hint = c.selectionStart() / max(1, self.view.document().characterCount())
-            sel = find_selection(self.block.text, c.selection().toPlainText(), hint)
+            sel = [cp_to_u16(self.block.text, x) for x in
+                   find_selection(self.block.text, c.selection().toPlainText(), hint)]
         self._set_sel(sel)
 
     def _on_edit_selection(self) -> None:
@@ -246,7 +247,7 @@ class MarkdownBlockWidget(BlockWidget):
         """Сохранённое выделение (из просмотра или с прошлого запуска) — видимым в редакторе."""
         c = self.edit.textCursor()
         if len(self.block.sel) == 2:
-            n = len(self.block.text)
+            n = u16_len(self.block.text)
             a, b = (min(max(0, x), n) for x in self.block.sel)
             c.setPosition(a)
             c.setPosition(b, QTextCursor.MoveMode.KeepAnchor)
@@ -262,7 +263,7 @@ class MarkdownBlockWidget(BlockWidget):
 
     def _update_info(self) -> None:
         if self.block.sel:
-            a, b = self.block.sel
+            a, b = (u16_to_cp(self.block.text, x) for x in self.block.sel)
             n = self.block.text[a:b].rstrip("\n").count("\n") + 1
             self.info.setText(f"· выделено строк: {n}")
         self.info.setVisible(bool(self.block.sel))
@@ -409,7 +410,7 @@ class CodeBlockWidget(BlockWidget):
 
     def _restore_selection(self) -> None:
         if len(self.block.sel) == 2:
-            n = len(self.block.text)
+            n = u16_len(self.block.text)
             a, b = (min(max(0, x), n) for x in self.block.sel)
             if b > a:
                 c = self.editor.textCursor()
@@ -426,7 +427,7 @@ class CodeBlockWidget(BlockWidget):
         text = self.block.text
         lines = text.count("\n") + 1 if text else 0
         if self.block.sel:
-            a, b = self.block.sel
+            a, b = (u16_to_cp(text, x) for x in self.block.sel)
             n = text[a:b].rstrip("\n").count("\n") + 1
             self.info.setText(f"· выделено строк: {n} из {lines}")
             self.info.setStyleSheet("color: #d29922; font-weight: bold;")
@@ -436,10 +437,11 @@ class CodeBlockWidget(BlockWidget):
 
 
 def typing_slice(text: str, sel: list[int], whole_lines: bool) -> tuple[str, int]:
-    """Что печатать: выделение (расширенное до целых строк) или весь блок. → (текст, смещение)."""
+    """Что печатать: выделение (расширенное до целых строк) или весь блок. → (текст, смещение).
+    sel — в единицах UTF-16 (как хранится в образце), смещение — в символах строки Python."""
     if len(sel) != 2 or sel[1] <= sel[0]:
         return text, 0
-    a, b = max(0, sel[0]), min(len(text), sel[1])
+    a, b = u16_to_cp(text, max(0, sel[0])), u16_to_cp(text, sel[1])
     if whole_lines:
         a = text.rfind("\n", 0, a) + 1
         if b > a and text[b - 1] == "\n":

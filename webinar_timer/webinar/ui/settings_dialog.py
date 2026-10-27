@@ -228,6 +228,13 @@ class SettingsDialog(QDialog):
         self._keep([o])
 
     def done(self, r: int) -> None:
+        if self._thread is not None:
+            # проверка/скачивание ещё идёт: ответ не должен прийти в уже закрытое окно
+            for sig in ("found", "failed", "progress", "done"):
+                try:
+                    getattr(self._thread, sig).disconnect()
+                except (AttributeError, RuntimeError, TypeError):
+                    pass
         if hasattr(self, "_notifier"):
             self._notifier.clear()
         for w in self._probe:

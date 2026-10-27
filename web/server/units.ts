@@ -13,7 +13,7 @@ export interface Unit {
 
 const unit = (kind: UnitKind, text: string, srcEnd: number, k = 1, pause = 0): Unit => ({ kind, text, srcEnd, k, pause });
 
-export const PUNCT = new Set(",;:)]}>");
+const PUNCT = new Set(",;:)]}>");
 
 export function normalize(text: string): string {
   return text.replace(/\r\n?/g, "\n");
@@ -135,7 +135,7 @@ function wrongKey(ch: string, rng: () => number): string | null {
   return isUpper(ch) ? c.toUpperCase() : c;
 }
 
-export function humanize(units: Unit[], s: Settings, rng: () => number = Math.random): Unit[] {
+function humanize(units: Unit[], s: Settings, rng: () => number = Math.random): Unit[] {
   const think = Math.max(0, s.think_pause_s);
   const typoP = Math.max(0, s.typo_per_100_words) / 100;   // вероятность опечатки в слове
   const n = units.length;

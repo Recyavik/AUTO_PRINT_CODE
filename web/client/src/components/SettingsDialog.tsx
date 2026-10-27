@@ -14,6 +14,9 @@ export function SettingsDialog({ settings, onSave, onClose }: {
 }) {
   const [tab, setTab] = useState<Tab>("hotkeys");
   const [s, setS] = useState<Settings>({ ...settings });
+  // с чем сравнивать при сохранении: снимок на момент открытия. Отправляется только изменённое здесь —
+  // иначе открытые вкладки и прочее, сменившиеся, пока окно было открыто, вернулись бы к старым значениям
+  const [initial] = useState<Settings>(settings);
   const autostart0 = useApp((x) => x.autostart);
   const monitors = useApp((x) => x.monitors);
   const [autostart, setAuto] = useState(autostart0);
@@ -40,7 +43,7 @@ export function SettingsDialog({ settings, onSave, onClose }: {
     }
     if (!s.hotkey_toggle) return alert("Нужен хоткей «Старт / пауза».");
     const patch: Partial<Settings> = {};
-    for (const k of Object.keys(s) as (keyof Settings)[]) if (s[k] !== settings[k]) (patch as Record<string, unknown>)[k] = s[k];
+    for (const k of Object.keys(s) as (keyof Settings)[]) if (s[k] !== initial[k]) (patch as Record<string, unknown>)[k] = s[k];
     onSave(patch);
     if (autostart !== autostart0) setAutostart(autostart);
     onClose();

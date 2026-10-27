@@ -109,8 +109,18 @@ export class Store {
   private readSettings(): Settings {
     try {
       return mergeSettings(readJson(SETTINGS_FILE) ?? {});
-    } catch {
-      return mergeSettings({});   // испорченные настройки — по умолчанию; файл перезапишется при первом изменении
+    } catch (e) {
+      // испорченный файл не затирать молча при следующем сохранении — отложить и сказать на странице
+      const stamp = new Date().toISOString().replace(/[-:]/g, "").replace("T", "-").slice(0, 15);
+      const broken = path.join(DATA_DIR, `settings.broken-${stamp}.json`);
+      try {
+        fs.renameSync(SETTINGS_FILE, broken);
+        this.warning = `Файл настроек повреждён (${(e as Error).message}) и сохранён как ${path.basename(broken)}. ` +
+          "Настройки — по умолчанию; хоткеи и прочее задайте заново.";
+      } catch {
+        this.warning = `Файл настроек повреждён (${(e as Error).message}). Настройки — по умолчанию.`;
+      }
+      return mergeSettings({});
     }
   }
 
@@ -147,7 +157,7 @@ export class Store {
       why += `; он сохранён как ${path.basename(broken)}`;
     }
     fs.copyFileSync(TEMPLATES_BAK, TEMPLATES_FILE);
-    this.warning = `${why}. Образцы восстановлены из резервной копии templates.json.bak.`;
+    this.warning = [this.warning, `${why}. Образцы восстановлены из резервной копии templates.json.bak.`].filter(Boolean).join(" ");
     return list;
   }
 

@@ -60,7 +60,8 @@ class CodeEditor(QPlainTextEdit):
     def _style(self) -> None:
         self.setStyleSheet(
             f"QPlainTextEdit {{ background:{hl.EDITOR_BG}; color:{hl.EDITOR_FG}; border:none;"
-            f" selection-background-color:{hl.EDITOR_SEL}; selection-color:{hl.EDITOR_FG}; }}")
+            # выделенное (то, что напечатается) — инверсией: в любой теме видно сразу, цвета подсветки тоже
+            f" selection-background-color:{hl.EDITOR_FG}; selection-color:{hl.EDITOR_BG}; }}")
 
     def apply_theme(self) -> None:
         """Тему окна сменили: фон, номера строк, текущая строка и подсветка — в новых цветах."""

@@ -126,10 +126,23 @@ class Settings:
 
     @classmethod
     def load(cls) -> "Settings":
+        global settings_warning
         s = cls()
         try:
             raw = json.loads(SETTINGS_FILE.read_text(encoding="utf-8-sig"))
-        except (OSError, ValueError):
+        except OSError:
+            return s
+        except ValueError as e:
+            # испорченный файл не затирать молча при следующем сохранении — отложить и сказать
+            stamp = time.strftime("%Y%m%d-%H%M%S")
+            broken = SETTINGS_FILE.with_name(f"settings.broken-{stamp}.json")
+            try:
+                os.replace(SETTINGS_FILE, broken)
+                settings_warning = (f"Файл настроек повреждён ({e}) и сохранён как {broken.name}. "
+                                    "Настройки — по умолчанию; хоткеи и прочее задайте заново.")
+            except OSError:
+                settings_warning = f"Файл настроек повреждён ({e}). Настройки — по умолчанию."
+            log.warning(settings_warning)
             return s
         if not isinstance(raw, dict):
             return s
@@ -162,6 +175,30 @@ ROLES = {
     "hint": ("🔎", "Подсказка", "#a855f7"),
 }
 
+
+
+settings_warning = ""   # Settings.load: что пошло не так (показать пользователю при запуске)
+
+
+# Выделение в блоке (Block.sel) хранится в единицах UTF-16 — так считают Qt и редактор веб-версии,
+# и файлы образцов у версий общие. Python режет строку по символам: эмодзи и т. п. занимают 2 единицы UTF-16.
+def u16_to_cp(text: str, pos: int) -> int:
+    """Позиция в единицах UTF-16 → номер символа в строке Python."""
+    units = 0
+    for i, ch in enumerate(text):
+        if units >= pos:
+            return i
+        units += 2 if ord(ch) > 0xFFFF else 1
+    return len(text)
+
+
+def cp_to_u16(text: str, cp: int) -> int:
+    """Номер символа в строке Python → позиция в единицах UTF-16."""
+    return cp + sum(1 for ch in text[:cp] if ord(ch) > 0xFFFF)
+
+
+def u16_len(text: str) -> int:
+    return cp_to_u16(text, len(text))
 
 @dataclass
 class Block:

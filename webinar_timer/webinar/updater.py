@@ -4,7 +4,8 @@
 «webinar-timer-update-1.3.0.exe» (программа без видео, фона и шрифта: они у пользователя уже стоят).
 Теги AutoPrintCode («v0.6.3») сюда не попадают, а его программа обновлений не видит теги таймера.
 
-Проверка и скачивание — в фоновом потоке (CheckThread, DownloadThread), окно не подвисает.
+Проверка и скачивание — в фоновом потоке (CheckThread, DownloadThread), окно не подвисает;
+поток переживает закрытие окна настроек и не держит выход из программы.
 Установка — тихим запуском установщика: он закрывает таймер, ставит новую версию (шаблоны и настройки
 пользователя не трогает) и запускает таймер снова. Обновляется только установленная версия (exe);
 из исходников — git pull.
@@ -17,11 +18,12 @@ import re
 import subprocess
 import sys
 import tempfile
+import threading
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 
-from PySide6.QtCore import QThread, Signal
+from PySide6.QtCore import QObject, Signal
 
 from . import __version__
 
@@ -40,7 +42,6 @@ class Release:
     notes: str
     asset_url: str
     size: int
-    page_url: str
 
 
 def version_key(v: str) -> tuple[int, ...] | None:
@@ -81,7 +82,7 @@ def pick_latest(releases: list[dict]) -> Release | None:
             continue
         if best is None or version_key(ver) > version_key(best.version):
             best = Release(ver, str(r.get("body") or ""), str(asset.get("browser_download_url", "")),
-                           int(asset.get("size") or 0), str(r.get("html_url", "")))
+                           int(asset.get("size") or 0))
     return best
 
 
@@ -104,7 +105,38 @@ def install(setup: Path) -> None:
                      close_fds=True)
 
 
-class CheckThread(QThread):
+class _Background(QObject):
+    """Сетевая работа в обычном фоновом потоке Python, а не в QThread с родителем-окном.
+    QThread, удалённый вместе с окном настроек посреди запроса (до 15 с), аварийно роняет всю программу
+    («QThread: Destroyed while thread is still running») — хоть посреди эфира. Фоновый поток переживает
+    закрытие окна и не держит выход из программы; сигналы приходят в окно, пока оно живо."""
+    finished = Signal()
+
+    def __init__(self, parent=None) -> None:
+        super().__init__()          # без родителя: окно может уйти раньше, чем закончится запрос
+        self._thread: threading.Thread | None = None
+
+    def start(self) -> None:
+        self._thread = threading.Thread(target=self._main, name=type(self).__name__, daemon=True)
+        self._thread.start()
+
+    def isRunning(self) -> bool:
+        return self._thread is not None and self._thread.is_alive()
+
+    def _main(self) -> None:
+        try:
+            self.run()
+        finally:
+            try:
+                self.finished.emit()
+            except RuntimeError:     # программа уже закрывается
+                pass
+
+    def run(self) -> None:
+        raise NotImplementedError
+
+
+class CheckThread(_Background):
     """Проверить, есть ли версия новее. found(Release | None) — None, если обновлений нет."""
     found = Signal(object)
     failed = Signal(str)
@@ -119,7 +151,7 @@ class CheckThread(QThread):
         self.found.emit(r if r is not None and is_newer(r.version) else None)
 
 
-class DownloadThread(QThread):
+class DownloadThread(_Background):
     """Скачать установщик обновления во временную папку. progress(0…100), done(путь)."""
     progress = Signal(int)
     done = Signal(object)
@@ -142,7 +174,11 @@ class DownloadThread(QThread):
                     got += len(chunk)
                     if total:
                         self.progress.emit(min(100, got * 100 // total))
+            # обрыв связи на середине: urllib просто вернёт конец данных — недокачанный установщик не запускать
+            if total and got != total:
+                raise OSError(f"скачано {got} из {total} байт — связь оборвалась")
         except Exception as e:
+            dest.unlink(missing_ok=True)
             log.warning("Скачивание обновления: %s", e)
             self.failed.emit(str(e))
             return

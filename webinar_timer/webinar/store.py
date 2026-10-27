@@ -170,7 +170,10 @@ class PlanStore:
         self.warning = problem
         self.plans = starter_plans() or [default_plan()]
         if not self.warning:
-            self.save()
+            try:
+                self.save()
+            except OSError as e:     # папка данных только для чтения — работать можно, предупредить
+                self.warning = f"Не удалось сохранить шаблоны ({e}): изменения не сохранятся"
 
     def save(self) -> None:
         _atomic_write(PLANS_FILE, {"version": 1, "saved": time.time(), "plans": [plan_to(p) for p in self.plans]},
