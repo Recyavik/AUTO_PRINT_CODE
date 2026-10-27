@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { blockTitle, codeNumber, type EngineState, PROFILES } from "../../shared/model.ts";
 import { typingText } from "../../shared/textprint.ts";
 import {
-  closeTab, command, moveBlock, moveTab, openTab, pauseHotkeys, shutdownHelper, updateSettings, useApp,
+  closeTab, command, moveBlock, moveTab, openTab, pauseHotkeys, shutdownHelper, updateSettings, useApp, WINDOW_TOKEN,
 } from "./api.ts";
 import { importFiles, Library, newTemplate } from "./components/Library.tsx";
 import { NumberField } from "./components/NumberField.tsx";
@@ -84,7 +84,7 @@ export function App() {
   // заголовок вкладки начинается с метки — по ней помощник узнаёт окно браузера со страницей
   useEffect(() => {
     // в начале — цветной кружок состояния; метку «⌨ AutoPrintCode» помощник ищет в заголовке окна (не в начале)
-    document.title = `${stateDot} ⌨ AutoPrintCode — ${engine.state === "countdown" && engine.countdown ? `старт через ${engine.countdown}` : stateText}`;
+    document.title = `${stateDot} ⌨ AutoPrintCode — ${engine.state === "countdown" && engine.countdown ? `старт через ${engine.countdown}` : stateText}${WINDOW_TOKEN}`;
     (document.getElementById("favicon") as HTMLLinkElement | null)?.setAttribute("href", faviconSvg(stateColor));
   }, [stateText, stateDot, engine.countdown]);
 

@@ -314,8 +314,10 @@ function onClient(ws: WebSocket, msg: ClientMsg): void {
       identifyMonitors();
       break;
     case "placeWindow":
-      if (s.start_screen) {
-        const label = placeWindow(findPageWindow(OWN_TITLE_MARK), s.start_screen);
+      // только окно, где открыта сама страница (своё окно приложения, метка token в заголовке):
+      // окно браузера с другими вкладками — например, с демонстрацией — не трогаем никогда
+      if (s.start_screen && msg.token) {
+        const label = placeWindow(findPageWindow(OWN_TITLE_MARK, msg.token), s.start_screen);
         if (label) log("info", `Окно страницы перенесено: ${label}`);
       }
       break;
@@ -482,13 +484,42 @@ function installedAppShortcut(): string | null {
   return null;
 }
 
-/** Открыть страницу: установленным приложением (своё окно и значок), иначе — вкладкой браузера. */
+// браузеры на Chromium: умеют --app — своё окно без вкладок и адресной строки
+const APP_BROWSERS = new Set(["chrome.exe", "msedge.exe", "browser.exe", "brave.exe", "vivaldi.exe", "chromium.exe"]);
+
+function regValue(key: string, name?: string): string {
+  try {
+    const out = execFileSync("reg", ["query", key, ...(name ? ["/v", name] : ["/ve"])],
+      { windowsHide: true, encoding: "utf-8", stdio: "pipe" });
+    return /REG_(?:EXPAND_)?SZ\s+(.*)$/m.exec(out)?.[1]?.trim() ?? "";
+  } catch {
+    return "";
+  }
+}
+
+/** Браузер для отдельного окна AutoPrintCode: браузер по умолчанию, если он на Chromium
+ *  (Яндекс, Chrome, Edge…), иначе Edge — он есть в Windows всегда. null — не нашли. */
+export function appBrowser(): string | null {
+  const progId = regValue(String.raw`HKCU\Software\Microsoft\Windows\Shell\Associations\UrlAssociations\http\UserChoice`, "ProgId");
+  const cmd = progId ? regValue("HKCR\\" + progId + "\\shell\\open\\command") : "";
+  const exe = /^"([^"]+)"/.exec(cmd)?.[1] ?? cmd.split(" ")[0];
+  if (exe && APP_BROWSERS.has(path.basename(exe).toLowerCase()) && fs.existsSync(exe)) return exe;
+  for (const base of [process.env["ProgramFiles(x86)"], process.env.ProgramFiles, process.env.LOCALAPPDATA]) {
+    const edge = path.join(base ?? "", "Microsoft", "Edge", "Application", "msedge.exe");
+    if (base && fs.existsSync(edge)) return edge;
+  }
+  return null;
+}
+
+/** Открыть страницу в своём окне (не вкладкой в уже открытом браузере — там может идти демонстрация):
+ *  установленное приложение, иначе браузер на Chromium с --app, иначе — как обычную ссылку. */
 function openBrowser(): void {
-  const target = installedAppShortcut() ?? URL_SELF;
-  // explorer.exe открывает ссылку или ярлык как двойной щелчок — работает и из помощника без окна
-  // (cmd /c start со скрытым окном из процесса без консоли страницу не открывал)
-  log("info", `Открываю ${target}`);
-  const p = spawn("explorer.exe", [target], { detached: true, stdio: "ignore" });
+  const shortcut = installedAppShortcut();
+  const browser = shortcut ? null : appBrowser();
+  // explorer.exe открывает ярлык или ссылку как двойной щелчок — работает и из помощника без окна
+  const [exe, args] = browser ? [browser, [`--app=${URL_SELF}`]] : ["explorer.exe", [shortcut ?? URL_SELF]];
+  log("info", `Открываю ${URL_SELF}: ${browser ? `${path.basename(browser)} --app` : shortcut ? "установленное приложение" : "ссылкой"}`);
+  const p = spawn(exe, args, { detached: true, stdio: "ignore" });
   p.on("error", (e) => log("error", `Не удалось открыть страницу: ${e.message}`));
   p.unref();
 }

@@ -88,13 +88,15 @@ function title(hwnd: number): string {
   return buf.toString("utf16le", 0, n * 2);
 }
 
-/** Окно браузера со страницей AutoPrintCode (по метке в заголовке); активное — в первую очередь. */
-export function findPageWindow(mark: string): number {
+/** Окно браузера со страницей AutoPrintCode: в заголовке метка программы и невидимая метка этого окна
+ *  (token). Без token — любое окно с меткой программы; активное — в первую очередь. */
+export function findPageWindow(mark: string, token = ""): number {
+  const ours = (h: number) => { const t = title(h); return t.includes(mark) && t.includes(token); };
   const fg = Number(GetForegroundWindow());
-  if (fg && title(fg).includes(mark)) return fg;
+  if (fg && ours(fg)) return fg;
   let found = 0;
   const cb = koffi.register((h: number) => {
-    if (IsWindowVisible(h) && title(Number(h)).includes(mark)) {
+    if (IsWindowVisible(h) && ours(Number(h))) {
       found = Number(h);
       return false;
     }

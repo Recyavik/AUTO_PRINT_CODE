@@ -92,7 +92,9 @@ function onMessage(m: ServerMsg): void {
         // один раз за открытие страницы (не при переподключении): окно — на выбранный монитор.
         // Небольшая пауза — заголовок вкладки с меткой AutoPrintCode должен успеть появиться
         placed = true;
-        if (m.settings.start_screen) setTimeout(() => send({ t: "placeWindow" }), 400);
+        // только если страница в своём окне (приложение или --app): окно браузера с вкладками не двигаем
+        const ownWindow = matchMedia("(display-mode: standalone)").matches || !window.toolbar.visible;
+        if (m.settings.start_screen && ownWindow) setTimeout(() => send({ t: "placeWindow", token: WINDOW_TOKEN }), 400);
       }
       set({ monitors: m.monitors ?? [], stopped: false, autostart: m.autostart, connected: true, everConnected: true, version: m.version, settings: m.settings, templates, engine: m.engine });
       flushAll();
@@ -223,6 +225,9 @@ export function command(cmd: "toggle" | "restart" | "stop", fromButton = false):
 }
 
 let placed = false;
+
+/** Невидимая метка этого окна в заголовке (символы нулевой ширины): по ней помощник находит именно его. */
+export const WINDOW_TOKEN = Array.from(crypto.getRandomValues(new Uint8Array(10)), (b) => (b & 1 ? "\u200c" : "\u200b")).join("");
 
 export function identifyMonitors(): void {
   send({ t: "identifyMonitors" });

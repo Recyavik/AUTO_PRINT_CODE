@@ -287,7 +287,7 @@ export type ClientMsg =
   | { t: "settings"; settings: Partial<Settings> }
   | { t: "cmd"; cmd: "toggle" | "restart" | "stop"; fromButton?: boolean }
   | { t: "block"; d: number }
-  | { t: "placeWindow" }
+  | { t: "placeWindow"; token: string }   // token — невидимая метка в заголовке именно этого окна
   | { t: "identifyMonitors" }            // «Определить»: показать номера мониторов                 // страница открылась: поставить её окно на выбранный монитор
   | { t: "pauseHotkeys"; on: boolean }   // окно настроек: отпустить хоткеи, чтобы их можно было нажать
   | { t: "shutdown" }                    // выключить помощника (он работает без окна)
