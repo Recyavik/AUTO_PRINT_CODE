@@ -147,37 +147,43 @@ export function identifyMonitors(ms = 2500): void {
     "-EncodedCommand", encoded], { detached: true, stdio: "ignore", windowsHide: true }).unref();
 }
 
-/** Скрипт PowerShell со значками для мониторов (отдельно — чтобы проверять без показа). */
-export function identifyScript(mons: Pick<Monitor, "monitor" | "primary">[], ms: number): string {
-  const items = mons.map((m, i) => {
-    const k = Math.max(1, (m.monitor.bottom - m.monitor.top) / 1080);   // на 4K значок крупнее
-    const w = Math.round(420 * k);
-    const h = Math.round(300 * k);
-    const x = Math.round(centerX(m.monitor) - w / 2);
-    const y = Math.round(centerY(m.monitor) - h / 2);
-    return `@{n='${i + 1}';x=${x};y=${y};w=${w};h=${h};k=${k.toFixed(2)};note='${m.primary ? "основной" : ""}'}`;
-  }).join(",");
+/** Скрипт PowerShell со значками для мониторов (отдельно — чтобы проверять без показа).
+ *  Мониторы находятся по имени устройства («\.\DISPLAY1»), границы берутся в координатах самого PowerShell —
+ *  так значок встаёт по центру при любом масштабе экрана (225 % на 4K и т. п.). */
+export function identifyScript(mons: Pick<Monitor, "id" | "primary">[], ms: number): string {
+  const items = mons.map((m, i) => `@{n='${i + 1}';dev='${m.id.replace(/'/g, "''")}';note='${m.primary ? "основной" : ""}'}`).join(",");
   return `
 Add-Type -AssemblyName System.Windows.Forms, System.Drawing
-Add-Type 'using System; using System.Runtime.InteropServices; public static class Dpi { [DllImport("user32.dll")] public static extern bool SetProcessDpiAwarenessContext(IntPtr v); }'
-[Dpi]::SetProcessDpiAwarenessContext([IntPtr]-4) | Out-Null
+try {
+  Add-Type 'using System; using System.Runtime.InteropServices; public static class Dpi { [DllImport("user32.dll")] public static extern bool SetProcessDpiAwarenessContext(IntPtr v); }'
+  [Dpi]::SetProcessDpiAwarenessContext([IntPtr]-4) | Out-Null
+} catch {}
+$screens = [System.Windows.Forms.Screen]::AllScreens
 $forms = @()
 foreach ($m in @(${items})) {
+  $sc = $screens | Where-Object { $_.DeviceName -eq $m.dev } | Select-Object -First 1
+  if (-not $sc) { continue }
+  $b = $sc.Bounds
+  $k = [Math]::Max(1.0, $b.Height / 1080.0)
+  $w = [int](420 * $k); $h = [int](300 * $k)
   $f = New-Object System.Windows.Forms.Form
   $f.FormBorderStyle = 'None'; $f.StartPosition = 'Manual'; $f.TopMost = $true; $f.ShowInTaskbar = $false
   $f.BackColor = [System.Drawing.Color]::FromArgb(30, 34, 41)
-  $f.Bounds = New-Object System.Drawing.Rectangle($m.x, $m.y, $m.w, $m.h)
+  $f.Bounds = New-Object System.Drawing.Rectangle(([int]($b.X + ($b.Width - $w) / 2)), ([int]($b.Y + ($b.Height - $h) / 2)), $w, $h)
   $num = New-Object System.Windows.Forms.Label
   $num.Text = $m.n; $num.Dock = 'Fill'; $num.TextAlign = 'MiddleCenter'
   $num.ForeColor = [System.Drawing.Color]::FromArgb(167, 139, 250)
-  $num.Font = New-Object System.Drawing.Font('Segoe UI', [float](150 * $m.k), [System.Drawing.FontStyle]::Bold, [System.Drawing.GraphicsUnit]::Pixel)
+  $num.Font = New-Object System.Drawing.Font('Segoe UI', [float](150 * $k), [System.Drawing.FontStyle]::Bold, [System.Drawing.GraphicsUnit]::Pixel)
   $note = New-Object System.Windows.Forms.Label
-  $note.Text = $m.note; $note.Dock = 'Bottom'; $note.Height = [int](48 * $m.k); $note.TextAlign = 'MiddleCenter'
+  $note.Text = $m.note; $note.Dock = 'Bottom'; $note.Height = [int](48 * $k); $note.TextAlign = 'MiddleCenter'
   $note.ForeColor = [System.Drawing.Color]::FromArgb(230, 232, 235)
-  $note.Font = New-Object System.Drawing.Font('Segoe UI', [float](22 * $m.k), [System.Drawing.FontStyle]::Bold, [System.Drawing.GraphicsUnit]::Pixel)
+  $note.Font = New-Object System.Drawing.Font('Segoe UI', [float](22 * $k), [System.Drawing.FontStyle]::Bold, [System.Drawing.GraphicsUnit]::Pixel)
   $f.Controls.Add($num); $f.Controls.Add($note)
-  $f.Show(); $forms += $f
+  $forms += $f
 }
+# процесс запущен «скрытым»: Windows прячет первое показанное окно — показываем каждое дважды
+foreach ($f in $forms) { $f.Show(); $f.Hide(); $f.Show(); $f.Bounds = $f.Bounds; $f.Activate() }
+foreach ($f in $forms) { Write-Output ("монитор {0}: {1} visible={2}" -f $f.Controls[0].Text, $f.Bounds, $f.Visible) }
 $t = New-Object System.Windows.Forms.Timer
 $t.Interval = ${ms}
 $t.Add_Tick({ $t.Stop(); foreach ($f in $forms) { $f.Close() }; [System.Windows.Forms.Application]::ExitThread() })
