@@ -560,7 +560,8 @@ class MainWindow(QMainWindow):
         self._hide_demo()
         self._break_index = seg.index
         image = existing(seg.activity.media) or existing(self.settings.break_image)
-        self.overlay = BreakOverlay(screens.demo_screen(self.settings), seg.end, self.clock, image, seg.activity.name)
+        self.overlay = BreakOverlay(screens.demo_screen(self.settings), seg.end, self.clock, image, seg.activity.name,
+                                    self.settings.break_text_color)
         o = self.overlay
         o.closed.connect(lambda: self.overlay is o and setattr(self, "overlay", None))
         o.show()

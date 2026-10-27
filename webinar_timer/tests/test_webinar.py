@@ -508,6 +508,32 @@ class WindowsTest(_WindowBase):
         self.win._hide_break()
         self.assertIsNone(self.win.overlay)
 
+    def test_break_panel_seek_like_video(self):
+        """Ползунок пульта перерыва перематывает отсчёт, как у видео: щелчок — сразу, перетаскивание — по отпусканию."""
+        self.win.start_break(10)
+        o, panel, bar = self.win.overlay, self.win.break_panel, self.win.break_panel.progress
+        self.assertTrue(bar.isEnabled())
+        bar.setValue(500)
+        bar.sliderMoved.emit(500)                       # щелчок по середине полосы
+        self.assertEqual((o.left_text(), panel.big.text()), ("05:00", "05:00"))
+        bar.setSliderDown(True)                         # тянут ползунок
+        bar.setValue(800)
+        bar.sliderMoved.emit(800)
+        self.assertEqual(panel.big.text(), "02:00", "на пульте видно, что будет")
+        self.assertEqual(o.left_text(), "05:00", "у зрителей — пока прежнее")
+        bar.setSliderDown(False)                        # отпустили
+        self.assertEqual(o.left_text(), "02:00")
+        panel.pause_btn.click()
+        self.clock.t += timedelta(minutes=1)
+        bar.setValue(100)
+        bar.sliderMoved.emit(100)
+        self.assertEqual(o.left_text(), "09:00", "на паузе перемотка тоже работает")
+        self.assertTrue(o.paused, "и отсчёт остаётся на паузе")
+        bar.setValue(1000)
+        bar.sliderMoved.emit(1000)
+        self.assertEqual(o.left_text(), "ПРОДОЛЖАЕМ", "в конец — время вышло")
+        self.win._hide_break()
+
     def test_panel_stop_removes_its_own_screen(self):
         """«Убрать» на пульте закрывает свою заставку, даже если окно таймера уже «забыло» про неё."""
         self.win.start_break(5)
@@ -1103,6 +1129,45 @@ class ButtonsAndMediaTest(_WindowBase):
         self.assertEqual((ed.plan.part_min, ed.lesson_edit.value()), (40, None), "как в настройках — 40")
         self.assertIn("Как в настройках · 40 мин", ed.lesson_edit.mode.currentText())
         self.assertEqual(plan_from({"start": "11:00", "schedule": [{"name": "a", "min": 1}]}).part_min, 45)
+
+
+class BreakOverlayThemeTest(unittest.TestCase):
+    """Заставку видят зрители: надписи белые при любой теме окна таймера (в светлой были тёмными и пропадали)."""
+
+    def test_text_is_light_in_light_theme(self):
+        from PySide6.QtGui import QGuiApplication
+        from webinar.ui import style
+        from webinar.ui.overlay import BreakOverlay
+        app = QApplication.instance() or QApplication([])
+        style.apply("light")
+        try:
+            now = datetime(2026, 10, 27, 13, 0)
+            ov = BreakOverlay(QGuiApplication.primaryScreen(), now + timedelta(minutes=9, seconds=38), lambda: now)
+            ov.resize(640, 360)
+            img = ov.grab().toImage()
+            # самый светлый пиксель в полосе с отсчётом «09:38» (фон — тёмный градиент)
+            brightest = max(img.pixelColor(x, y).lightness() for x in range(200, 440, 2) for y in range(190, 250, 2))
+            ov.close()
+            self.assertGreater(brightest, 220)
+            # время вышло: «ПРОДОЛЖАЕМ» и под ним «ПЕРЕРЫВ ЗАВЕРШЁН» — обе строки видны
+            done = BreakOverlay(QGuiApplication.primaryScreen(), now, lambda: now)
+            done.resize(640, 360)
+            img = done.grab().toImage()
+            band = lambda y0, y1: max(img.pixelColor(x, y).lightness() for x in range(120, 520, 2) for y in range(y0, y1, 2))
+            self.assertGreater(band(120, 175), 220, "ПРОДОЛЖАЕМ")
+            self.assertGreater(band(195, 230), 220, "ПЕРЕРЫВ ЗАВЕРШЁН")
+            done.close()
+            # свой цвет из настроек: отсчёт рисуется им (самый «красный» пиксель — красный)
+            red = BreakOverlay(QGuiApplication.primaryScreen(), now + timedelta(minutes=5), lambda: now, "", "Перерыв", "#FF0000")
+            red.resize(640, 360)
+            img = red.grab().toImage()
+            reddest = max((img.pixelColor(x, y) for x in range(200, 440, 2) for y in range(190, 250, 2)),
+                          key=lambda c: c.red() - c.green())
+            red.close()
+            self.assertGreater(reddest.red(), 220)
+            self.assertLess(reddest.green(), 60)
+        finally:
+            style.apply("dark")
 
 
 class SettingsSaveTest(unittest.TestCase):

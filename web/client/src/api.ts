@@ -224,6 +224,10 @@ export function command(cmd: "toggle" | "restart" | "stop", fromButton = false):
 
 let placed = false;
 
+export function identifyMonitors(): void {
+  send({ t: "identifyMonitors" });
+}
+
 export function setAutostart(on: boolean): void {
   send({ t: "autostart", on });
 }

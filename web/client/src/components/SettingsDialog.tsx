@@ -2,7 +2,7 @@
 import { useState } from "react";
 import { hotkeyFromEvent, parseHotkey } from "../../../shared/hotkeys.ts";
 import { HOTKEYS, PROFILES, type Settings, SOUND_STYLES } from "../../../shared/model.ts";
-import { setAutostart, useApp } from "../api.ts";
+import { identifyMonitors, setAutostart, useApp } from "../api.ts";
 import { sounds } from "../sound.ts";
 import { NumberField } from "./NumberField.tsx";
 
@@ -134,15 +134,19 @@ export function SettingsDialog({ settings, onSave, onClose }: {
             {check("guard_enabled", "Пауза, если во время печати нажата клавиша или кнопка мыши (случайная клавиша не попадёт в код)")}
             <span title="Если окно случайно закрыли на мониторе демонстрации, при новом открытии оно встанет на выбранный монитор">
               Окно при запуске:</span>
-            <select value={s.start_screen} onChange={(e) => set("start_screen", e.target.value)}
-              title="Переносится окно браузера, в котором открыта страница AutoPrintCode. Неподключённый монитор — откроется на основном.">
-              <option value="">Где было в прошлый раз</option>
-              <option value="primary">Основной монитор</option>
-              {monitors.map((m) => <option key={m.id} value={m.id}>{m.label}</option>)}
-              {s.start_screen && s.start_screen !== "primary" && !monitors.some((m) => m.id === s.start_screen) && (
-                <option value={s.start_screen}>{s.start_screen} (сейчас не подключён)</option>
-              )}
-            </select>
+            <span style={{ display: "flex", gap: 8 }}>
+              <select value={s.start_screen} onChange={(e) => set("start_screen", e.target.value)}
+                title="Переносится окно браузера, в котором открыта страница AutoPrintCode. Неподключённый монитор — откроется на основном.">
+                <option value="">Где было в прошлый раз</option>
+                <option value="primary">Основной монитор</option>
+                {monitors.map((m) => <option key={m.id} value={m.id}>{m.label}</option>)}
+                {s.start_screen && s.start_screen !== "primary" && !monitors.some((m) => m.id === s.start_screen) && (
+                  <option value={s.start_screen}>{s.start_screen} (сейчас не подключён)</option>
+                )}
+              </select>
+              <button className="btn small" title="Показать на каждом мониторе его номер — как в этом списке"
+                onClick={identifyMonitors}>Определить</button>
+            </span>
             {check("auto_advance", "По окончании переходить к следующему блоку кода")}
             <label className="check full" title="Помощник стартует при входе в Windows без окна — останется открыть приложение AutoPrintCode">
               <input type="checkbox" checked={autostart} onChange={(e) => setAuto(e.target.checked)} />

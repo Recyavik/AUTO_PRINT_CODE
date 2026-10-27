@@ -2,7 +2,7 @@
 
 Заставка перерыва — на весь монитор, поверх всего, что там показано: фон (картинка, растянутая
 с обрезкой краёв, или встроенный фиолетовый), название («ПЕРЕРЫВ») и крупный обратный отсчёт
-шрифтом Furore — как на слайдах 1Т. Когда время вышло — «ПРОДОЛЖАЕМ»; заставка остаётся, пока её
+шрифтом Furore — как на слайдах 1Т. Когда время вышло — «ПРОДОЛЖАЕМ», ниже «ПЕРЕРЫВ ЗАВЕРШЁН»; заставка остаётся, пока её
 не уберут («■ Убрать» на пульте перерыва, щелчком по ней или Esc), чтобы не исчезнуть посреди фразы ведущего.
 """
 from __future__ import annotations
@@ -17,7 +17,6 @@ from PySide6.QtGui import QColor, QFont, QFontDatabase, QLinearGradient, QPainte
 from PySide6.QtWidgets import QLabel, QStackedLayout, QWidget
 
 from ..model import fmt_left
-from . import style
 
 log = logging.getLogger(__name__)
 
@@ -81,8 +80,9 @@ class _ScreenWindow(QWidget):
 
 class BreakOverlay(_ScreenWindow):
     def __init__(self, screen: QScreen, end: datetime, clock: Callable[[], datetime], image: str = "",
-                 title: str = "ПЕРЕРЫВ") -> None:
+                 title: str = "ПЕРЕРЫВ", text_color: str = "#FFFFFF") -> None:
         super().__init__(screen)
+        self.text_color = QColor(text_color) if QColor.isValidColorName(text_color) else QColor("#FFFFFF")
         self.end, self.clock, self.title = end, clock, (title or "ПЕРЕРЫВ").upper()
         self.total = max(timedelta(0), end - clock())     # длительность — для «Заново» и полосы на пульте
         self._paused_left: timedelta | None = None        # отсчёт на паузе: сколько оставалось
@@ -117,6 +117,16 @@ class BreakOverlay(_ScreenWindow):
             now = self.clock()
             self.end = max(now, max(self.end, now) + delta if delta > timedelta(0) else self.end + delta)
         self.total = max(timedelta(0), self.total + delta)
+        self.update()
+
+    def seek(self, passed: timedelta) -> None:
+        """Перемотка с пульта: отсчёт — как будто от перерыва прошло passed (0 … вся длительность).
+        На паузе остаётся на паузе; расписание эфира не сдвигается."""
+        left = max(timedelta(0), min(self.total, self.total - passed))
+        if self._paused_left is not None:
+            self._paused_left = left
+        else:
+            self.end = self.clock() + left
         self.update()
 
     def restart(self) -> None:
@@ -158,12 +168,17 @@ class BreakOverlay(_ScreenWindow):
             p.setFont(title_font(px))
             p.setPen(QColor(0, 0, 0, 120))
             p.drawText(rect.translated(px * 0.04, px * 0.05), Qt.AlignmentFlag.AlignCenter, s)
-            p.setPen(QColor(style.INK))
+            # цвет — из настроек заставки, не из темы окна таймера (в светлой теме текст был тёмным и пропадал)
+            p.setPen(self.text_color)
             p.drawText(rect, Qt.AlignmentFlag.AlignCenter, s)
 
-        text(QRectF(0, h * 0.30, w, h * 0.16), self.title, h * 0.075)
-        left = self.left_text()
-        text(QRectF(0, h * 0.50, w, h * 0.22), left, h * (0.13 if ":" in left else 0.075))
+        if self.left().total_seconds() > 0:
+            text(QRectF(0, h * 0.30, w, h * 0.16), self.title, h * 0.075)
+            text(QRectF(0, h * 0.50, w, h * 0.22), self.left_text(), h * 0.13)
+        else:
+            # время вышло: главное — «ПРОДОЛЖАЕМ», ниже мельче — что закончилось
+            text(QRectF(0, h * 0.32, w, h * 0.18), "ПРОДОЛЖАЕМ", h * 0.11)
+            text(QRectF(0, h * 0.53, w, h * 0.12), "ПЕРЕРЫВ ЗАВЕРШЁН", h * 0.055)
 
 
 class MediaOverlay(_ScreenWindow):

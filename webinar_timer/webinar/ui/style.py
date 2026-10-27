@@ -127,7 +127,8 @@ QCheckBox::indicator:disabled {{ border-color: {g['DIM']}; }}
 QProgressBar {{ background: {g['TINT2']}; border: none; border-radius: 4px; max-height: 8px; }}
 QProgressBar::chunk {{ background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 {g['BRAND']}, stop:1 {g['BRAND_BRIGHT']});
   border-radius: 4px; }}
-QMenu {{ background: {g['SURFACE']}; border: 1px solid {g['LINE']}; color: {g['INK']}; }}
+QMenu {{ background: {g['SURFACE']}; border: 1px solid {g['LINE']}; color: {g['INK']}; padding: 4px; }}
+QMenu::item {{ padding: 6px 30px 6px 12px; border-radius: 4px; }}   /* запас справа: цветные значки (🔓) шире расчётного */
 QMenu::item:selected {{ background: {g['BRAND']}; color: {g['ON_BRAND']}; }}
 QToolTip {{ background: {g['SURFACE']}; color: {g['INK']}; border: 1px solid {g['LINE']}; }}
 QScrollBar:vertical {{ background: transparent; width: 10px; }}

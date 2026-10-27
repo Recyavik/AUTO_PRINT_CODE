@@ -36,10 +36,12 @@ export function pickLatest(releases: { tag_name?: string; draft?: boolean; prere
   assets?: { name?: string; browser_download_url?: string }[] }[]): Found | null {
   let best: Found | null = null;
   for (const r of releases) {
-    if (r.draft || r.prerelease || !/^v\d/.test(r.tag_name ?? "")) continue;
+    // опечатка в имени тега при создании релиза: «v.0.6.8», «v-0.6.8» — номер тот же
+    const m = /^v[.\-_ ]?(\d.*)$/i.exec(r.tag_name ?? "");
+    if (r.draft || r.prerelease || !m) continue;
     const asset = (r.assets ?? []).find((a) => ASSET.test(a.name ?? ""));
     if (!asset?.browser_download_url) continue;
-    const version = (r.tag_name ?? "").slice(1);
+    const version = m[1];
     if (!best || isNewer(version, best.version)) best = { version, url: asset.browser_download_url, notes: r.body ?? "" };
   }
   return best;

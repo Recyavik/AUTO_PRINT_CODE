@@ -19,7 +19,7 @@ import { typingText } from "../shared/textprint.ts";
 import { Engine } from "./engine.ts";
 import { InputHooks } from "./input.ts";
 import { log, LOG_FILE } from "./log.ts";
-import { enableDpiAwareness, findPageWindow, listMonitors, placeWindow } from "./screens.ts";
+import { enableDpiAwareness, findPageWindow, identifyMonitors, listMonitors, placeWindow } from "./screens.ts";
 import { DATA_DIR, Store, WEB_DIR } from "./store.ts";
 import { checkUpdate, installUpdate } from "./update.ts";
 import * as w from "./win32.ts";
@@ -309,6 +309,9 @@ function onClient(ws: WebSocket, msg: ClientMsg): void {
     case "autostart":
       setAutostart(msg.on);
       broadcast({ t: "autostart", on: getAutostart() });
+      break;
+    case "identifyMonitors":
+      identifyMonitors();
       break;
     case "placeWindow":
       if (s.start_screen) {

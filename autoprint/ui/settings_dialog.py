@@ -14,7 +14,7 @@ from ..hotkeys import parse_hotkey
 from ..sounds import STYLES
 from ..storage import PROFILE_IDE, PROFILES, Settings
 from ..updater import MODE_FROZEN, install_mode
-from .screens import screen_choices
+from .screens import identify, screen_choices
 from .updates import INTERVALS, MODE_DOWNLOAD, MODE_NOTIFY, UPDATE_MODES
 
 HOTKEYS = [
@@ -220,7 +220,13 @@ class SettingsDialog(QDialog):
                                      "окно откроется на основном.")
         f.addRow("Задержка старта по хоткею:", self.hk_delay)
         f.addRow("Отсчёт при старте кнопкой:", self.countdown)
-        f.addRow("Окно при запуске:", self.start_screen)
+        ident = QPushButton("Определить")
+        ident.setToolTip("Показать на каждом мониторе его номер — как в этом списке")
+        ident.clicked.connect(lambda: setattr(self, "_badges", identify()))
+        srow = QHBoxLayout()
+        srow.addWidget(self.start_screen, 1)
+        srow.addWidget(ident)
+        f.addRow("Окно при запуске:", srow)
         for cb in (self.minimize, self.autopause, self.guard, self.advance, self.on_top):
             f.addRow(cb)
         tabs.addTab(w, "Поведение")

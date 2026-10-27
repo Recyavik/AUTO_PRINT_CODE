@@ -22,3 +22,11 @@ test("берётся самый новый релиз AutoPrintCode с уста�
   assert.deepEqual(found, { version: "0.7.0", url: "https://x/0.7.0.exe", notes: "Новое" });
   assert.equal(pickLatest([{ tag_name: "v0.6.3" }]), null);
 });
+
+test("тег с опечаткой «v.0.6.8» при создании релиза — версия распознаётся", () => {
+  const asset = { name: "autoprintcode-web-update-0.6.8.exe", browser_download_url: "https://x/u.exe" };
+  for (const tag of ["v.0.6.8", "v-0.6.8", "v0.6.8"]) {
+    assert.equal(pickLatest([{ tag_name: tag, assets: [asset] }])?.version, "0.6.8", tag);
+  }
+  assert.equal(pickLatest([{ tag_name: "webinar-v1.3.2", assets: [asset] }]), null, "теги таймера — мимо");
+});

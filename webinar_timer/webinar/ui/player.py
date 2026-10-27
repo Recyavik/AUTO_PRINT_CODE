@@ -104,7 +104,6 @@ class _Remote(QWidget):
             QSlider::groove:horizontal {{ height: 6px; background: {style.TINT2}; border-radius: 3px; }}
             QSlider::sub-page:horizontal {{ background: {accent}; border-radius: 3px; }}
             QSlider::handle:horizontal {{ width: 14px; margin: -5px 0; border-radius: 7px; background: {style.INK}; }}
-            QSlider#progress::handle:horizontal {{ width: 0px; margin: 0; }}
         """)
 
     def _button(self, text: str, tip: str, slot: Callable, name: str = "") -> QPushButton:
@@ -259,9 +258,12 @@ class BreakPanel(_Remote):
 
         bar = QHBoxLayout()
         self.big = QLabel(objectName="big")
-        self.progress = QSlider(Qt.Orientation.Horizontal, objectName="progress")
-        self.progress.setEnabled(False)          # только показывает, сколько прошло
+        # перемотка, как у видео: тянуть — цифры на пульте показывают, что будет; отпустить или щёлкнуть — на заставку
+        self.progress = SeekSlider()
         self.progress.setRange(0, 1000)
+        self.progress.setToolTip("Перемотать отсчёт перерыва: потяните ползунок или щёлкните по полосе")
+        self.progress.sliderMoved.connect(self._on_slider_moved)
+        self.progress.sliderReleased.connect(lambda: self.seek(self.progress.value()))
         bar.addWidget(self.big)
         bar.addSpacing(8)
         bar.addWidget(self.progress, 1)
@@ -302,8 +304,25 @@ class BreakPanel(_Remote):
         self.overlay.restart()
         self.refresh()
 
+    def _passed(self, value: int) -> timedelta:
+        """Положение ползунка (0–1000) → сколько прошло от перерыва."""
+        return timedelta(seconds=round(self.overlay.total.total_seconds() * value / 1000))
+
+    def seek(self, value: int) -> None:
+        self.overlay.seek(self._passed(value))
+        self.refresh()
+
+    def _on_slider_moved(self, value: int) -> None:
+        if self.progress.isSliderDown():         # тянут: показать, что будет, заставку не трогать до отпускания
+            left = self.overlay.total - self._passed(value)
+            self.big.setText(fmt_left(left) if left.total_seconds() > 0 else "00:00")
+        else:                                    # щелчок по полосе — сразу туда
+            self.seek(value)
+
     def refresh(self) -> None:
         o = self.overlay
+        if self.progress.isSliderDown():         # ползунок тянут — не перебивать его отсчётом
+            return
         left = o.left()
         self.big.setText(fmt_left(left) if left.total_seconds() > 0 else "00:00")
         total = max(1.0, o.total.total_seconds())

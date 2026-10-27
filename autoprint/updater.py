@@ -66,7 +66,10 @@ _VER_RE = re.compile(r"^v?(\d+(?:\.\d+)*)(?:[-.]?([a-zA-Z]+)\.?(\d*))?$")
 
 def parse_version(s: str) -> tuple | None:
     """'v0.4.0' → ключ сравнения; бета ('0.4.0-beta.2', '0.4.0rc1') младше финальной 0.4.0."""
-    m = _VER_RE.match(s.strip())
+    # опечатка в имени тега при создании релиза: «v.0.6.8», «v-0.6.8» — номер тот же
+    s = s.strip()
+    s = s[:1] + s[1:].lstrip(".-_ ") if s[:1] in "vV" else s
+    m = _VER_RE.match(s)
     if not m:
         return None
     nums = tuple(int(x) for x in m.group(1).split("."))

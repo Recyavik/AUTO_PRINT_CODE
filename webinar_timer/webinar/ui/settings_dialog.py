@@ -6,7 +6,8 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QFileDialog, QFormLayout, QGroupBox, QHBoxLayout,
+from PySide6.QtGui import QColor
+from PySide6.QtWidgets import (QCheckBox, QColorDialog, QComboBox, QDialog, QFileDialog, QFormLayout, QGroupBox, QHBoxLayout,
                                QLabel, QLineEdit, QPushButton, QSlider, QSpinBox, QVBoxLayout)
 from shiboken6 import isValid
 
@@ -72,6 +73,20 @@ class SettingsDialog(QDialog):
 
         self.image = self._file_row(form, "Фон перерыва:", self.s.break_image,
                                     "без картинки — встроенный фиолетовый фон", "Картинки (*.png *.jpg *.jpeg *.bmp *.webp)")
+        # цвет надписей заставки: образец-кнопка открывает выбор цвета, «Белый» — как было по умолчанию
+        self.text_color = self.s.break_text_color
+        self.color_btn = QPushButton()
+        self.color_btn.setFixedWidth(120)
+        self.color_btn.setToolTip("Цвет «ПЕРЕРЫВ», отсчёта и «ПРОДОЛЖАЕМ» на заставке. Проверить — «Проба заставки».")
+        self.color_btn.clicked.connect(self._pick_color)
+        white = QPushButton("Белый")
+        white.clicked.connect(lambda: self._set_color("#FFFFFF"))
+        crow = QHBoxLayout()
+        crow.addWidget(self.color_btn)
+        crow.addWidget(white)
+        crow.addStretch(1)
+        form.addRow("Цвет надписей заставки:", crow)
+        self._set_color(self.text_color)
         self.eyes = self._file_row(form, "Гимнастика для глаз:", self.s.eyes_media,
                                    "видео или картинка — кнопкой «▶ Показать видео» в напоминании о зарядке",
                                    "Видео и картинки (*.mp4 *.mov *.avi *.mkv *.webm *.wmv *.m4v *.png *.jpg *.jpeg)")
@@ -170,6 +185,7 @@ class SettingsDialog(QDialog):
         s.demo_screen = self.demo.currentData() or ""
         s.control_screen = self.control.currentData() or ""
         s.break_image = self.image.text().strip()
+        s.break_text_color = self.text_color
         s.eyes_media = self.eyes.text().strip()
         s.heads_up_min = self.heads.value()
         s.lesson_min = self.lesson.value()
@@ -190,11 +206,23 @@ class SettingsDialog(QDialog):
         self._notifier.show(Segment(0, Activity("Зарядка для глаз (проба)", DEMO_OFF, 5), now,
                                     now + timedelta(minutes=5)), False)
 
+    def _set_color(self, name: str) -> None:
+        self.text_color = QColor(name).name().upper() if QColor.isValidColorName(name) else "#FFFFFF"
+        c = QColor(self.text_color)
+        ink = "#000000" if c.lightness() > 140 else "#FFFFFF"   # подпись на образце читается на любом цвете
+        self.color_btn.setText(self.text_color)
+        self.color_btn.setStyleSheet(f"background: {self.text_color}; color: {ink}; border: 1px solid #888; font-weight: 600;")
+
+    def _pick_color(self) -> None:
+        c = QColorDialog.getColor(QColor(self.text_color), self, "Цвет надписей заставки")
+        if c.isValid():
+            self._set_color(c.name())
+
     def _test_break(self) -> None:
         s = self._collect()
         now = datetime.now()
         o = BreakOverlay(screens.demo_screen(s), now + timedelta(seconds=10), datetime.now, existing(s.break_image),
-                         "Перерыв")
+                         "Перерыв", s.break_text_color)
         o.show()
         o.raise_()
         self._keep([o])

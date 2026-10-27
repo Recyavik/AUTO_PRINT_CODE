@@ -4,6 +4,7 @@
 // иначе имя устройства Windows («\\.\DISPLAY2»). Нужна, чтобы случайно закрытое окно при новом запуске
 // не появилось на мониторе демонстрации. Окно браузера двигает помощник средствами Windows —
 // странице разрешений не нужно. Если выбранного монитора сейчас нет — берётся основной.
+import { spawn } from "node:child_process";
 import koffi from "koffi";
 
 const user32 = koffi.load("user32.dll");
@@ -62,7 +63,7 @@ function monitorInfo(h: number): { id: string; primary: boolean; monitor: Rect; 
 const centerX = (r: Rect) => (r.left + r.right) / 2;
 const centerY = (r: Rect) => (r.top + r.bottom) / 2;
 
-/** Мониторы с подписями для настроек: «Монитор 2 (слева)». */
+/** Мониторы с подписями для настроек: «Монитор 2: 2560×1440». Номер — как у «Определить». */
 export function listMonitors(): Monitor[] {
   const handles: number[] = [];
   const cb = koffi.register((h: number) => { handles.push(Number(h)); return true; }, koffi.pointer(MonitorEnumProc));
@@ -71,17 +72,13 @@ export function listMonitors(): Monitor[] {
   } finally {
     koffi.unregister(cb);
   }
-  // сначала основной, затем слева направо — как в настольной версии
+  // сначала основной, затем по положению — как в настольной версии
   const mons = handles.map(monitorInfo).filter((m) => m !== null)
     .sort((a, b) => Number(b.primary) - Number(a.primary) || a.monitor.left - b.monitor.left || a.monitor.top - b.monitor.top);
-  const p = mons.find((m) => m.primary) ?? mons[0];
   return mons.map((m, i) => {
-    const side = m === p ? "" : centerX(m.monitor) < centerX(p.monitor) ? "слева" : centerX(m.monitor) > centerX(p.monitor)
-      ? "справа" : centerY(m.monitor) < centerY(p.monitor) ? "сверху" : "снизу";
     const w = m.monitor.right - m.monitor.left;
     const h = m.monitor.bottom - m.monitor.top;
-    const notes = [m.primary && "основной", side].filter(Boolean).join(", ");
-    return { ...m, label: `Монитор ${i + 1}: ${w}×${h}${notes ? ` (${notes})` : ""}` };
+    return { ...m, label: `Монитор ${i + 1}: ${w}×${h}${m.primary ? " (основной)" : ""}` };
   });
 }
 
@@ -139,4 +136,52 @@ export function placeWindow(hwnd: number, startScreen: string): string {
   if (wp.showCmd === SW_SHOWMINIMIZED) wp.showCmd = SW_SHOWNORMAL;
   wp.flags = 0;
   return SetWindowPlacement(hwnd, wp) ? target.label : "";
+}
+
+/** «Определить»: на каждом мониторе на пару секунд — крупный номер, как в списке «Окно при запуске».
+ *  У помощника нет своих окон — значки рисует скрытый PowerShell (Windows Forms), в настоящих пикселях. */
+export function identifyMonitors(ms = 2500): void {
+  // кириллица и кавычки — без экранирования: скрипт передаётся в UTF-16 base64
+  const encoded = Buffer.from(identifyScript(listMonitors(), ms), "utf16le").toString("base64");
+  spawn("powershell.exe", ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden",
+    "-EncodedCommand", encoded], { detached: true, stdio: "ignore", windowsHide: true }).unref();
+}
+
+/** Скрипт PowerShell со значками для мониторов (отдельно — чтобы проверять без показа). */
+export function identifyScript(mons: Pick<Monitor, "monitor" | "primary">[], ms: number): string {
+  const items = mons.map((m, i) => {
+    const k = Math.max(1, (m.monitor.bottom - m.monitor.top) / 1080);   // на 4K значок крупнее
+    const w = Math.round(420 * k);
+    const h = Math.round(300 * k);
+    const x = Math.round(centerX(m.monitor) - w / 2);
+    const y = Math.round(centerY(m.monitor) - h / 2);
+    return `@{n='${i + 1}';x=${x};y=${y};w=${w};h=${h};k=${k.toFixed(2)};note='${m.primary ? "основной" : ""}'}`;
+  }).join(",");
+  return `
+Add-Type -AssemblyName System.Windows.Forms, System.Drawing
+Add-Type 'using System; using System.Runtime.InteropServices; public static class Dpi { [DllImport("user32.dll")] public static extern bool SetProcessDpiAwarenessContext(IntPtr v); }'
+[Dpi]::SetProcessDpiAwarenessContext([IntPtr]-4) | Out-Null
+$forms = @()
+foreach ($m in @(${items})) {
+  $f = New-Object System.Windows.Forms.Form
+  $f.FormBorderStyle = 'None'; $f.StartPosition = 'Manual'; $f.TopMost = $true; $f.ShowInTaskbar = $false
+  $f.BackColor = [System.Drawing.Color]::FromArgb(30, 34, 41)
+  $f.Bounds = New-Object System.Drawing.Rectangle($m.x, $m.y, $m.w, $m.h)
+  $num = New-Object System.Windows.Forms.Label
+  $num.Text = $m.n; $num.Dock = 'Fill'; $num.TextAlign = 'MiddleCenter'
+  $num.ForeColor = [System.Drawing.Color]::FromArgb(167, 139, 250)
+  $num.Font = New-Object System.Drawing.Font('Segoe UI', [float](150 * $m.k), [System.Drawing.FontStyle]::Bold, [System.Drawing.GraphicsUnit]::Pixel)
+  $note = New-Object System.Windows.Forms.Label
+  $note.Text = $m.note; $note.Dock = 'Bottom'; $note.Height = [int](48 * $m.k); $note.TextAlign = 'MiddleCenter'
+  $note.ForeColor = [System.Drawing.Color]::FromArgb(230, 232, 235)
+  $note.Font = New-Object System.Drawing.Font('Segoe UI', [float](22 * $m.k), [System.Drawing.FontStyle]::Bold, [System.Drawing.GraphicsUnit]::Pixel)
+  $f.Controls.Add($num); $f.Controls.Add($note)
+  $f.Show(); $forms += $f
+}
+$t = New-Object System.Windows.Forms.Timer
+$t.Interval = ${ms}
+$t.Add_Tick({ $t.Stop(); foreach ($f in $forms) { $f.Close() }; [System.Windows.Forms.Application]::ExitThread() })
+$t.Start()
+[System.Windows.Forms.Application]::Run()
+`;
 }

@@ -45,9 +45,11 @@ class Release:
 
 def version_key(v: str) -> tuple[int, ...] | None:
     """«1.2.0» → (1, 2, 0, 0, 0, 0) — одной длины, чтобы «1.2» == «1.2.0»; не версия — None."""
-    if not re.fullmatch(r"\d+(\.\d+){0,5}", v.strip()):
+    # опечатки в имени тега при создании релиза: «webinar-v.1.3.2», «v-1.3.2» — номер тот же
+    v = v.strip().lstrip("vV").lstrip(".-_ ")
+    if not re.fullmatch(r"\d+(\.\d+){0,5}", v):
         return None
-    nums = tuple(int(x) for x in v.strip().split("."))
+    nums = tuple(int(x) for x in v.split("."))
     return nums + (0,) * (6 - len(nums))
 
 
