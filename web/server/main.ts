@@ -101,11 +101,33 @@ const notify = (text: string, level: "info" | "warn" = "info") => broadcast({ t:
 
 let hotkeysPaused = false;
 let appliedBindings = "";
+// Хоткеи держатся, только пока открыта страница: помощник работает без окна, и иначе, закрыв окно,
+// не понять, почему хоткеи заняты (например, для настольной версии). Посреди печати — не отпускаем.
+let pageOpen = false;
+let pageTimer: NodeJS.Timeout | null = null;
+
+function refreshPageOpen(): void {
+  if (pageTimer) clearTimeout(pageTimer);
+  pageTimer = null;
+  if (clients.size > 0) {
+    if (!pageOpen) { pageOpen = true; applySettings(); }
+    return;
+  }
+  if (!pageOpen) return;
+  // окно закрыли (или страницу перезагружают) — подождать пару секунд, не печатается ли сейчас
+  pageTimer = setTimeout(() => {
+    pageTimer = null;
+    if (clients.size > 0 || engine.busy) return;   // вернулись или печать идёт — держим; проверим при остановке
+    pageOpen = false;
+    applySettings();
+    log("info", "Окно AutoPrintCode закрыто — хоткеи освобождены (откроете окно — займутся снова)");
+  }, 3000);
+}
 
 function applySettings(): void {
   engine.setSettings(s);
   // хоткеи перерегистрируются, только если они изменились (ползунок громкости шлёт настройки на каждом шаге)
-  const bindings = hotkeysPaused ? {} : Object.fromEntries(HOTKEYS.map(([k]) => [k, String(s[k] ?? "")]));
+  const bindings = hotkeysPaused || !pageOpen ? {} : Object.fromEntries(HOTKEYS.map(([k]) => [k, String(s[k] ?? "")]));
   const key = JSON.stringify(bindings);
   if (key === appliedBindings) return;
   appliedBindings = key;
@@ -241,6 +263,7 @@ function startServices(): void {
       case "state":
         if (ev.state === "running" && s.guard_enabled) input.arm();
         else input.disarm();
+        if (!engine.busy && clients.size === 0) refreshPageOpen();   // печать кончилась при закрытом окне
         broadcast({ t: "engine", engine: engineStatus() });
         break;
       case "progress":
@@ -418,6 +441,7 @@ wss.on("error", () => {});
 
 wss.on("connection", (ws) => {
   clients.add(ws);
+  refreshPageOpen();
   send(ws, { t: "hello", version: VERSION, settings: s, templates: store.templates, engine: engineStatus(), hotkeysFailed,
     autostart: getAutostart(), monitors: listMonitors().map(({ id, label }) => ({ id, label })) });
   if (store.warning) send(ws, { t: "notify", text: store.warning, level: "warn" });
@@ -431,6 +455,7 @@ wss.on("connection", (ws) => {
   });
   ws.on("close", () => {
     clients.delete(ws);
+    refreshPageOpen();
     if (hotkeysPaused) {   // страница закрылась с открытыми настройками — вернуть хоткеи
       hotkeysPaused = false;
       applySettings();

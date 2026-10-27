@@ -93,6 +93,15 @@ def save_ico(color: str, path: Path) -> bool:
         return False
 
 
+def _web_helper_running() -> bool:
+    """Работает ли помощник веб-версии AutoPrintCode (слушает 127.0.0.1:8790) — он мог занять хоткеи."""
+    import socket
+    try:
+        with socket.create_connection(("127.0.0.1", 8790), timeout=0.3):
+            return True
+    except OSError:
+        return False
+
 class MainWindow(QMainWindow):
     def __init__(self, settings: Settings, store: TemplateStore) -> None:
         super().__init__()
@@ -120,8 +129,14 @@ class MainWindow(QMainWindow):
 
         self.hotkeys = HotkeyManager()
         self.hotkeys.triggered.connect(self._on_hotkey)
-        self.hotkeys.failed.connect(lambda t: self._notify(
-            f"Не удалось занять хоткеи: {t} (заняты другой программой?). Смените их в настройках.", True))
+        self.hotkeys.failed.connect(self._on_hotkeys_failed)
+        self.hotkeys.ok.connect(self._on_hotkeys_ok)
+        # хоткеи заняты другой программой (например, веб-версией AutoPrintCode) — пробуем снова, пока не освободятся
+        self._hk_failed = ""
+        self._settings_open = False
+        self._hk_retry = QTimer(self)
+        self._hk_retry.setInterval(5000)
+        self._hk_retry.timeout.connect(self._retry_hotkeys)
 
         self._save_timer = QTimer(self)
         self._save_timer.setSingleShot(True)
@@ -448,7 +463,34 @@ class MainWindow(QMainWindow):
             for i, kind in enumerate(("key", "key", "space")):
                 QTimer.singleShot(i * 120, lambda k=kind: self.player.play(k))
 
+    # ---- хоткеи заняты другой программой
+    def _on_hotkeys_failed(self, text: str) -> None:
+        if self._settings_open:
+            return
+        if not self._hk_failed:   # сообщаем один раз, дальше молча пробуем каждые 5 с
+            if _web_helper_running():
+                self._notify(f"Хоткеи {text} заняты веб-версией AutoPrintCode. Закройте её окно — "
+                             "здесь хоткеи заработают сами.", True)
+            else:
+                self._notify(f"Не удалось занять хоткеи: {text} (заняты другой программой?). "
+                             "Как только освободятся — заработают сами, или смените их в настройках.", True)
+        self._hk_failed = text
+        self._hk_retry.start()
+
+    def _on_hotkeys_ok(self) -> None:
+        if self._settings_open:
+            return
+        if self._hk_failed:
+            self._notify("Хоткеи свободны и снова работают.", True)
+        self._hk_failed = ""
+        self._hk_retry.stop()
+
+    def _retry_hotkeys(self) -> None:
+        if not self._settings_open:
+            self.hotkeys.set_bindings({k: getattr(self.settings, k) for k, _ in HOTKEYS})
+
     def open_settings(self) -> None:
+        self._settings_open = True
         self.hotkeys.set_bindings({})  # иначе QKeySequenceEdit не увидит уже занятые сочетания
         dlg = SettingsDialog(self.settings, self)
         dlg.test_sound.connect(self._test_sound)
@@ -459,6 +501,7 @@ class MainWindow(QMainWindow):
                 setattr(self.settings, k, v)   # тот же объект — его читает движок
             self._invalidate_job_if_idle()
             self._save_settings()
+        self._settings_open = False
         self._apply_settings()
 
     def _on_strip_toggle(self, on: bool) -> None:

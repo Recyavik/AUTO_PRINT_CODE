@@ -80,6 +80,7 @@ class HotkeyManager(QObject):
 
     triggered = Signal(str)
     failed = Signal(str)  # список хоткеев, которые не удалось зарегистрировать
+    ok = Signal()         # все хоткеи заняты успешно
 
     def __init__(self) -> None:
         super().__init__()
@@ -133,5 +134,7 @@ class HotkeyManager(QObject):
                         bad.append(text)
                 if bad:
                     self.failed.emit(", ".join(bad))
+                else:
+                    self.ok.emit()
         for hid in ids:
             user32.UnregisterHotKey(None, hid)
