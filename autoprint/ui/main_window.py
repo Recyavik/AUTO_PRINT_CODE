@@ -26,6 +26,7 @@ from ..typer import COUNTDOWN, FINISHED, IDLE, PAUSED, RUNNING, TypingEngine
 from . import theme
 from .blocks import BlockWidget, typing_slice
 from .code_editor import CodeEditor
+from .screens import place_on_start_screen
 from .settings_dialog import HOTKEYS, SettingsDialog
 from .template_view import TemplateView, ZoomWheelFilter
 from .updates import MODE_AUTO, MODE_DOWNLOAD, UpdateDialog, UpdateManager
@@ -739,6 +740,8 @@ class MainWindow(QMainWindow):
         s = self.settings
         if s.window_geometry:
             self.restoreGeometry(QByteArray.fromBase64(s.window_geometry.encode()))
+        # не открываться на мониторе демонстрации, если окно в прошлый раз закрыли там
+        place_on_start_screen(self, s.start_screen)
         if s.splitter_state:
             self.split.restoreState(QByteArray.fromBase64(s.splitter_state.encode()))
         self._fill_library(s.current_tab)

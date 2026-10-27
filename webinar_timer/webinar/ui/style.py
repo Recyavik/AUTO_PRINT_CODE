@@ -137,3 +137,11 @@ QScrollBar::add-line, QScrollBar::sub-line {{ height: 0; }}
 
 
 apply("dark")
+
+
+def tabular_digits(w) -> None:
+    """Цифры одинаковой ширины (в Segoe UI «1» уже остальных): тикающее время не меняет ширину надписи."""
+    from PySide6.QtGui import QFont
+    f = w.font()
+    f.setFeature(QFont.Tag("tnum"), 1)
+    w.setFont(f)

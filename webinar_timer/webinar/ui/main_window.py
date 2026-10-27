@@ -14,12 +14,13 @@ from PySide6.QtWidgets import (QApplication, QFileDialog, QFrame, QGridLayout, Q
                                QScrollArea, QSpinBox, QSystemTrayIcon, QTimeEdit, QVBoxLayout, QWidget)
 from shiboken6 import isValid
 
-from .. import APP_NAME, __version__, updater
+from .. import APP_NAME, __version__, chime, updater
 from ..model import DEMO_NONE, DEMO_ON, DEMO_TEXT, Activity, Plan, Segment, State, default_plan, fmt_left, lessons, \
     parse_time, plan_from, plan_to
 from ..scheduler import Scheduler
 from ..store import TEMPLATES_DIR, PlanStore, Settings, existing
 from . import screens, style
+from .style import tabular_digits
 from .editor import PlanEditor
 from .lessons import LessonPanel, TimelineBar
 from .notify import Notifier, parse_pos
@@ -46,14 +47,6 @@ def make_icon(color: str = style.BRAND, size: int = 64) -> QIcon:
     p.drawLine(c, QPointF(size * 0.72, size * 0.58))
     p.end()
     return QIcon(pm)
-
-
-def _sound() -> None:
-    try:
-        import winsound
-        winsound.PlaySound("SystemNotification", winsound.SND_ALIAS | winsound.SND_ASYNC)
-    except Exception:   # нет звука — не беда
-        pass
 
 
 class FitLabel(QLabel):
@@ -212,6 +205,7 @@ class MainWindow(QMainWindow):
         self.today = QLabel(objectName="muted")
         self.clock_lbl = QLabel()
         self.clock_lbl.setStyleSheet("font-size: 18pt; font-weight: 700;")
+        tabular_digits(self.clock_lbl)   # часы не «дышат» шириной каждую секунду
         self.status = QLabel()
         gear = QPushButton("⚙ Настройки")
         gear.clicked.connect(self.open_settings)
@@ -230,6 +224,9 @@ class MainWindow(QMainWindow):
         self.overall = TimelineBar()
         self.overall_lbl = QLabel(objectName="muted")
         self.overall_lbl.setStyleSheet("font-size: 10pt; font-weight: 600;")
+        self.overall_lbl.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        tabular_digits(self.overall_lbl)
+        self._fit_overall_lbl()
         line.addWidget(self.overall, 1)
         line.addWidget(self.overall_lbl)
         outer.addLayout(line)
@@ -546,7 +543,7 @@ class MainWindow(QMainWindow):
     def _remind(self, seg: Segment, heads_up: bool) -> None:
         self.notifier.show(seg, heads_up)
         if self.settings.sound:
-            _sound()
+            chime.play(self.settings.sound_volume)
         if self.settings.windows_toast:
             when = f"через {self.settings.heads_up_min} мин" if heads_up else "сейчас"
             self.tray.showMessage(APP_NAME, f"{when}: {seg.activity.name}", make_icon(), 8000)
@@ -854,6 +851,16 @@ class MainWindow(QMainWindow):
 
     # ================================================================ окно и выход
     # ================================================================ тема
+    def _fit_overall_lbl(self) -> None:
+        """Постоянная ширина подписи «прошло · осталось» — по самому длинному из её вариантов.
+        Иначе полоса эфира рядом сдвигается каждую секунду и при смене «38:18» на «1:38:18»."""
+        lbl = self.overall_lbl
+        lbl.ensurePolished()
+        fm = QFontMetrics(lbl.font())
+        samples = ("до начала 8:88:88 · всего 8:88:88", "прошло 8:88:88 · осталось 8:88:88",
+                   "всего 8:88:88 · 88:88–88:88")
+        lbl.setFixedWidth(max(fm.horizontalAdvance(t) for t in samples) + 6)
+
     def set_theme(self, name: str) -> None:
         """Сменить тему на лету: общая таблица стилей и всё, что оформлено своими цветами (повестка, карточки,
         пульты). Эфир не прерывается; экран демонстрации не меняется."""
@@ -863,6 +870,7 @@ class MainWindow(QMainWindow):
             self.settings.theme = style.current
             self.settings.save()
         self._style_theme()
+        self._fit_overall_lbl()
         self._rebuild_agenda()
         self.overall.update()
         for c in self.notifier.cards:

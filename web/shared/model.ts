@@ -57,6 +57,7 @@ export interface Settings {
   autopause_on_focus_change: boolean;
   guard_enabled: boolean;
   auto_advance: boolean;
+  start_screen: string;   // окно при запуске: "" — где было, "primary" — основной монитор, иначе устройство Windows, например «\\.\DISPLAY2»
 
   open_tabs: string[];
   current_tab: string;
@@ -98,6 +99,7 @@ export const DEFAULT_SETTINGS: Settings = {
   autopause_on_focus_change: true,
   guard_enabled: true,
   auto_advance: false,
+  start_screen: "",
 
   open_tabs: [],
   current_tab: "",
@@ -285,13 +287,14 @@ export type ClientMsg =
   | { t: "settings"; settings: Partial<Settings> }
   | { t: "cmd"; cmd: "toggle" | "restart" | "stop"; fromButton?: boolean }
   | { t: "block"; d: number }
+  | { t: "placeWindow" }                 // страница открылась: поставить её окно на выбранный монитор
   | { t: "pauseHotkeys"; on: boolean }   // окно настроек: отпустить хоткеи, чтобы их можно было нажать
   | { t: "shutdown" }                    // выключить помощника (он работает без окна)
   | { t: "autostart"; on: boolean };     // запуск помощника при входе в Windows
 
 export type ServerMsg =
   | { t: "hello"; version: string; settings: Settings; templates: Template[]; engine: EngineStatus;
-      hotkeysFailed: string; autostart: boolean }
+      hotkeysFailed: string; autostart: boolean; monitors: { id: string; label: string }[] }
   | { t: "autostart"; on: boolean }
   | { t: "template"; template: Template }
   | { t: "templateDeleted"; id: string }

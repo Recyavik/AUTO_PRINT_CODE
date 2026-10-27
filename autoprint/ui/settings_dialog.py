@@ -14,6 +14,7 @@ from ..hotkeys import parse_hotkey
 from ..sounds import STYLES
 from ..storage import PROFILE_IDE, PROFILES, Settings
 from ..updater import MODE_FROZEN, install_mode
+from .screens import screen_choices
 from .updates import INTERVALS, MODE_DOWNLOAD, MODE_NOTIFY, UPDATE_MODES
 
 HOTKEYS = [
@@ -206,8 +207,20 @@ class SettingsDialog(QDialog):
         self.advance.setChecked(s.auto_advance)
         self.on_top = QCheckBox("Окно поверх остальных")
         self.on_top.setChecked(s.always_on_top)
+        self.start_screen = QComboBox()
+        for label, value in screen_choices(parent.screen() if parent else None):
+            self.start_screen.addItem(label, value)
+        i = self.start_screen.findData(s.start_screen)
+        if i < 0:   # выбранного монитора сейчас нет — показать его как есть, не терять выбор
+            self.start_screen.addItem(f"{s.start_screen} (сейчас не подключён)", s.start_screen)
+            i = self.start_screen.count() - 1
+        self.start_screen.setCurrentIndex(i)
+        self.start_screen.setToolTip("Если окно случайно закрыли на мониторе демонстрации, при новом запуске "
+                                     "оно откроется на выбранном мониторе. Неподключённый монитор — "
+                                     "окно откроется на основном.")
         f.addRow("Задержка старта по хоткею:", self.hk_delay)
         f.addRow("Отсчёт при старте кнопкой:", self.countdown)
+        f.addRow("Окно при запуске:", self.start_screen)
         for cb in (self.minimize, self.autopause, self.guard, self.advance, self.on_top):
             f.addRow(cb)
         tabs.addTab(w, "Поведение")
@@ -321,6 +334,7 @@ class SettingsDialog(QDialog):
         s.guard_enabled = self.guard.isChecked()
         s.auto_advance = self.advance.isChecked()
         s.always_on_top = self.on_top.isChecked()
+        s.start_screen = self.start_screen.currentData() or ""
         s.update_auto_check = self.upd_auto.isChecked()
         s.update_interval_h = self.upd_interval.currentData()
         s.update_mode = self.upd_mode.currentData() or MODE_DOWNLOAD

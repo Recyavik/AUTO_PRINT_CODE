@@ -7,10 +7,10 @@ from pathlib import Path
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QFileDialog, QFormLayout, QGroupBox, QHBoxLayout,
-                               QLabel, QLineEdit, QPushButton, QSpinBox, QVBoxLayout)
+                               QLabel, QLineEdit, QPushButton, QSlider, QSpinBox, QVBoxLayout)
 from shiboken6 import isValid
 
-from .. import __version__, updater
+from .. import __version__, chime, updater
 from ..model import DEMO_OFF, Activity, Segment
 from ..store import MEDIA_DIR, Settings, existing, portable, resolve
 from . import screens, style
@@ -95,9 +95,26 @@ class SettingsDialog(QDialog):
         self.heads.setSpecialValueText("не предупреждать")
         self.heads.setValue(self.s.heads_up_min)
         form.addRow("Предупреждать заранее:", self.heads)
-        self.sound = QCheckBox("Звук при напоминании")
+        self.sound = QCheckBox("Звук напоминаний")
         self.sound.setChecked(self.s.sound)
-        form.addRow(self.sound)
+        self.sound.setToolTip("Мягкий колокольчик, когда появляется напоминание. Снимите галочку — напоминания без звука.")
+        self.volume = QSlider(Qt.Orientation.Horizontal)
+        self.volume.setRange(5, 100)
+        self.volume.setSingleStep(5)
+        self.volume.setValue(max(5, self.s.sound_volume))
+        self.volume.setToolTip("Громкость колокольчика")
+        self.volume.sliderReleased.connect(lambda: chime.play(self.volume.value()))
+        try_btn = QPushButton("▶ Проба")
+        try_btn.clicked.connect(lambda: chime.play(self.volume.value()))
+        self.sound.toggled.connect(self.volume.setEnabled)
+        self.sound.toggled.connect(try_btn.setEnabled)
+        self.volume.setEnabled(self.s.sound)
+        try_btn.setEnabled(self.s.sound)
+        snd = QHBoxLayout()
+        snd.addWidget(self.sound)
+        snd.addWidget(self.volume, 1)
+        snd.addWidget(try_btn)
+        form.addRow(snd)
         self.toast = QCheckBox("Дублировать уведомлением Windows (оно появляется на основном мониторе)")
         self.toast.setChecked(self.s.windows_toast)
         form.addRow(self.toast)
@@ -157,6 +174,7 @@ class SettingsDialog(QDialog):
         s.heads_up_min = self.heads.value()
         s.lesson_min = self.lesson.value()
         s.sound = self.sound.isChecked()
+        s.sound_volume = self.volume.value()
         s.windows_toast = self.toast.isChecked()
         s.auto_update_check = self.auto_update.isChecked()
         s.theme = self.theme.currentData()

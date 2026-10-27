@@ -11,6 +11,7 @@ export interface AppState {
   everConnected: boolean;
   stopped: boolean;            // помощник выключен кнопкой ⏻ — не переподключаться
   autostart: boolean;          // помощник запускается вместе с Windows
+  monitors: { id: string; label: string }[];   // для настройки «Окно при запуске»
   version: string;
   settings: Settings | null;
   templates: Template[];
@@ -24,6 +25,7 @@ let state: AppState = {
   everConnected: false,
   stopped: false,
   autostart: false,
+  monitors: [],
   version: "",
   settings: null,
   templates: [],
@@ -86,7 +88,13 @@ function onMessage(m: ServerMsg): void {
     case "hello": {
       // правки, которые не дошли до помощника (связь пропадала), важнее его копии — досылаем
       const templates = m.templates.map((t) => pending.get(t.id)?.template ?? t);
-      set({ stopped: false, autostart: m.autostart, connected: true, everConnected: true, version: m.version, settings: m.settings, templates, engine: m.engine });
+      if (!placed) {
+        // один раз за открытие страницы (не при переподключении): окно — на выбранный монитор.
+        // Небольшая пауза — заголовок вкладки с меткой AutoPrintCode должен успеть появиться
+        placed = true;
+        if (m.settings.start_screen) setTimeout(() => send({ t: "placeWindow" }), 400);
+      }
+      set({ monitors: m.monitors ?? [], stopped: false, autostart: m.autostart, connected: true, everConnected: true, version: m.version, settings: m.settings, templates, engine: m.engine });
       flushAll();
       sounds.configure(m.settings);
       if (m.hotkeysFailed) toast(`Не удалось занять хоткеи: ${m.hotkeysFailed}. Смените их в настройках.`, "warn");
@@ -213,6 +221,8 @@ export function command(cmd: "toggle" | "restart" | "stop", fromButton = false):
   sounds.unlock();
   send({ t: "cmd", cmd, fromButton });
 }
+
+let placed = false;
 
 export function setAutostart(on: boolean): void {
   send({ t: "autostart", on });

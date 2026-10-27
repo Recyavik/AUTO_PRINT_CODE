@@ -15,6 +15,7 @@ export function SettingsDialog({ settings, onSave, onClose }: {
   const [tab, setTab] = useState<Tab>("hotkeys");
   const [s, setS] = useState<Settings>({ ...settings });
   const autostart0 = useApp((x) => x.autostart);
+  const monitors = useApp((x) => x.monitors);
   const [autostart, setAuto] = useState(autostart0);
   const set = <K extends keyof Settings>(k: K, v: Settings[K]) => setS((x) => ({ ...x, [k]: v }));
 
@@ -131,6 +132,17 @@ export function SettingsDialog({ settings, onSave, onClose }: {
             {check("minimize_on_button_start", "Сворачивать браузер при старте кнопкой (фокус вернётся в прошлое окно)")}
             {check("autopause_on_focus_change", "Пауза, если сменилось активное окно")}
             {check("guard_enabled", "Пауза, если во время печати нажата клавиша или кнопка мыши (случайная клавиша не попадёт в код)")}
+            <span title="Если окно случайно закрыли на мониторе демонстрации, при новом открытии оно встанет на выбранный монитор">
+              Окно при запуске:</span>
+            <select value={s.start_screen} onChange={(e) => set("start_screen", e.target.value)}
+              title="Переносится окно браузера, в котором открыта страница AutoPrintCode. Неподключённый монитор — откроется на основном.">
+              <option value="">Где было в прошлый раз</option>
+              <option value="primary">Основной монитор</option>
+              {monitors.map((m) => <option key={m.id} value={m.id}>{m.label}</option>)}
+              {s.start_screen && s.start_screen !== "primary" && !monitors.some((m) => m.id === s.start_screen) && (
+                <option value={s.start_screen}>{s.start_screen} (сейчас не подключён)</option>
+              )}
+            </select>
             {check("auto_advance", "По окончании переходить к следующему блоку кода")}
             <label className="check full" title="Помощник стартует при входе в Windows без окна — останется открыть приложение AutoPrintCode">
               <input type="checkbox" checked={autostart} onChange={(e) => setAuto(e.target.checked)} />

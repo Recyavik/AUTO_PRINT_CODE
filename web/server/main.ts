@@ -19,6 +19,7 @@ import { typingText } from "../shared/textprint.ts";
 import { Engine } from "./engine.ts";
 import { InputHooks } from "./input.ts";
 import { log, LOG_FILE } from "./log.ts";
+import { enableDpiAwareness, findPageWindow, listMonitors, placeWindow } from "./screens.ts";
 import { DATA_DIR, Store, WEB_DIR } from "./store.ts";
 import { checkUpdate, installUpdate } from "./update.ts";
 import * as w from "./win32.ts";
@@ -55,6 +56,8 @@ function hardExit(): never {
   throw new Error("unreachable");
 }
 process.on("unhandledRejection", (e) => log("error", `Необработанное исключение: ${(e as Error)?.stack ?? e}`));
+
+enableDpiAwareness();   // координаты мониторов — в настоящих пикселях (масштаб 150–225 %)
 
 if (process.platform !== "win32") {
   console.error("Помощник AutoPrintCode работает только в Windows (использует WinAPI SendInput).");
@@ -307,6 +310,12 @@ function onClient(ws: WebSocket, msg: ClientMsg): void {
       setAutostart(msg.on);
       broadcast({ t: "autostart", on: getAutostart() });
       break;
+    case "placeWindow":
+      if (s.start_screen) {
+        const label = placeWindow(findPageWindow(OWN_TITLE_MARK), s.start_screen);
+        if (label) log("info", `Окно страницы перенесено: ${label}`);
+      }
+      break;
     case "pauseHotkeys":
       hotkeysPaused = msg.on;
       applySettings();
@@ -405,7 +414,7 @@ wss.on("error", () => {});
 wss.on("connection", (ws) => {
   clients.add(ws);
   send(ws, { t: "hello", version: VERSION, settings: s, templates: store.templates, engine: engineStatus(), hotkeysFailed,
-    autostart: getAutostart() });
+    autostart: getAutostart(), monitors: listMonitors().map(({ id, label }) => ({ id, label })) });
   if (store.warning) send(ws, { t: "notify", text: store.warning, level: "warn" });
   ws.on("error", (e) => log("warn", `Соединение со страницей: ${e.message}`));
   ws.on("message", (data) => {
