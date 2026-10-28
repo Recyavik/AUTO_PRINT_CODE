@@ -3,6 +3,7 @@
 Пульт видео (PlayerPanel): сначала, −10 с, пауза/играть, +10 с, полоса перемотки (щелчок — сразу туда),
 время, громкость и «Убрать». Пульт перерыва (BreakPanel): крупный отсчёт и полоса, −1 мин, пауза/продолжить,
 +1 мин, «Заново» и «Убрать» — отсчёт на заставке у зрителей меняется вместе с ним.
+Пульт занавеса (CurtainPanel): только «Убрать занавес» — вверху монитора управления, чтобы не закрывать другие пульты.
 Фокус пульт не забирает; его можно перетащить мышью за свободное место — позиция (общая для обоих пультов)
 запоминается относительно монитора управления, как у карточек напоминаний.
 """
@@ -340,3 +341,23 @@ class BreakPanel(_Remote):
     def closeEvent(self, e) -> None:
         self._timer.stop()
         super().closeEvent(e)
+
+
+class CurtainPanel(_Remote):
+    """Пульт экстренного занавеса: одна кнопка «Убрать»; стоит вверху монитора управления (не на месте других пультов)."""
+
+    def __init__(self, screen: QScreen, hotkey: str) -> None:
+        super().__init__("break", "ЗАНАВЕС НА ЭКРАНЕ ДЕМОНСТРАЦИИ", "зрители видят «Сейчас продолжим»", screen, None)
+        row = QHBoxLayout()
+        hint = QLabel(f"Убрать — кнопкой или {hotkey}" if hotkey else "Убрать — кнопкой", objectName="time")
+        self.stop_btn = self._button("■ Убрать занавес", "Открыть экран демонстрации зрителям",
+                                     self.stop_requested.emit, "ok")
+        row.addWidget(hint, 1)
+        row.addWidget(self.stop_btn)
+        self.lay.addLayout(row)
+        self._fix_buttons(self.stop_btn)
+
+    def place(self) -> None:
+        self.adjustSize()
+        area = self.screen_.availableGeometry()
+        self.move(area.center().x() - self.width() // 2, area.top() + MARGIN)

@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (QApplication, QFileDialog, QFrame, QGridLayout, Q
 from shiboken6 import isValid
 
 from .. import APP_NAME, __version__, chime, updater
+from ..hotkey import GlobalHotkey
 from ..model import DEMO_NONE, DEMO_ON, DEMO_TEXT, Activity, Plan, Segment, State, default_plan, fmt_left, lessons, \
     parse_time, plan_from, plan_to
 from ..scheduler import Scheduler
@@ -24,8 +25,8 @@ from .style import tabular_digits
 from .editor import PlanEditor
 from .lessons import LessonPanel, TimelineBar
 from .notify import Notifier, parse_pos
-from .overlay import BreakOverlay, MediaOverlay, is_video
-from .player import BreakPanel, PlayerPanel
+from .overlay import BreakOverlay, CurtainOverlay, MediaOverlay, is_video
+from .player import BreakPanel, CurtainPanel, PlayerPanel
 from .settings_dialog import SettingsDialog
 
 log = logging.getLogger("webinar")
@@ -152,7 +153,8 @@ class MainWindow(QMainWindow):
         self.media: MediaOverlay | None = None        # видео/картинка активности на экране демонстрации
         self.player_panel: PlayerPanel | None = None  # пульт этого видео на мониторе управления
         self.break_panel: BreakPanel | None = None    # пульт перерыва (вместо карточки с отсчётом)
-        self._break_index = -1                        # какой блок-перерыв сейчас на заставке (-1 — вне расписания)
+        self.curtain: CurtainOverlay | None = None    # экстренный занавес — поверх всего на экране демонстрации
+        self.curtain_panel: CurtainPanel | None = None
         self.rows: list[AgendaRow] = []
         self.lesson_panels: list[LessonPanel] = []
         self._quitting = False
@@ -163,7 +165,6 @@ class MainWindow(QMainWindow):
         self.scheduler.tick.connect(self._on_tick)
         self.scheduler.heads_up.connect(lambda seg: self._remind(seg, True))
         self.scheduler.block_started.connect(lambda seg: self._remind(seg, False))
-        self.scheduler.break_started.connect(self._show_break)
         self.scheduler.finished.connect(self._on_finished)
         self.notifier = Notifier(lambda: screens.control_screen(self.settings), clock)
         # перерыв уже идёт — у ведущего его пульт, карточка «сейчас» не нужна (и после «Напомнить через минуту»)
@@ -176,6 +177,8 @@ class MainWindow(QMainWindow):
 
         self._build()
         self._build_tray()
+        self.curtain_key: GlobalHotkey | None = None
+        self._register_curtain_key()
         self._style_theme()
         self._fill_plans()
         if settings.window_geometry:
@@ -294,6 +297,9 @@ class MainWindow(QMainWindow):
                                  "Повторное нажатие — убрать. Видео выбирается в ⚙ Настройках.")
         self.eyes_btn.clicked.connect(self._toggle_eyes)
         ll.addWidget(self.eyes_btn)
+        self.curtain_btn = QPushButton("🎭 Занавес")      # подпись и подсказка с клавишей — _register_curtain_key
+        self.curtain_btn.clicked.connect(self._toggle_curtain)
+        ll.addWidget(self.curtain_btn)
 
         self.run_btn = QPushButton("▶ Вести эфир", objectName="primary")
         self.run_btn.setCheckable(True)
@@ -352,6 +358,7 @@ class MainWindow(QMainWindow):
         self.tray_break = menu.addMenu("☕ Перерыв сейчас")
         self.tray_break.aboutToShow.connect(self._fill_tray_break)
         menu.addAction("👁 Зарядка сейчас", self.start_eyes)
+        self.tray_curtain = menu.addAction("🎭 Занавес", self._toggle_curtain)
         menu.addAction("Убрать с экрана демонстрации", self._hide_demo)
         menu.addAction("Убрать все напоминания", self.notifier.clear)
         menu.addSeparator()
@@ -602,10 +609,8 @@ class MainWindow(QMainWindow):
         return existing(a.media) or (existing(self.settings.eyes_media) if a.kind == "eyes" else "")
 
     def _show_break(self, seg: Segment) -> None:
-        if self.overlay is not None and seg.index >= 0 and self._break_index == seg.index:
-            return      # этот перерыв уже на экране (начали заранее — «☕ Начать перерыв»): пауза и ±мин остаются
-        self._hide_demo()
-        self._break_index = seg.index
+        """Заставка перерыва — только по кнопке ведущего; убирает её тоже только ведущий («■ Убрать» на пульте)."""
+        old = self._on_demo()
         image = existing(seg.activity.media) or existing(self.settings.break_image)
         self.overlay = BreakOverlay(screens.demo_screen(self.settings), seg.end, self.clock, image, seg.activity.name,
                                     self.settings.break_text_color)
@@ -613,6 +618,7 @@ class MainWindow(QMainWindow):
         o.closed.connect(lambda: self.overlay is o and setattr(self, "overlay", None))
         o.show()
         o.raise_()
+        self._close_later(old)
         self._show_break_panel(o)
         log.info("Перерыв: заставка до %s", f"{seg.end:%H:%M}")
 
@@ -641,21 +647,25 @@ class MainWindow(QMainWindow):
     def _start_activity(self, seg: Segment) -> None:
         """Кнопка действия в напоминании: перерыв — заставка, у активности с файлом — файл на экран демонстрации."""
         if seg.activity.breaks:
-            if self.overlay is None:
-                self._show_break(seg)
+            if self.overlay is None:      # перерыв уже на экране (начали раньше) — его пауза и ±мин остаются
+                # полная длительность — с момента нажатия: начали раньше или позже расписания — перерыв не короче
+                now = self.clock()
+                self._show_break(Segment(seg.index, seg.activity, now, now + timedelta(minutes=seg.activity.min)))
+                self._sync_break_btn()
             return
         path = self.media_of(seg)
         if path:
             self._show_media(path)
 
     def _show_media(self, path: str) -> None:
-        """Видео или картинка — на весь экран демонстрации (видео само закроется в конце)."""
-        self._hide_demo()
+        """Видео или картинка — на весь экран демонстрации; остаётся, пока ведущий не уберёт («■ Убрать»)."""
+        old = self._on_demo()
         self.media = MediaOverlay(screens.demo_screen(self.settings), path)
         m = self.media
         m.closed.connect(lambda: self.media is m and setattr(self, "media", None))
         m.show()
         m.raise_()
+        self._close_later(old)
         if m.player is not None:
             self._show_player(m, Path(path).stem)
         self._sync_break_btn()
@@ -728,9 +738,11 @@ class MainWindow(QMainWindow):
         self.settings.save()
 
     def _sync_break_btn(self) -> None:
-        for btn, on, label in ((self.break_btn, self.overlay is not None, "☕ Перерыв сейчас"),
-                               (self.eyes_btn, self.media is not None, "👁 Зарядка сейчас")):
-            text = "■ Убрать с экрана" if on else label
+        for btn, on, label, off in ((self.break_btn, self.overlay is not None, "☕ Перерыв сейчас", "■ Убрать с экрана"),
+                                    (self.eyes_btn, self.media is not None, "👁 Зарядка сейчас", "■ Убрать с экрана"),
+                                    (self.curtain_btn, self.curtain is not None, self._curtain_text(),
+                                     "■ Убрать занавес")):
+            text = off if on else label
             if btn.text() != text:
                 btn.setText(text)
 
@@ -750,6 +762,70 @@ class MainWindow(QMainWindow):
         if self.overlay is not None:
             o, self.overlay = self.overlay, None
             o.close()
+        self._sync_break_btn()
+
+    def _on_demo(self) -> list:
+        """Что сейчас на экране демонстрации (заставка, видео, занавес) — убрать уже после показа нового."""
+        return [w for w in (self.overlay, self.media, self.curtain) if w is not None]
+
+    @staticmethod
+    def _close_later(old: list) -> None:
+        """Новое уже на экране — теперь закрыть прежнее: между ними зрители не увидят, что под заставками."""
+        for w in old:
+            if isValid(w):
+                w.close()
+
+    # ---- экстренный занавес
+    def _register_curtain_key(self) -> None:
+        """Клавиша занавеса из настроек — общая для Windows: работает и когда активен PowerPoint или окно эфира."""
+        if self.curtain_key is not None:
+            self.curtain_key.unregister()
+        key = self.curtain_key = GlobalHotkey(self.settings.curtain_key, self._toggle_curtain)
+        if self.settings.curtain_key and not key.ok:
+            self.tray.showMessage(APP_NAME, f"Клавиша занавеса {key.label or self.settings.curtain_key} не работает: "
+                                  "её заняла другая программа. Выберите другую в ⚙ Настройках.", make_icon(), 8000)
+        how = f"Работает и из PowerPoint: {key.label}. " if key.ok else ""
+        self.curtain_btn.setToolTip("Экстренно закрыть экран демонстрации заставкой «Сейчас продолжим» — без отсчёта.\n"
+                                    f"{how}Повторно (или «Убрать» на пульте) — открыть. Клавиша — в ⚙ Настройках.")
+        self.tray_curtain.setText(f"🎭 Занавес ({key.label})" if key.ok else "🎭 Занавес")
+        self._sync_break_btn()
+
+    def _curtain_text(self) -> str:
+        key = self.curtain_key
+        return f"🎭 Занавес · {key.label}" if key is not None and key.ok else "🎭 Занавес"
+
+    def _toggle_curtain(self) -> None:
+        if self.curtain is not None:
+            self.hide_curtain()
+        else:
+            self.show_curtain()
+
+    def show_curtain(self) -> None:
+        """Экстренно закрыть экран демонстрации «Сейчас продолжим» — поверх всего (перерыв или видео под ним остаются)."""
+        if self.curtain is not None:
+            return
+        c = CurtainOverlay(screens.demo_screen(self.settings), existing(self.settings.break_image),
+                           self.settings.break_text_color)
+        self.curtain = c
+        c.closed.connect(lambda: self.curtain is c and setattr(self, "curtain", None))
+        c.show()
+        c.raise_()
+        panel = CurtainPanel(screens.control_screen(self.settings), self.curtain_key.label if self.curtain_key.ok else "")
+        self.curtain_panel = panel
+        panel.stop_requested.connect(self.hide_curtain)
+        c.closed.connect(panel.close)
+        c.closed.connect(self._sync_break_btn)
+        panel.destroyed.connect(lambda: self.curtain_panel is panel and setattr(self, "curtain_panel", None))
+        panel.place()
+        panel.show()
+        self._sync_break_btn()
+        log.info("Занавес на экране демонстрации")
+
+    def hide_curtain(self) -> None:
+        if self.curtain is not None:
+            c, self.curtain = self.curtain, None
+            c.close()
+            log.info("Занавес убран")
         self._sync_break_btn()
 
     def _hide_demo(self) -> None:
@@ -796,7 +872,7 @@ class MainWindow(QMainWindow):
         self._on_tick(self.scheduler.state())
 
     def _on_tick(self, st: State) -> None:
-        self._sync_break_btn()   # заставку могли убрать щелчком по ней или из напоминания
+        self._sync_break_btn()   # заставку могли убрать с пульта или из напоминания
         now = self.clock()
         self.clock_lbl.setText(f"{now:%H:%M:%S}")
         self.today.setText(now.strftime("%d.%m.%Y"))
@@ -923,7 +999,7 @@ class MainWindow(QMainWindow):
         self.overall.update()
         for c in self.notifier.cards:
             c.restyle()
-        for panel in (self.player_panel, self.break_panel):
+        for panel in (self.player_panel, self.break_panel, self.curtain_panel):
             if panel is not None and isValid(panel):
                 panel.restyle()
         log.info("Тема: %s", style.THEME_NAMES[style.current])
@@ -963,6 +1039,7 @@ class MainWindow(QMainWindow):
         before = copy.deepcopy(self.settings)
         dlg = SettingsDialog(self.settings, self, self.update_release, self.run_btn.isChecked)
         dlg.install_started.connect(self.quit_app)     # установщик закроет и снова откроет таймер
+        self.curtain_key.unregister()                  # иначе нажатое в поле клавиши сочетание включало бы занавес
         ok = dlg.exec()
         if dlg.release is not None:
             self._on_update_found(dlg.release)
@@ -980,6 +1057,7 @@ class MainWindow(QMainWindow):
             self.notifier.anchor = parse_pos(self.settings.note_pos)
             self.notifier.layout()
             self._rebuild_agenda()               # продолжительность урока — в заголовках панелей
+        self._register_curtain_key()             # прежняя или новая клавиша занавеса — снова работает
 
     def _show(self) -> None:
         self.showNormal()
@@ -999,6 +1077,8 @@ class MainWindow(QMainWindow):
             return
         self.notifier.clear()
         self._hide_demo()
+        self.hide_curtain()
+        self.curtain_key.unregister()
         self.tray.hide()
         super().closeEvent(e)
 

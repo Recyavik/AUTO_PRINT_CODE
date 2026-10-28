@@ -4,8 +4,8 @@
 События (каждое — один раз за эфир):
   * heads_up(seg)      — за settings.heads_up_min минут до блока с напоминанием;
   * block_started(seg) — начался блок с напоминанием (или перерыв);
-  * break_started(seg) — начался перерыв: заставку показать (убирает её ведущий — кнопкой на пульте);
   * finished()         — эфир завершён.
+Сам планировщик ничего не показывает зрителям: заставку перерыва и видео включает ведущий кнопкой в напоминании.
 Если эфир включили посреди блока, о текущем блоке тоже сообщается (предупреждения о прошлом — нет).
 Пересчёт того же шаблона во время эфира (другое время старта, правка) не повторяет уже отправленные события.
 """
@@ -23,7 +23,6 @@ class Scheduler(QObject):
     tick = Signal(object)              # State — для табло
     heads_up = Signal(object)          # Segment
     block_started = Signal(object)     # Segment
-    break_started = Signal(object)     # Segment
     finished = Signal()
 
     def __init__(self, clock: Callable[[], datetime] = datetime.now, parent=None) -> None:
@@ -91,8 +90,6 @@ class Scheduler(QObject):
 
         if cur is not None and self._once("start", cur.index):
             self._once("head", cur.index)        # предупреждать о начавшемся блоке поздно
-            if cur.activity.breaks:
-                self.break_started.emit(cur)
             if cur.activity.reminds or cur.activity.breaks:
                 self.block_started.emit(cur)
 

@@ -3,7 +3,9 @@
 Заставка перерыва — на весь монитор, поверх всего, что там показано: фон (картинка, растянутая
 с обрезкой краёв, или встроенный фиолетовый), название («ПЕРЕРЫВ») и крупный обратный отсчёт
 шрифтом Furore — как на слайдах 1Т. Когда время вышло — «ПРОДОЛЖАЕМ», ниже «ПЕРЕРЫВ ЗАВЕРШЁН»; заставка остаётся, пока её
-не уберут («■ Убрать» на пульте перерыва, щелчком по ней или Esc), чтобы не исчезнуть посреди фразы ведущего.
+не уберут кнопкой «■ Убрать» на пульте, чтобы не исчезнуть посреди фразы ведущего.
+Заставка и видео — «занавес»: пока они на экране, ведущий спокойно готовит слайды за ними; зрители этого не видят.
+Экстренный занавес (CurtainOverlay) — тот же фон и «СЕЙЧАС ПРОДОЛЖИМ», без отсчёта: быстро закрыть то, что не для зрителей.
 """
 from __future__ import annotations
 
@@ -55,7 +57,7 @@ def is_video(path: str) -> bool:
 
 
 class _ScreenWindow(QWidget):
-    """Окно на весь монитор демонстрации поверх всего. Щелчок или Esc — убрать."""
+    """Окно на весь монитор демонстрации поверх всего. Убирается только кнопкой на пульте (не случайным щелчком)."""
     closed = Signal()
 
     def __init__(self, screen: QScreen) -> None:
@@ -66,16 +68,54 @@ class _ScreenWindow(QWidget):
         self.setGeometry(screen.geometry())
         self.setCursor(Qt.CursorShape.BlankCursor)
 
-    def mousePressEvent(self, _e) -> None:
-        self.close()
-
-    def keyPressEvent(self, e) -> None:
-        if e.key() == Qt.Key.Key_Escape:
-            self.close()
-
     def closeEvent(self, e) -> None:
         self.closed.emit()
         super().closeEvent(e)
+
+
+def paint_backdrop(p: QPainter, w: float, h: float, pixmap: QPixmap) -> None:
+    """Фон заставки: картинка, растянутая с обрезкой краёв, или встроенный фиолетовый 1Т."""
+    if not pixmap.isNull():
+        scaled = pixmap.scaled(int(w), int(h), Qt.AspectRatioMode.KeepAspectRatioByExpanding,
+                               Qt.TransformationMode.SmoothTransformation)
+        p.drawPixmap(int((w - scaled.width()) / 2), int((h - scaled.height()) / 2), scaled)
+        return
+    r = QRectF(0, 0, w, h)
+    g = QLinearGradient(0, 0, w, h)
+    g.setColorAt(0, QColor("#0B0A3A"))
+    g.setColorAt(1, QColor("#3A0F5E"))
+    p.fillRect(r, g)
+    glow = QRadialGradient(w * 0.8, h * 0.1, w * 0.6)
+    glow.setColorAt(0, QColor(142, 77, 255, 90))
+    glow.setColorAt(1, QColor(142, 77, 255, 0))
+    p.fillRect(r, glow)
+
+
+def paint_title(p: QPainter, rect: QRectF, s: str, px: float, color: QColor) -> None:
+    """Надпись как на слайдах 1Т: по центру, с лёгкой тенью для читаемости на любом фоне."""
+    p.setFont(title_font(px))
+    p.setPen(QColor(0, 0, 0, 120))
+    p.drawText(rect.translated(px * 0.04, px * 0.05), Qt.AlignmentFlag.AlignCenter, s)
+    p.setPen(color)
+    p.drawText(rect, Qt.AlignmentFlag.AlignCenter, s)
+
+
+class CurtainOverlay(_ScreenWindow):
+    """Экстренный занавес: фон заставки и «СЕЙЧАС ПРОДОЛЖИМ» — без отсчёта, пока ведущий не уберёт."""
+    TEXT = "СЕЙЧАС ПРОДОЛЖИМ"
+
+    def __init__(self, screen: QScreen, image: str = "", text_color: str = "#FFFFFF") -> None:
+        super().__init__(screen)
+        self.text_color = QColor(text_color) if QColor.isValidColorName(text_color) else QColor("#FFFFFF")
+        self.pixmap = QPixmap(image) if image else QPixmap()
+
+    def paintEvent(self, _e) -> None:
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+        w, h = self.width(), self.height()
+        paint_backdrop(p, w, h, self.pixmap)
+        paint_title(p, QRectF(0, h * 0.40, w, h * 0.18), self.TEXT, h * 0.09, self.text_color)
 
 
 class BreakOverlay(_ScreenWindow):
@@ -147,30 +187,12 @@ class BreakOverlay(_ScreenWindow):
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
-        r = QRectF(self.rect())
-        w, h = r.width(), r.height()
-        if not self.pixmap.isNull():
-            scaled = self.pixmap.scaled(self.size(), Qt.AspectRatioMode.KeepAspectRatioByExpanding,
-                                        Qt.TransformationMode.SmoothTransformation)
-            p.drawPixmap(int((w - scaled.width()) / 2), int((h - scaled.height()) / 2), scaled)
-        else:
-            g = QLinearGradient(0, 0, w, h)
-            g.setColorAt(0, QColor("#0B0A3A"))
-            g.setColorAt(1, QColor("#3A0F5E"))
-            p.fillRect(r, g)
-            glow = QRadialGradient(w * 0.8, h * 0.1, w * 0.6)
-            glow.setColorAt(0, QColor(142, 77, 255, 90))
-            glow.setColorAt(1, QColor(142, 77, 255, 0))
-            p.fillRect(r, glow)
+        w, h = self.width(), self.height()
+        paint_backdrop(p, w, h, self.pixmap)
 
-        # как на слайде «ПЕРЕРЫВ / 10 МИН»: белые надписи по центру, лёгкая тень для читаемости на любом фоне
+        # как на слайде «ПЕРЕРЫВ / 10 МИН»; цвет — из настроек заставки, не из темы окна таймера
         def text(rect: QRectF, s: str, px: float) -> None:
-            p.setFont(title_font(px))
-            p.setPen(QColor(0, 0, 0, 120))
-            p.drawText(rect.translated(px * 0.04, px * 0.05), Qt.AlignmentFlag.AlignCenter, s)
-            # цвет — из настроек заставки, не из темы окна таймера (в светлой теме текст был тёмным и пропадал)
-            p.setPen(self.text_color)
-            p.drawText(rect, Qt.AlignmentFlag.AlignCenter, s)
+            paint_title(p, rect, s, px, self.text_color)
 
         if self.left().total_seconds() > 0:
             text(QRectF(0, h * 0.30, w, h * 0.16), self.title, h * 0.075)
@@ -182,7 +204,7 @@ class BreakOverlay(_ScreenWindow):
 
 
 class MediaOverlay(_ScreenWindow):
-    """Файл активности на весь монитор демонстрации: видео (со звуком, само закрывается в конце) или картинка."""
+    """Файл активности на весь монитор демонстрации: видео (со звуком; в конце — стоп-кадр) или картинка."""
 
     def __init__(self, screen: QScreen, path: str) -> None:
         super().__init__(screen)
@@ -222,7 +244,9 @@ class MediaOverlay(_ScreenWindow):
             log.warning("Видео не открылось: %s", self.player.errorString())
         if status == QMediaPlayer.MediaStatus.EndOfMedia:
             log.info("Видео закончилось (%d с)", self.player.position() // 1000)
-            self.close()            # видео кончилось — экран демонстрации снова виден
+            # экран не открывается сам: последний кадр стоит, пока ведущий не уберёт видео кнопкой на пульте
+            self.player.setPosition(max(0, self.player.duration() - 100))
+            self.player.pause()
 
     def closeEvent(self, e) -> None:
         if self.player is not None:

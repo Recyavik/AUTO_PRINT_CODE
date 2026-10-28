@@ -6,12 +6,12 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QColor
+from PySide6.QtGui import QColor, QKeySequence
 from PySide6.QtWidgets import (QCheckBox, QColorDialog, QComboBox, QDialog, QFileDialog, QFormLayout, QGroupBox, QHBoxLayout,
-                               QLabel, QLineEdit, QPushButton, QSlider, QSpinBox, QVBoxLayout)
+                               QKeySequenceEdit, QLabel, QLineEdit, QPushButton, QSlider, QSpinBox, QVBoxLayout)
 from shiboken6 import isValid
 
-from .. import __version__, chime, updater
+from .. import __version__, chime, hotkey, updater
 from ..model import DEMO_OFF, Activity, Segment
 from ..store import MEDIA_DIR, Settings, existing, portable, resolve
 from . import screens, style
@@ -96,6 +96,27 @@ class SettingsDialog(QDialog):
         self.lesson.setToolTip("Предел каждой части занятия: до перерыва и после него (академический час — 45 мин).<br>"
                                "В редакторе шаблона минуты блока нельзя увеличить сверх него. Для всех шаблонов, у которых не задана своя.")
         form.addRow("Продолжительность урока:", self.lesson)
+
+        # клавиша экстренного занавеса: нажать нужное сочетание в поле
+        self.curtain_key = QKeySequenceEdit(QKeySequence.fromString(self.s.curtain_key, QKeySequence.SequenceFormat.PortableText))
+        self.curtain_key.setMaximumSequenceLength(1)
+        self.curtain_key.setToolTip("Щёлкните и нажмите клавишу или сочетание. Работает во всех программах, и в PowerPoint.")
+        self.curtain_key.keySequenceChanged.connect(self._check_curtain_key)
+        key_default = QPushButton("Scroll Lock")
+        key_default.setToolTip("Вернуть клавишу по умолчанию")
+        key_default.clicked.connect(lambda: self.curtain_key.setKeySequence(QKeySequence(Qt.Key.Key_ScrollLock)))
+        key_off = QPushButton("Выключить")
+        key_off.setToolTip("Без клавиши — занавес только кнопкой в окне таймера или в трее")
+        key_off.clicked.connect(self.curtain_key.clear)
+        krow = QHBoxLayout()
+        krow.addWidget(self.curtain_key, 1)
+        krow.addWidget(key_default)
+        krow.addWidget(key_off)
+        form.addRow("Клавиша занавеса:", krow)
+        self.curtain_hint = QLabel(objectName="hint")
+        self.curtain_hint.setWordWrap(True)
+        form.addRow(self.curtain_hint)
+        self._check_curtain_key()
 
         self.theme = QComboBox()
         for key, title in style.THEME_NAMES.items():
@@ -194,7 +215,26 @@ class SettingsDialog(QDialog):
         s.windows_toast = self.toast.isChecked()
         s.auto_update_check = self.auto_update.isChecked()
         s.theme = self.theme.currentData()
+        key = self._curtain_key_text()
+        if key is not None:                     # неподходящее сочетание не сохраняется — остаётся прежнее
+            s.curtain_key = key
         return s
+
+    def _curtain_key_text(self) -> str | None:
+        """Сочетание из поля («ScrollLock», «Ctrl+Alt+Z»); "" — выключено; None — не годится."""
+        text = self.curtain_key.keySequence().toString(QKeySequence.SequenceFormat.PortableText)
+        return text if not text or hotkey.parse(text) is not None else None
+
+    def _check_curtain_key(self) -> None:
+        key = self._curtain_key_text()
+        if key is None:
+            self.curtain_hint.setText("Такое сочетание мешало бы печатать. Нужна клавиша с Ctrl или Alt "
+                                      "(или одна из: Scroll Lock, Pause, F1–F24).")
+        elif key:
+            self.curtain_hint.setText("Экстренный занавес «Сейчас продолжим» на экран демонстрации — этой клавишей "
+                                      "из любой программы; ей же убрать.")
+        else:
+            self.curtain_hint.setText("Клавиша выключена: занавес — кнопкой «🎭 Занавес» в окне таймера или в трее.")
 
     def _test_note(self) -> None:
         now = datetime.now()

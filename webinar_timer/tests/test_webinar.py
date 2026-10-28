@@ -127,7 +127,6 @@ class SchedulerTest(unittest.TestCase):
         events: list[tuple[str, str]] = []
         s.heads_up.connect(lambda seg: events.append(("head", seg.activity.name)))
         s.block_started.connect(lambda seg: events.append(("start", seg.activity.name)))
-        s.break_started.connect(lambda seg: events.append(("break+", seg.activity.name)))
         s.finished.connect(lambda: events.append(("finished", "")))
         s.set_plan(PLAN, DAY)
         return s, clock, events
@@ -143,7 +142,7 @@ class SchedulerTest(unittest.TestCase):
         self.walk(s, clock, at("11:20"))
         self.assertEqual(events, [
             ("head", "Зарядка"), ("start", "Зарядка"),            # за минуту и в начале
-            ("head", "ПЕРЕРЫВ"), ("break+", "ПЕРЕРЫВ"), ("start", "ПЕРЕРЫВ"),
+            ("head", "ПЕРЕРЫВ"), ("start", "ПЕРЕРЫВ"),               # только напоминания — заставку включает ведущий
             ("head", "Выводы"),                                   # за минуту до конца перерыва — пора возвращаться
             ("start", "Выводы"),                                  # конец перерыва — начало «Выводов»
             ("finished", ""),
@@ -157,7 +156,7 @@ class SchedulerTest(unittest.TestCase):
     def test_started_late_reports_current_block_only(self):
         s, clock, events = self.make(at("11:12"))          # посреди перерыва (11:10–11:14)
         s.start()
-        self.assertEqual(events, [("break+", "ПЕРЕРЫВ"), ("start", "ПЕРЕРЫВ")], "о прошлых блоках — ничего")
+        self.assertEqual(events, [("start", "ПЕРЕРЫВ")], "о прошлых блоках — ничего")
 
     def test_stop_silences(self):
         s, clock, events = self.make(at("11:11"))
@@ -172,13 +171,13 @@ class SchedulerTest(unittest.TestCase):
         (иначе — второе напоминание и пересозданная заставка перерыва: пауза и ±мин ведущего терялись)."""
         s, clock, events = self.make(at("11:11"))          # идёт перерыв
         s.start()
-        self.assertEqual(events, [("break+", "ПЕРЕРЫВ"), ("start", "ПЕРЕРЫВ")])
+        self.assertEqual(events, [("start", "ПЕРЕРЫВ")])
         s.set_plan(PLAN, DAY)                               # тот же шаблон — пересчёт
         s.start()                                           # окно включает эфир снова — он уже идёт
-        self.assertEqual(len(events), 2, "ничего не повторилось")
+        self.assertEqual(len(events), 1, "ничего не повторилось")
         other = Plan("Другой", "11:00", [Activity("ПЕРЕРЫВ", DEMO_NONE, 30)])
         s.set_plan(other, DAY)                              # другой шаблон — с чистого листа
-        self.assertEqual(events[-2:], [("break+", "ПЕРЕРЫВ"), ("start", "ПЕРЕРЫВ")])
+        self.assertEqual(events[-1:], [("start", "ПЕРЕРЫВ")])
 
     def test_heads_up_off(self):
         s, clock, events = self.make(at("10:58"))
@@ -338,6 +337,12 @@ class _WindowBase(unittest.TestCase):
     def tearDown(self):
         self.win.quit_app()
 
+    def start_break_from_card(self):
+        """«☕ Начать перерыв» в напоминании о перерыве."""
+        card = next(c for c in self.win.notifier.cards if c.seg.activity.breaks)
+        card.next.emit(card)
+        return self.win.overlay
+
     def walk(self, until: datetime):
         while self.clock.t < until:
             self.clock.t += timedelta(seconds=15)
@@ -470,7 +475,8 @@ class WindowsTest(_WindowBase):
     def test_break_overlay_on_demo_screen_stays_until_hidden(self):
         self.win.run_btn.setChecked(True)
         self.walk(at("11:10"))                        # перерыв 11:10–11:14
-        o = self.win.overlay
+        self.assertIsNone(self.win.overlay, "по расписанию — только напоминание, заставку включает ведущий")
+        o = self.start_break_from_card()
         self.assertIsNotNone(o)
         self.assertEqual(o.geometry(), screens.demo_screen(self.win.settings).geometry(), "весь экран демонстрации")
         self.assertEqual(o.left_text(), "04:00")
@@ -482,6 +488,12 @@ class WindowsTest(_WindowBase):
         self.assertTrue(screens.control_screen(self.win.settings).availableGeometry().contains(panel.geometry()))
         panel.refresh()
         self.assertEqual(panel.big.text(), "00:00")
+        from PySide6.QtCore import Qt
+        from PySide6.QtTest import QTest
+        QTest.mouseClick(o, Qt.MouseButton.LeftButton)  # случайный щелчок и Esc по экрану демонстрации — не убирают
+        QTest.keyClick(o, Qt.Key.Key_Escape)
+        self.assertTrue(o.isVisible())
+        self.assertIs(self.win.overlay, o)
         panel.stop_btn.click()                        # «Убрать» на пульте
         self.assertIsNone(self.win.overlay)
         self.assertFalse(panel.isVisible(), "пульт ушёл вместе с заставкой")
@@ -596,6 +608,103 @@ class WindowsTest(_WindowBase):
         self.assertEqual(o.left_text(), "ПРОДОЛЖАЕМ", "в конец — время вышло")
         self.win._hide_break()
 
+    def test_emergency_curtain(self):
+        """«🎭 Занавес»: экран демонстрации закрыт «Сейчас продолжим», у ведущего — пульт «Убрать занавес»;
+        перерыв под занавесом остаётся; убирается только кнопкой (или той же клавишей)."""
+        from PySide6.QtCore import Qt
+        from PySide6.QtTest import QTest
+        self.win.start_break(5)
+        o = self.win.overlay
+        self.win.curtain_btn.click()
+        c, panel = self.win.curtain, self.win.curtain_panel
+        self.assertIsNotNone(c)
+        self.assertEqual(c.geometry(), screens.demo_screen(self.win.settings).geometry())
+        self.assertTrue(screens.control_screen(self.win.settings).availableGeometry().contains(panel.geometry()))
+        self.assertEqual(self.win.curtain_btn.text(), "■ Убрать занавес")
+        QTest.mouseClick(c, Qt.MouseButton.LeftButton)
+        QTest.keyClick(c, Qt.Key.Key_Escape)
+        self.assertTrue(c.isVisible(), "случайный щелчок и Esc не убирают")
+        panel.stop_btn.click()
+        self.assertIsNone(self.win.curtain)
+        self.assertFalse(c.isVisible() or panel.isVisible())
+        self.assertIs(self.win.overlay, o, "перерыв под занавесом остался")
+        self.assertTrue(o.isVisible())
+        self.assertEqual(self.win.curtain_btn.text(), self.win._curtain_text())
+        self.assertIn("Занавес", self.win.curtain_btn.text())
+        self.win._hide_break()
+
+    def test_curtain_hotkey_toggles(self):
+        """Глобальная клавиша (сообщение WM_HOTKEY от Windows) включает и убирает занавес."""
+        import ctypes
+        from ctypes import wintypes
+        from PySide6.QtCore import QByteArray
+        from webinar import hotkey
+        key = self.win.curtain_key
+        msg = wintypes.MSG(None, hotkey.WM_HOTKEY, key.id, 0)
+        for expect in (True, False):
+            handled = key.nativeEventFilter(QByteArray(b"windows_dispatcher_MSG"), ctypes.addressof(msg))
+            self.assertTrue(handled[0])
+            app.processEvents()
+            self.assertEqual(self.win.curtain is not None, expect)
+        other = wintypes.MSG(None, hotkey.WM_HOTKEY, key.id + 100, 0)
+        self.assertFalse(key.nativeEventFilter(QByteArray(b"windows_generic_MSG"), ctypes.addressof(other))[0])
+
+    def test_curtain_key_parse(self):
+        """Клавиша занавеса: по умолчанию Scroll Lock; буква без Ctrl/Alt не годится (мешала бы печатать)."""
+        from webinar import hotkey
+        self.assertEqual(wstore.Settings().curtain_key, "ScrollLock")
+        self.assertEqual(hotkey.parse("ScrollLock"), (0, 0x91))
+        self.assertEqual(hotkey.parse("Ctrl+Alt+Z"), (hotkey.MOD_CONTROL | hotkey.MOD_ALT, ord("Z")))
+        self.assertEqual(hotkey.parse("F9"), (0, 0x78))
+        self.assertEqual(hotkey.parse("Shift+F12"), (hotkey.MOD_SHIFT, 0x7B))
+        for bad in ("", "Z", "Shift+Z", "Space", "Ctrl+Alt+Z, Ctrl+X"):
+            self.assertIsNone(hotkey.parse(bad), bad)
+
+    def test_curtain_key_from_settings(self):
+        """Клавишу занавеса меняют в ⚙ Настройках: подпись кнопки — новая; неподходящая не сохраняется."""
+        from PySide6.QtCore import Qt
+        from PySide6.QtGui import QKeySequence
+        dlg = SettingsDialog(self.win.settings, self.win)
+        self.assertEqual(dlg.result_settings().curtain_key, "ScrollLock")
+        dlg.curtain_key.setKeySequence(QKeySequence("Ctrl+Alt+K"))
+        self.assertEqual(dlg.result_settings().curtain_key, "Ctrl+Alt+K")
+        dlg.curtain_key.setKeySequence(QKeySequence(Qt.Key.Key_Q))
+        self.assertIn("мешало бы печатать", dlg.curtain_hint.text())
+        self.assertEqual(dlg.result_settings().curtain_key, "Ctrl+Alt+K", "буква без Ctrl/Alt — остаётся прежняя")
+        dlg.curtain_key.clear()
+        self.assertEqual(dlg.result_settings().curtain_key, "", "выключить")
+        dlg.deleteLater()
+
+        self.win.settings.curtain_key = "Ctrl+Alt+K"
+        self.win._register_curtain_key()
+        if self.win.curtain_key.ok:                          # сочетание может быть занято на этом компьютере
+            self.assertEqual(self.win.curtain_btn.text(), "🎭 Занавес · Ctrl+Alt+K")
+        self.win.settings.curtain_key = ""
+        self.win._register_curtain_key()
+        self.assertEqual(self.win.curtain_btn.text(), "🎭 Занавес")
+        self.assertFalse(self.win.curtain_key.ok)
+
+    def test_switching_demo_never_uncovers_screen(self):
+        """Зарядка → перерыв, занавес → перерыв: прежнее уходит только когда новое уже на экране (без мелькания)."""
+        from PySide6.QtGui import QColor, QImage
+        img = Path(wstore.DATA_DIR) / "eyes_swap.png"
+        q = QImage(32, 18, QImage.Format.Format_RGB32)
+        q.fill(QColor("green"))
+        q.save(str(img))
+        self.win._show_media(str(img))
+        self.win.show_curtain()
+        old_media, old_curtain = self.win.media, self.win.curtain
+        seen = []
+        for w in (old_media, old_curtain):
+            w.closed.connect(lambda: seen.append(self.win.overlay is not None and self.win.overlay.isVisible()))
+        self.win.start_break(5)
+        self.assertEqual(seen, [True, True], "в момент закрытия прежнего заставка перерыва уже видна")
+        self.assertIsNone(self.win.media)
+        self.assertIsNone(self.win.curtain)
+        self.assertEqual((self.win.eyes_btn.text(), self.win.curtain_btn.text()),
+                         ("👁 Зарядка сейчас", self.win._curtain_text()))
+        self.win._hide_break()
+
     def test_panel_stop_removes_its_own_screen(self):
         """«Убрать» на пульте закрывает свою заставку, даже если окно таймера уже «забыло» про неё."""
         self.win.start_break(5)
@@ -640,17 +749,35 @@ class WindowsTest(_WindowBase):
                          ["Теория · 10 мин", "Урок 2 · 2 мин"])
 
     def test_break_started_early_keeps_host_adjustments(self):
-        """«Далее ▶» на «скоро перерыв» — заставка раньше времени; в начале перерыва она та же (пауза не теряется)."""
+        """«☕ Начать перерыв» на «скоро перерыв» — заставка раньше времени, на всю длительность;
+        в начале перерыва по расписанию она та же (пауза не теряется)."""
         self.win.run_btn.setChecked(True)
         self.walk(at("11:09"))                               # перерыв 11:10–11:14, предупреждение за минуту
-        card = next(c for c in self.win.notifier.cards if c.seg.activity.breaks)
-        card.next.emit(card)                                 # «Далее ▶» — начать перерыв сейчас
-        o = self.win.overlay
+        o = self.start_break_from_card()
         self.assertIsNotNone(o)
+        self.assertEqual(o.left_text(), "04:00", "перерыв не короче из-за раннего начала")
         o.pause()
         self.walk(at("11:11"))                               # перерыв начался по расписанию
         self.assertIs(self.win.overlay, o, "та же заставка")
         self.assertTrue(o.paused, "пауза ведущего сохранилась")
+
+    def test_scheduled_break_never_starts_by_itself(self):
+        """Перерыв провели раньше кнопкой и убрали — в его время по расписанию заставка сама не появляется."""
+        self.win.run_btn.setChecked(True)
+        self.walk(at("11:08"))
+        self.win.start_break(2)                              # «☕ Перерыв сейчас» раньше расписания
+        self.win._hide_break()
+        self.walk(at("11:16"))                               # весь перерыв по расписанию прошёл
+        self.assertIsNone(self.win.overlay, "ничего не запустилось само")
+        self.assertFalse(self.win.break_panel is not None and self.win.break_panel.isVisible(), "и пульта нет")
+
+    def test_late_break_gets_full_length(self):
+        """Ведущий задержался — перерыв всё равно на всю длительность с момента нажатия."""
+        self.win.run_btn.setChecked(True)
+        self.walk(at("11:12"))                               # перерыв 11:10–11:14, ведущий задержался на 2 мин
+        o = self.start_break_from_card()
+        self.assertEqual(o.left_text(), "04:00", "полные 4 мин с момента нажатия")
+        self.win._hide_break()
 
     def test_snoozed_break_card_does_not_come_back_during_break(self):
         """«⏰ 1 мин» на «скоро перерыв», а перерыв уже идёт с пультом — карточка «сейчас» не появляется."""
@@ -662,7 +789,8 @@ class WindowsTest(_WindowBase):
         wnotify.SNOOZE_MS = 0
         try:
             self.win.notifier.snooze(card)
-            self.walk(at("11:11"))                           # перерыв начался — у ведущего пульт
+            self.win.start_break()                           # ведущий начал перерыв — у него пульт
+            self.walk(at("11:11"))
             app.processEvents()
             app.processEvents()
         finally:
@@ -674,7 +802,7 @@ class WindowsTest(_WindowBase):
         """Во время эфира поправили «Старт сегодня» на минуту — о текущем блоке второй раз не напоминает."""
         self.win.run_btn.setChecked(True)
         self.walk(at("11:11"))                               # идёт перерыв
-        o = self.win.overlay
+        o = self.start_break_from_card()
         o.add(timedelta(minutes=2))
         self.win.start_edit.setTime(self.win.start_edit.time().addSecs(60))   # 11:01 — перерыв всё ещё идёт
         self.assertIs(self.win.overlay, o, "заставка не пересоздана — +2 мин ведущего на месте")
@@ -810,6 +938,10 @@ class WindowsTest(_WindowBase):
         self.assertIsNotNone(panel)
         self.assertTrue(screens.control_screen(self.win.settings).availableGeometry().contains(panel.geometry()))
         self.assertEqual(panel.title.text(), "eyes")
+        from PySide6.QtMultimedia import QMediaPlayer
+        self.win.media._on_status(QMediaPlayer.MediaStatus.EndOfMedia)
+        self.assertIsNotNone(self.win.media, "видео кончилось — стоп-кадр, экран не открывается сам")
+        self.assertTrue(self.win.media.isVisible())
         panel.stop_btn.click()
         app.sendPostedEvents(None, QEvent.Type.DeferredDelete)
         self.assertIsNone(self.win.media)
@@ -901,6 +1033,7 @@ class WindowsTest(_WindowBase):
     def test_stop_clears_everything(self):
         self.win.run_btn.setChecked(True)
         self.walk(at("11:11"))
+        self.assertIsNotNone(self.start_break_from_card())
         self.win.run_btn.setChecked(False)
         self.assertEqual((self.win.notifier.cards, self.win.overlay), ([], None))
         self.walk(at("11:20"))
