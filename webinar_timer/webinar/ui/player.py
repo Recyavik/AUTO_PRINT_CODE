@@ -346,8 +346,8 @@ class BreakPanel(_Remote):
 class CurtainPanel(_Remote):
     """Пульт экстренного занавеса: одна кнопка «Убрать»; стоит вверху монитора управления (не на месте других пультов)."""
 
-    def __init__(self, screen: QScreen, hotkey: str) -> None:
-        super().__init__("break", "ЗАНАВЕС НА ЭКРАНЕ ДЕМОНСТРАЦИИ", "зрители видят «Сейчас продолжим»", screen, None)
+    def __init__(self, screen: QScreen, hotkey: str, text: str) -> None:
+        super().__init__("break", "ЗАНАВЕС НА ЭКРАНЕ ДЕМОНСТРАЦИИ", f"зрители видят «{text}»", screen, None)
         row = QHBoxLayout()
         hint = QLabel(f"Убрать — кнопкой или {hotkey}" if hotkey else "Убрать — кнопкой", objectName="time")
         self.stop_btn = self._button("■ Убрать занавес", "Открыть экран демонстрации зрителям",

@@ -119,7 +119,7 @@ def build_exe(py: Path) -> Path:
     _rmtree(dist / NAME)
     run([py, "-m", "PyInstaller", "--noconfirm", "--clean", "--windowed", "--name", NAME, "--icon", ico,
          "--add-data", f"{APP / 'webinar' / 'ui' / '*.svg'};webinar/ui",
-         "--hidden-import", "PySide6.QtMultimedia", "--hidden-import", "PySide6.QtMultimediaWidgets",
+         "--hidden-import", "PySide6.QtMultimedia",
          "--distpath", dist, "--workpath", BUILD / "work", "--specpath", BUILD, APP / "webinar.py"], cwd=APP)
     return dist / NAME
 

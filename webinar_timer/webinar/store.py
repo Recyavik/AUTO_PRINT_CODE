@@ -98,6 +98,7 @@ class Settings:
     sound: bool = True             # звук напоминания (мягкий колокольчик, webinar/chime.py)
     sound_volume: int = 40         # его громкость, 0–100
     windows_toast: bool = False    # дублировать всплывающим уведомлением Windows (оно на основном мониторе!)
+    curtain_text: str = "Сейчас продолжим"   # надпись экстренного занавеса (на экране — заглавными)
     curtain_key: str = "ScrollLock" # экстренный занавес — общая клавиша Windows (работает и из PowerPoint); пусто — нет
     auto_update_check: bool = True # сам проверять обновления и сообщать о новой версии (ставит пользователь)
     theme: str = "dark"            # тема окна таймера: dark | light (экран демонстрации от неё не зависит)

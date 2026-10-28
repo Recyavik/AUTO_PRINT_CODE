@@ -608,6 +608,33 @@ class WindowsTest(_WindowBase):
         self.assertEqual(o.left_text(), "ПРОДОЛЖАЕМ", "в конец — время вышло")
         self.win._hide_break()
 
+    def test_curtain_text_from_settings(self):
+        """Текст занавеса — из настроек (на экране заглавными, на пульте — как написан); пусто — «Сейчас продолжим»;
+        длинный текст переносится и уменьшается, чтобы поместиться на экране."""
+        from PySide6.QtCore import QRectF
+        self.assertEqual(wstore.Settings().curtain_text, "Сейчас продолжим")
+        self.win.settings.curtain_text = "Технические неполадки Zoom"
+        self.win.show_curtain()
+        self.assertEqual(self.win.curtain.text, "ТЕХНИЧЕСКИЕ НЕПОЛАДКИ ZOOM")
+        self.assertIn("«Технические неполадки Zoom»", self.win.curtain_panel.title.text())
+        self.win.hide_curtain()
+        self.win.settings.curtain_text = "   "
+        self.win.show_curtain()
+        self.assertEqual(self.win.curtain.text, "СЕЙЧАС ПРОДОЛЖИМ")
+        self.win.hide_curtain()
+        rect = QRectF(0, 0, 1000, 300)
+        long = "ОЧЕНЬ ДЛИННАЯ НАДПИСЬ " * 6
+        self.assertLess(overlay.fit_px(rect, long, 100), overlay.fit_px(rect, "КОРОТКО", 100))
+
+        dlg = SettingsDialog(self.win.settings, self.win)
+        dlg.curtain_text.setText("  Пауза на минуту ")
+        self.assertEqual(dlg.result_settings().curtain_text, "Пауза на минуту")
+        dlg._test_curtain()                                  # проба — на экране демонстрации
+        probe = [w for w in dlg._probe if isinstance(w, overlay.CurtainOverlay)]
+        self.assertEqual(probe[0].text, "ПАУЗА НА МИНУТУ")
+        dlg.reject()
+        dlg.deleteLater()
+
     def test_emergency_curtain(self):
         """«🎭 Занавес»: экран демонстрации закрыт «Сейчас продолжим», у ведущего — пульт «Убрать занавес»;
         перерыв под занавесом остаётся; убирается только кнопкой (или той же клавишей)."""
@@ -938,6 +965,9 @@ class WindowsTest(_WindowBase):
         self.assertIsNotNone(panel)
         self.assertTrue(screens.control_screen(self.win.settings).availableGeometry().contains(panel.geometry()))
         self.assertEqual(panel.title.text(), "eyes")
+        from PySide6.QtWidgets import QWidget
+        self.assertEqual(self.win.media.findChildren(QWidget), [],
+                         "кадры рисуются в самом окне, как заставка перерыва (QVideoWidget через Direct3D моргал)")
         from PySide6.QtMultimedia import QMediaPlayer
         self.win.media._on_status(QMediaPlayer.MediaStatus.EndOfMedia)
         self.assertIsNotNone(self.win.media, "видео кончилось — стоп-кадр, экран не открывается сам")

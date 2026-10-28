@@ -5,7 +5,7 @@ import copy
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QKeySequence
 from PySide6.QtWidgets import (QCheckBox, QColorDialog, QComboBox, QDialog, QFileDialog, QFormLayout, QGroupBox, QHBoxLayout,
                                QKeySequenceEdit, QLabel, QLineEdit, QPushButton, QSlider, QSpinBox, QVBoxLayout)
@@ -18,7 +18,7 @@ from . import screens, style
 from .editor import finish_on_enter
 from .lessons import LessonLengthEdit
 from .notify import Notifier, parse_pos
-from .overlay import BreakOverlay
+from .overlay import BreakOverlay, CurtainOverlay
 
 
 class SettingsDialog(QDialog):
@@ -97,7 +97,18 @@ class SettingsDialog(QDialog):
                                "В редакторе шаблона минуты блока нельзя увеличить сверх него. Для всех шаблонов, у которых не задана своя.")
         form.addRow("Продолжительность урока:", self.lesson)
 
-        # клавиша экстренного занавеса: нажать нужное сочетание в поле
+        # экстренный занавес: надпись (проба — на 5 с) и клавиша
+        self.curtain_text = QLineEdit(self.s.curtain_text)
+        self.curtain_text.setPlaceholderText(CurtainOverlay.DEFAULT_TEXT)
+        self.curtain_text.setToolTip("Надпись на экране демонстрации, пока висит занавес (на экране — заглавными; "
+                                     "длинный текст переносится и уменьшается). Пусто — «Сейчас продолжим».")
+        test_curtain = QPushButton("Проба (5 с)")
+        test_curtain.setToolTip("Показать занавес на мониторе демонстрации на 5 секунд")
+        test_curtain.clicked.connect(self._test_curtain)
+        trow = QHBoxLayout()
+        trow.addWidget(self.curtain_text, 1)
+        trow.addWidget(test_curtain)
+        form.addRow("Текст занавеса:", trow)
         self.curtain_key = QKeySequenceEdit(QKeySequence.fromString(self.s.curtain_key, QKeySequence.SequenceFormat.PortableText))
         self.curtain_key.setMaximumSequenceLength(1)
         self.curtain_key.setToolTip("Щёлкните и нажмите клавишу или сочетание. Работает во всех программах, и в PowerPoint.")
@@ -215,6 +226,7 @@ class SettingsDialog(QDialog):
         s.windows_toast = self.toast.isChecked()
         s.auto_update_check = self.auto_update.isChecked()
         s.theme = self.theme.currentData()
+        s.curtain_text = self.curtain_text.text().strip()
         key = self._curtain_key_text()
         if key is not None:                     # неподходящее сочетание не сохраняется — остаётся прежнее
             s.curtain_key = key
@@ -231,7 +243,7 @@ class SettingsDialog(QDialog):
             self.curtain_hint.setText("Такое сочетание мешало бы печатать. Нужна клавиша с Ctrl или Alt "
                                       "(или одна из: Scroll Lock, Pause, F1–F24).")
         elif key:
-            self.curtain_hint.setText("Экстренный занавес «Сейчас продолжим» на экран демонстрации — этой клавишей "
+            self.curtain_hint.setText("Экстренный занавес на экран демонстрации — этой клавишей "
                                       "из любой программы; ей же убрать.")
         else:
             self.curtain_hint.setText("Клавиша выключена: занавес — кнопкой «🎭 Занавес» в окне таймера или в трее.")
@@ -266,6 +278,14 @@ class SettingsDialog(QDialog):
         o.show()
         o.raise_()
         self._keep([o])
+
+    def _test_curtain(self) -> None:
+        s = self._collect()
+        c = CurtainOverlay(screens.demo_screen(s), existing(s.break_image), s.break_text_color, s.curtain_text)
+        c.show()
+        c.raise_()
+        QTimer.singleShot(5000, lambda: isValid(c) and c.close())   # проба — сама уходит (настоящий — только кнопкой)
+        self._keep([c])
 
     def done(self, r: int) -> None:
         if self._thread is not None:

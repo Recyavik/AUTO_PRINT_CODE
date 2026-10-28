@@ -5,7 +5,7 @@
 шрифтом Furore — как на слайдах 1Т. Когда время вышло — «ПРОДОЛЖАЕМ», ниже «ПЕРЕРЫВ ЗАВЕРШЁН»; заставка остаётся, пока её
 не уберут кнопкой «■ Убрать» на пульте, чтобы не исчезнуть посреди фразы ведущего.
 Заставка и видео — «занавес»: пока они на экране, ведущий спокойно готовит слайды за ними; зрители этого не видят.
-Экстренный занавес (CurtainOverlay) — тот же фон и «СЕЙЧАС ПРОДОЛЖИМ», без отсчёта: быстро закрыть то, что не для зрителей.
+Экстренный занавес (CurtainOverlay) — тот же фон и своя надпись (по умолчанию «СЕЙЧАС ПРОДОЛЖИМ»), без отсчёта: быстро закрыть то, что не для зрителей.
 """
 from __future__ import annotations
 
@@ -15,14 +15,15 @@ from pathlib import Path
 from typing import Callable
 
 from PySide6.QtCore import QRectF, Qt, QTimer, QUrl, Signal
-from PySide6.QtGui import QColor, QFont, QFontDatabase, QLinearGradient, QPainter, QPixmap, QRadialGradient, QScreen
-from PySide6.QtWidgets import QLabel, QStackedLayout, QWidget
+from PySide6.QtGui import QColor, QFont, QFontDatabase, QFontMetricsF, QImage, QLinearGradient, QPainter, QPixmap, QRadialGradient, QScreen
+from PySide6.QtWidgets import QWidget
 
 from ..model import fmt_left
 
 log = logging.getLogger(__name__)
 
 TITLE_FONT = "Furore"          # шрифт заголовков 1Т; если не установлен — Segoe UI Black
+WRAP_CENTER = Qt.AlignmentFlag.AlignCenter.value | Qt.TextFlag.TextWordWrap.value   # по центру, с переносом слов
 VIDEO_EXT = {".mp4", ".mov", ".avi", ".mkv", ".webm", ".wmv", ".m4v"}
 
 
@@ -91,21 +92,34 @@ def paint_backdrop(p: QPainter, w: float, h: float, pixmap: QPixmap) -> None:
     p.fillRect(r, glow)
 
 
-def paint_title(p: QPainter, rect: QRectF, s: str, px: float, color: QColor) -> None:
+def paint_title(p: QPainter, rect: QRectF, s: str, px: float, color: QColor, wrap: bool = False) -> None:
     """Надпись как на слайдах 1Т: по центру, с лёгкой тенью для читаемости на любом фоне."""
+    flags = WRAP_CENTER if wrap else Qt.AlignmentFlag.AlignCenter.value
     p.setFont(title_font(px))
     p.setPen(QColor(0, 0, 0, 120))
-    p.drawText(rect.translated(px * 0.04, px * 0.05), Qt.AlignmentFlag.AlignCenter, s)
+    p.drawText(rect.translated(px * 0.04, px * 0.05), flags, s)
     p.setPen(color)
-    p.drawText(rect, Qt.AlignmentFlag.AlignCenter, s)
+    p.drawText(rect, flags, s)
+
+
+def fit_px(rect: QRectF, s: str, px: float) -> float:
+    """Кегль, при котором надпись (с переносом по словам) помещается в rect: длинный текст — мельче."""
+    flags = WRAP_CENTER
+    while px > 18:
+        box = QFontMetricsF(title_font(px)).boundingRect(rect, flags, s)
+        if box.width() <= rect.width() and box.height() <= rect.height():
+            break
+        px *= 0.92
+    return px
 
 
 class CurtainOverlay(_ScreenWindow):
-    """Экстренный занавес: фон заставки и «СЕЙЧАС ПРОДОЛЖИМ» — без отсчёта, пока ведущий не уберёт."""
-    TEXT = "СЕЙЧАС ПРОДОЛЖИМ"
+    """Экстренный занавес: фон заставки и надпись из настроек — без отсчёта, пока ведущий не уберёт."""
+    DEFAULT_TEXT = "Сейчас продолжим"
 
-    def __init__(self, screen: QScreen, image: str = "", text_color: str = "#FFFFFF") -> None:
+    def __init__(self, screen: QScreen, image: str = "", text_color: str = "#FFFFFF", text: str = "") -> None:
         super().__init__(screen)
+        self.text = (text.strip() or self.DEFAULT_TEXT).upper()
         self.text_color = QColor(text_color) if QColor.isValidColorName(text_color) else QColor("#FFFFFF")
         self.pixmap = QPixmap(image) if image else QPixmap()
 
@@ -115,7 +129,8 @@ class CurtainOverlay(_ScreenWindow):
         p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
         w, h = self.width(), self.height()
         paint_backdrop(p, w, h, self.pixmap)
-        paint_title(p, QRectF(0, h * 0.40, w, h * 0.18), self.TEXT, h * 0.09, self.text_color)
+        rect = QRectF(w * 0.06, h * 0.25, w * 0.88, h * 0.5)
+        paint_title(p, rect, self.text, fit_px(rect, self.text, h * 0.09), self.text_color, wrap=True)
 
 
 class BreakOverlay(_ScreenWindow):
@@ -204,34 +219,53 @@ class BreakOverlay(_ScreenWindow):
 
 
 class MediaOverlay(_ScreenWindow):
-    """Файл активности на весь монитор демонстрации: видео (со звуком; в конце — стоп-кадр) или картинка."""
+    """Файл активности на весь монитор демонстрации: видео (со звуком; в конце — стоп-кадр) или картинка.
+
+    Кадры видео рисуются в самом окне (QVideoSink → QPainter), как заставка перерыва, а не через QVideoWidget:
+    тот выводит через Direct3D, Windows считает такое окно на весь монитор полноэкранной игрой и при переходе
+    в другое окно с панели задач переключает режим вывода — экран у зрителей моргал."""
 
     def __init__(self, screen: QScreen, path: str) -> None:
         super().__init__(screen)
-        self.setStyleSheet("background: black;")
-        lay = QStackedLayout(self)
+        self.setAttribute(Qt.WidgetAttribute.WA_OpaquePaintEvent)
         self.player = None
+        self.frame = QImage()                      # последний кадр видео (в конце видео он и остаётся)
+        self.pixmap = QPixmap()                    # картинка вместо видео
         if is_video(path):
-            from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
-            from PySide6.QtMultimediaWidgets import QVideoWidget
-            video = QVideoWidget(self)
-            video.setAspectRatioMode(Qt.AspectRatioMode.KeepAspectRatio)
-            lay.addWidget(video)
+            from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer, QVideoSink
             self.audio = QAudioOutput(self)
             self.player = QMediaPlayer(self)
             self.player.setAudioOutput(self.audio)
-            self.player.setVideoOutput(video)
+            self.sink = QVideoSink(self)
+            self.sink.videoFrameChanged.connect(self._on_frame)
+            self.player.setVideoOutput(self.sink)
             self.player.setSource(QUrl.fromLocalFile(str(Path(path).resolve())))
             self.player.mediaStatusChanged.connect(self._on_status)
             self.player.errorOccurred.connect(lambda _e, msg: log.warning("Видео %s: %s", Path(path).name, msg))
         else:
-            label = QLabel(self)
-            label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            pm = QPixmap(path)
-            if not pm.isNull():
-                label.setPixmap(pm.scaled(self.size(), Qt.AspectRatioMode.KeepAspectRatio,
-                                          Qt.TransformationMode.SmoothTransformation))
-            lay.addWidget(label)
+            self.pixmap = QPixmap(path)
+
+    def _on_frame(self, frame) -> None:
+        if frame.isValid():
+            image = frame.toImage()
+            if not image.isNull():
+                self.frame = image
+                self.update()
+
+    def paintEvent(self, _e) -> None:
+        p = QPainter(self)
+        p.fillRect(self.rect(), QColor("black"))
+        src = self.frame if not self.frame.isNull() else self.pixmap
+        if src.isNull():
+            return
+        p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+        size = src.size().scaled(self.size(), Qt.AspectRatioMode.KeepAspectRatio)
+        target = QRectF((self.width() - size.width()) / 2, (self.height() - size.height()) / 2,
+                        size.width(), size.height())
+        if isinstance(src, QImage):
+            p.drawImage(target, src)
+        else:
+            p.drawPixmap(target, src, QRectF(src.rect()))
 
     def showEvent(self, e) -> None:
         super().showEvent(e)

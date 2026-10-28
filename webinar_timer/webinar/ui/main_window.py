@@ -785,7 +785,7 @@ class MainWindow(QMainWindow):
             self.tray.showMessage(APP_NAME, f"Клавиша занавеса {key.label or self.settings.curtain_key} не работает: "
                                   "её заняла другая программа. Выберите другую в ⚙ Настройках.", make_icon(), 8000)
         how = f"Работает и из PowerPoint: {key.label}. " if key.ok else ""
-        self.curtain_btn.setToolTip("Экстренно закрыть экран демонстрации заставкой «Сейчас продолжим» — без отсчёта.\n"
+        self.curtain_btn.setToolTip("Экстренно закрыть экран демонстрации заставкой с вашей надписью (⚙ Настройки) — без отсчёта.\n"
                                     f"{how}Повторно (или «Убрать» на пульте) — открыть. Клавиша — в ⚙ Настройках.")
         self.tray_curtain.setText(f"🎭 Занавес ({key.label})" if key.ok else "🎭 Занавес")
         self._sync_break_btn()
@@ -801,16 +801,17 @@ class MainWindow(QMainWindow):
             self.show_curtain()
 
     def show_curtain(self) -> None:
-        """Экстренно закрыть экран демонстрации «Сейчас продолжим» — поверх всего (перерыв или видео под ним остаются)."""
+        """Экстренно закрыть экран демонстрации надписью из настроек — поверх всего (перерыв или видео под ним остаются)."""
         if self.curtain is not None:
             return
         c = CurtainOverlay(screens.demo_screen(self.settings), existing(self.settings.break_image),
-                           self.settings.break_text_color)
+                           self.settings.break_text_color, self.settings.curtain_text)
         self.curtain = c
         c.closed.connect(lambda: self.curtain is c and setattr(self, "curtain", None))
         c.show()
         c.raise_()
-        panel = CurtainPanel(screens.control_screen(self.settings), self.curtain_key.label if self.curtain_key.ok else "")
+        panel = CurtainPanel(screens.control_screen(self.settings), self.curtain_key.label if self.curtain_key.ok else "",
+                             self.settings.curtain_text.strip() or CurtainOverlay.DEFAULT_TEXT)
         self.curtain_panel = panel
         panel.stop_requested.connect(self.hide_curtain)
         c.closed.connect(panel.close)
