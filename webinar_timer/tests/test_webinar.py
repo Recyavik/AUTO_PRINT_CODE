@@ -1454,6 +1454,41 @@ class SettingsSaveTest(unittest.TestCase):
 
 
 class EditorTest(unittest.TestCase):
+    def test_video_length_in_editor(self):
+        """У блока с видео — длина ролика; длиннее блока — «⚠» и «подогнать минуты»; урок не позволяет — отказ."""
+        from webinar import media_info
+        video = Path(tempfile.mkdtemp()) / "Гимнастика.mp4"
+        video.write_bytes(b"")
+        media_info._cache[media_info._key(str(video))] = 6 * 60_000 + 30_000      # ролик 6:30
+        p = Plan("x", "11:00", [Activity("Зарядка для глаз", DEMO_OFF, 5), Activity("Теория", DEMO_ON, 30)])
+        dlg = PlanEditor(p, lesson_min=45, eyes_media=str(video))
+        length, fit = dlg._lengths[0]
+        self.assertEqual(length.text(), "⚠ 6:30", "видео из настроек длиннее 5-минутного блока")
+        self.assertFalse(fit.isHidden())
+        self.assertEqual(dlg._lengths[1][0].text(), "", "у блока без видео — ничего")
+        fit.click()
+        self.assertEqual(dlg.plan.schedule[0].min, 7, "минуты — по ролику, с округлением вверх")
+        self.assertEqual(dlg._lengths[0][0].text(), "6:30")
+        self.assertTrue(dlg._lengths[0][1].isHidden())
+
+        full = Plan("y", "11:00", [Activity("Зарядка для глаз", DEMO_OFF, 5), Activity("Теория", DEMO_ON, 40)])
+        dlg = PlanEditor(full, lesson_min=45, eyes_media=str(video))
+        dlg._lengths[0][1].click()
+        self.assertEqual(dlg.plan.schedule[0].min, 5, "урок заполнен — минуты не меняются")
+        self.assertIn("не помещается", dlg.notice.text())
+
+    def test_video_panel_plan_line(self):
+        """Пульт видео: сколько осталось, когда закончится и насколько ролик выходит за план блока."""
+        from webinar.ui.player import plan_line
+        now = at("11:02")
+        self.assertEqual(plan_line(0, 0, now, at("11:05")), ("", 0), "длина ещё не известна")
+        self.assertEqual(plan_line(60_000, 253_000, now, at("11:05")),
+                         ("осталось 3:13 · закончится в 11:05 · по плану до 11:05", 0), "13 с — не опоздание")
+        self.assertEqual(plan_line(0, 390_000, now, at("11:05")),
+                         ("осталось 6:30 · закончится в 11:08 · по плану до 11:05, +4 мин", 4))
+        self.assertEqual(plan_line(0, 390_000, now, None), ("осталось 6:30 · закончится в 11:08", 0),
+                         "видео не из повестки — без плана")
+
     def test_edit_and_json(self):
         dlg = PlanEditor(PLAN)
         dlg.title.setText("Новый")

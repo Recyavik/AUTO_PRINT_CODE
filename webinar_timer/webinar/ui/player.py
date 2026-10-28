@@ -1,7 +1,7 @@
 """Пульты на мониторе управления: зрители видят только экран демонстрации, а ведущий — пульт поверх своих окон.
 
 Пульт видео (PlayerPanel): сначала, −10 с, пауза/играть, +10 с, полоса перемотки (щелчок — сразу туда),
-время, громкость и «Убрать». Пульт перерыва (BreakPanel): крупный отсчёт и полоса, −1 мин, пауза/продолжить,
+время, громкость и «Убрать»; под полосой — сколько осталось, когда ролик закончится и выходит ли он за план блока. Пульт перерыва (BreakPanel): крупный отсчёт и полоса, −1 мин, пауза/продолжить,
 +1 мин, «Заново» и «Убрать» — отсчёт на заставке у зрителей меняется вместе с ним.
 Пульт занавеса (CurtainPanel): только «Убрать занавес» — вверху монитора управления, чтобы не закрывать другие пульты.
 Фокус пульт не забирает; его можно перетащить мышью за свободное место — позиция (общая для обоих пультов)
@@ -9,7 +9,8 @@
 """
 from __future__ import annotations
 
-from datetime import timedelta
+import math
+from datetime import datetime, timedelta
 from typing import Callable
 
 from PySide6.QtCore import QPoint, Qt, QTimer, Signal
@@ -33,6 +34,24 @@ def theme_colors(kind: str) -> tuple[str, str, str, str, str]:
 def fmt_ms(ms: int) -> str:
     s = max(0, ms) // 1000
     return f"{s // 3600}:{s // 60 % 60:02d}:{s % 60:02d}" if s >= 3600 else f"{s // 60}:{s % 60:02d}"
+
+
+def plan_line(pos_ms: int, dur_ms: int, now: datetime, planned_end: datetime | None) -> tuple[str, int]:
+    """Строка пульта видео: «осталось 2:50 · закончится в 11:07 · по плану до 11:05, +2 мин» и на сколько
+    минут ролик выходит за план (0 — укладывается или плана нет). Длина ещё не известна — пусто."""
+    if dur_ms <= 0:
+        return "", 0
+    left = max(0, dur_ms - pos_ms)
+    finish = now + timedelta(milliseconds=left)
+    text = f"осталось {fmt_ms(left)} · закончится в {finish:%H:%M}"
+    if planned_end is None:
+        return text, 0
+    late = (finish - planned_end).total_seconds()
+    over = max(1, math.floor(late / 60 + 0.5)) if late >= 30 else 0   # до минуты; меньше полуминуты — не опоздание
+    text += f" · по плану до {planned_end:%H:%M}"
+    if over > 0:
+        text += f", +{over} мин"
+    return text, max(0, over)
 
 
 class SeekSlider(QSlider):
@@ -151,9 +170,12 @@ class _Remote(QWidget):
 class PlayerPanel(_Remote):
     """Пульт к QMediaPlayer: player — что показывает видео на экране демонстрации."""
 
-    def __init__(self, player, audio, title: str, screen: QScreen, anchor: QPoint | None = None) -> None:
+    def __init__(self, player, audio, title: str, screen: QScreen, anchor: QPoint | None = None,
+                 clock: Callable[[], datetime] = datetime.now, planned_end: datetime | None = None) -> None:
+        """planned_end — когда блок кончается по расписанию (видео не из повестки — None)."""
         super().__init__("video", "НА ЭКРАНЕ ДЕМОНСТРАЦИИ", title, screen, anchor)
         self.player, self.audio = player, audio
+        self.clock, self.planned_end = clock, planned_end
 
         bar = QHBoxLayout()
         self.slider = SeekSlider()
@@ -163,6 +185,9 @@ class PlayerPanel(_Remote):
         bar.addWidget(self.slider, 1)
         bar.addWidget(self.time)
         self.lay.addLayout(bar)
+        self.plan = QLabel(objectName="time")
+        self.plan.setTextFormat(Qt.TextFormat.RichText)
+        self.lay.addWidget(self.plan)
 
         row = QHBoxLayout()
         self.restart_btn = self._button("↺ Сначала", "Видео с начала", lambda: self.seek_to(0))
@@ -199,6 +224,9 @@ class PlayerPanel(_Remote):
         self._on_duration(player.duration())
         self._on_position(player.position())
         self._sync_play()
+        self._plan_timer = QTimer(self)                 # на паузе позиция стоит, а «закончится в» уходит вперёд
+        self._plan_timer.timeout.connect(self._show_plan)
+        self._plan_timer.start(1000)
 
     # ---- управление
     def playing(self) -> bool:
@@ -214,7 +242,7 @@ class PlayerPanel(_Remote):
 
     def seek_to(self, ms: int) -> None:
         dur = self.player.duration()
-        ms = max(0, ms if dur <= 0 else min(ms, max(0, dur - 200)))   # у самого конца видео закрылось бы само
+        ms = max(0, ms if dur <= 0 else min(ms, max(0, dur - 200)))   # не в самый конец: там видео сразу «кончается»
         self.player.setPosition(ms)
         self._on_position(ms)
 
@@ -245,6 +273,14 @@ class PlayerPanel(_Remote):
 
     def _show_time(self, ms: int) -> None:
         self.time.setText(f"{fmt_ms(ms)} / {fmt_ms(self.player.duration())}")
+        self._show_plan(ms)
+
+    def _show_plan(self, ms: int | None = None) -> None:
+        pos = self.player.position() if ms is None else ms
+        text, over = plan_line(pos, self.player.duration(), self.clock(), self.planned_end)
+        self.plan.setText(f"<span style='color:{style.AMBER}; font-weight:700'>{text}</span>" if over else text)
+        self.plan.setToolTip("Ролик закончится позже, чем блок по расписанию: следующий блок начнётся во время видео. "
+                             "Можно перемотать или убрать видео раньше." if over else "")
 
     def _on_volume(self, v: int) -> None:
         self.audio.setVolume(v / 100)

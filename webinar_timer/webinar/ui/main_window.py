@@ -477,7 +477,8 @@ class MainWindow(QMainWindow):
         p = plan or self.current_plan()
         if p is None:
             return
-        dlg = PlanEditor(p, self, self.settings.lesson_min, self.settings.manual_break_min)
+        dlg = PlanEditor(p, self, self.settings.lesson_min, self.settings.manual_break_min,
+                         self.settings.eyes_media)
         ok = dlg.exec() and dlg.result_plan
         dlg.deleteLater()
         if ok:
@@ -655,10 +656,11 @@ class MainWindow(QMainWindow):
             return
         path = self.media_of(seg)
         if path:
-            self._show_media(path)
+            self._show_media(path, seg.end)
 
-    def _show_media(self, path: str) -> None:
-        """Видео или картинка — на весь экран демонстрации; остаётся, пока ведущий не уберёт («■ Убрать»)."""
+    def _show_media(self, path: str, planned_end: datetime | None = None) -> None:
+        """Видео или картинка — на весь экран демонстрации; остаётся, пока ведущий не уберёт («■ Убрать»).
+        planned_end — конец блока по расписанию: пульт покажет, укладывается ли ролик."""
         old = self._on_demo()
         self.media = MediaOverlay(screens.demo_screen(self.settings), path)
         m = self.media
@@ -667,14 +669,14 @@ class MainWindow(QMainWindow):
         m.raise_()
         self._close_later(old)
         if m.player is not None:
-            self._show_player(m, Path(path).stem)
+            self._show_player(m, Path(path).stem, planned_end)
         self._sync_break_btn()
         log.info("На экран демонстрации: %s", Path(path).name)
 
-    def _show_player(self, m: MediaOverlay, title: str) -> None:
+    def _show_player(self, m: MediaOverlay, title: str, planned_end: datetime | None = None) -> None:
         """Пульт видео — на монитор управления: зрители видят только само видео."""
         panel = PlayerPanel(m.player, m.audio, title, screens.control_screen(self.settings),
-                            parse_pos(self.settings.player_pos))
+                            parse_pos(self.settings.player_pos), self.clock, planned_end)
         self.player_panel = panel
         panel.stop_requested.connect(lambda: self._remove_from_demo(m, "видео"))
         panel.dropped.connect(self._save_player_pos)

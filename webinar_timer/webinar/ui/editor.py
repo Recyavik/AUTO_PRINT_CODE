@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import copy
 import json
+import math
 
 from pathlib import Path
 
@@ -16,9 +17,11 @@ from shiboken6 import isValid
 
 from ..model import (DEMO_NONE, DEMO_OFF, DEMO_ON, Activity, Plan, parse_time, plan_from, plan_to, reorder_lessons,
                      split_lessons)
-from ..store import MEDIA_DIR, portable, resolve
+from .. import media_info
+from ..store import MEDIA_DIR, existing, portable, resolve
 from . import style
 from .lessons import LessonLengthEdit
+from .overlay import is_video
 
 DEMO_ITEMS = [("ВКЛ", DEMO_ON), ("ВЫКЛ", DEMO_OFF), ("нет", DEMO_NONE)]
 COLS = ["", "Активность", "Демонстрация", "Минуты", "Напомнить", "Перерыв", "На экран", ""]
@@ -288,9 +291,11 @@ class _LessonStrip(QListWidget):
 
 
 class PlanEditor(QDialog):
-    def __init__(self, plan: Plan, parent=None, lesson_min: int | None = None, break_min: int = 10) -> None:
+    def __init__(self, plan: Plan, parent=None, lesson_min: int | None = None, break_min: int = 10,
+                 eyes_media: str = "") -> None:
         """lesson_min — продолжительность урока из общих настроек (у шаблона может быть своя);
-        break_min — перерыв перед уроком, который добавляет «+ Добавить урок»."""
+        break_min — перерыв перед уроком, который добавляет «+ Добавить урок»;
+        eyes_media — видео зарядки из настроек (у блока зарядки без своего файла — его длина)."""
         super().__init__(parent)
         self.setWindowTitle("Шаблон вебинара")
         # кнопка «Развернуть»: на весь экран и обратно к прежнему размеру (и двойной щелчок по заголовку)
@@ -302,6 +307,8 @@ class PlanEditor(QDialog):
         self.default_lesson = plan.part_min if lesson_min is None else lesson_min
         self._apply_lesson(self.plan)
         self.break_min = break_min
+        self.eyes_media = eyes_media
+        self._lengths: dict[int, tuple[QLabel, QToolButton]] = {}   # строка → длина ролика и «подогнать»
         self.result_plan: Plan | None = None
 
         lay = QVBoxLayout(self)
@@ -439,6 +446,7 @@ class PlanEditor(QDialog):
     # ---------------------------------------------------------------- таблица
     def _fill(self) -> None:
         self.table.setRowCount(0)
+        self._lengths.clear()
         for i, a in enumerate(self.plan.schedule):
             self.table.insertRow(i)
             self.table.setCellWidget(i, C_HANDLE, _Handle(i, a.locked))
@@ -458,7 +466,8 @@ class PlanEditor(QDialog):
             mins = _Minutes()
             mins.setRange(1, 600)
             mins.setValue(a.min)
-            mins.valueChanged.connect(lambda v, a=a: (setattr(a, "min", v), self._sync_total()))
+            mins.valueChanged.connect(lambda v, i=i, a=a: (setattr(a, "min", v), self._sync_total(),
+                                                           self._show_length(i)))
             self.table.setCellWidget(i, C_MIN, mins)
 
             remind = QCheckBox()
@@ -470,7 +479,7 @@ class PlanEditor(QDialog):
             brk.setToolTip("Перерыв: заставка с отсчётом на экран демонстрации")
             brk.toggled.connect(lambda on, a=a: (setattr(a, "is_break", on), self._refresh_flags()))
             self.table.setCellWidget(i, C_BREAK, _center(brk))
-            self.table.setCellWidget(i, C_MEDIA, self._media_cell(a))
+            self.table.setCellWidget(i, C_MEDIA, self._media_cell(i, a))
 
             delete = QToolButton()
             delete.setText("✕")
@@ -483,8 +492,9 @@ class PlanEditor(QDialog):
         _no_enter_buttons(self)
         self._refresh_flags()
 
-    def _media_cell(self, a: Activity) -> QWidget:
-        """Файл блока на экран демонстрации (видео гимнастики, фон перерыва). Пусто — из настроек."""
+    def _media_cell(self, i: int, a: Activity) -> QWidget:
+        """Файл блока на экран демонстрации (видео гимнастики, фон перерыва). Пусто — из настроек.
+        У видео — его длина; ролик длиннее блока — предупреждение и «подогнать минуты под ролик»."""
         box = QWidget()
         lay = QHBoxLayout(box)
         lay.setContentsMargins(0, 0, 0, 0)
@@ -505,6 +515,7 @@ class PlanEditor(QDialog):
             self._fill()
 
         pick.clicked.connect(choose)
+        pick.setMinimumWidth(pick.sizeHint().width())        # длина ролика рядом не сжимает подпись кнопки
         lay.addWidget(pick)
         if a.media:
             x = QToolButton()
@@ -512,7 +523,68 @@ class PlanEditor(QDialog):
             x.setToolTip("Убрать свой файл")
             x.clicked.connect(clear)
             lay.addWidget(x)
+        length = QLabel(objectName="hint")
+        fit = QToolButton()
+        fit.setText("⇥")
+        fit.setToolTip("Подогнать минуты блока под ролик")
+        fit.clicked.connect(lambda _c=False: self._fit_to_video(i))
+        fit.hide()
+        lay.addWidget(length)
+        lay.addWidget(fit)
+        self._lengths[i] = (length, fit)
+        video = self.video_of(a)
+        if video:
+            # место под длину и «подогнать» — сразу: длина приходит позже, а ширина колонки считается по ячейкам
+            length.setMinimumWidth(length.fontMetrics().horizontalAdvance("⚠ 88:88") + 4)
+            policy = fit.sizePolicy()
+            policy.setRetainSizeWhenHidden(True)
+            fit.setSizePolicy(policy)
+            media_info.video_ms(video, lambda _ms, i=i: self._show_length(i))
         return box
+
+    def video_of(self, a: Activity) -> str:
+        """Видео, которое блок покажет зрителям: свой файл или (у зарядки) видео из настроек; не видео — ""."""
+        path = existing(a.media) or (existing(self.eyes_media) if a.kind == "eyes" else "")
+        return path if path and is_video(path) else ""
+
+    def _video_len(self, i: int) -> int | None:
+        """Длина ролика блока i в мс, если уже известна."""
+        video = self.video_of(self.plan.schedule[i])
+        if not video:
+            return None
+        found: list[int | None] = []
+        media_info.video_ms(video, found.append)         # из кэша — сразу; иначе позже вызовет _show_length
+        return found[0] if found else None
+
+    def _show_length(self, i: int) -> None:
+        if i not in self._lengths or i >= len(self.plan.schedule) or not isValid(self._lengths[i][0]):
+            return
+        length, fit = self._lengths[i]
+        a, ms = self.plan.schedule[i], self._video_len(i)
+        if ms is None:
+            length.setText("")
+            fit.hide()
+            return
+        over = ms > a.min * 60_000
+        length.setText(f"⚠ {media_info.fmt_len(ms)}" if over else media_info.fmt_len(ms))
+        length.setStyleSheet(f"color: {style.RED if over else style.MUTED};")
+        length.setToolTip(f"Ролик {media_info.fmt_len(ms)} — длиннее блока ({a.min} мин): по расписанию он "
+                          "закончится позже, следующий блок начнётся во время видео" if over
+                          else f"Длина ролика {media_info.fmt_len(ms)} — помещается в блок ({a.min} мин)")
+        fit.setVisible(over and not a.locked)
+
+    def _fit_to_video(self, i: int) -> None:
+        """Минуты блока — по длине ролика (с округлением вверх), если урок позволяет."""
+        ms = self._video_len(i)
+        spin = self.table.cellWidget(i, C_MIN)
+        if ms is None or spin is None:
+            return
+        need = math.ceil(ms / 60_000)
+        if need > spin.maximum():
+            self._refuse(f"Ролик {media_info.fmt_len(ms)} не помещается: в уроке можно дать блоку не больше "
+                         f"{spin.maximum()} мин — сначала уменьшите другой блок")
+            return
+        spin.setValue(need)
 
     def _refresh_flags(self) -> None:
         """Галочки показывают действующее значение (в том числе выведенное из названия и демонстрации)."""
