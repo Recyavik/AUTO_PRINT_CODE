@@ -175,6 +175,12 @@ class Settings:
     prompter_mode: str = "auto"        # окно суфлёра: auto — печатает программа, self — набираю сам
     prompter_font: int = 20            # окно суфлёра: размер текста «что сказать»
     prompter_geometry: str = ""        # окно суфлёра: место и размер
+    # «Эфир» (autoprint/efir, ui/efir_*.py): шаблоны вебинаров — в data/efir/webinars.json
+    efir_port: int = 8791              # адрес вкладки эфира: http://127.0.0.1:<порт>/ (занят — следующие)
+    efir_pinned: bool = True           # окно таймера поверх всех окон
+    efir_timer_geometry: str = ""      # окно таймера: место и размер
+    efir_window_geometry: str = ""     # окно «Эфир» (шаблоны)
+    efir_editor_geometry: str = ""     # редактор шаблона вебинара
     step_nav: str = "arrows"           # шаги: arrows — стрелками от курсора (код — продолжение файла)
                                        #       | home — от начала документа (Ctrl+Home)
 

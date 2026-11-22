@@ -1,0 +1,533 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Экран эфира</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@600;800&family=Unbounded:wght@500;800&family=Russo+One&family=Oswald:wght@500;600&family=Rubik+Mono+One&display=swap" rel="stylesheet">
+<style>
+  :root { --fg: #fff; --font: 'Montserrat', 'Bahnschrift', 'Segoe UI', system-ui, sans-serif; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; cursor: default;
+    -webkit-font-smoothing: antialiased; user-select: none; }
+  .layer { position: fixed; inset: 0; transition: opacity .6s ease; }
+  /* фоны — в своём контексте наложения: их z-index при смене не поднимает их над надписями */
+  #bgs { position: fixed; inset: 0; z-index: 0; }
+  #caption { z-index: 2; } #brk { z-index: 3; } #vid { z-index: 4; } #hint, #dot { z-index: 9; }
+  .layer canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  .bg-image { position: absolute; inset: 0; background: center / cover no-repeat; }
+  #caption, #brk { display: flex; flex-direction: column; align-items: center; justify-content: center;
+    color: var(--fg); font-family: var(--font); text-align: center; padding: 4vh 6vw; pointer-events: none; }
+  #caption { font-weight: 800; font-size: clamp(24px, 6vw, 120px); letter-spacing: .04em; line-height: 1.1;
+    text-shadow: 0 .04em .5em rgba(0,0,0,.55); text-transform: uppercase; overflow-wrap: anywhere; }
+  #brk { opacity: 0; }
+  #brk.on { opacity: 1; }
+  #brk .scrim { position: absolute; inset: 0;
+    background: radial-gradient(ellipse at center, rgba(0,0,0,.28) 0%, rgba(0,0,0,.08) 60%, rgba(0,0,0,0) 100%); }
+  #brk .bgwrap { position: absolute; inset: 0; }
+  #brk .inner { position: relative; display: flex; flex-direction: column; align-items: center; gap: 1.2vh; }
+  #brk .title { font-weight: 800; font-size: clamp(22px, 5.4vw, 110px); letter-spacing: .14em;
+    text-transform: uppercase; text-shadow: 0 .05em .6em rgba(0,0,0,.5); line-height: 1.05; overflow-wrap: anywhere; }
+  #brk .time { text-transform: uppercase; font-weight: 800; font-variant-numeric: tabular-nums; font-size: clamp(60px, min(24vw, 40vh), 460px);
+    line-height: 1; letter-spacing: .02em; text-shadow: 0 .03em .35em rgba(0,0,0,.55); }
+  #brk .sub { font-weight: 600; font-size: clamp(14px, 2vw, 40px); letter-spacing: .22em; text-transform: uppercase;
+    opacity: .8; text-shadow: 0 .05em .6em rgba(0,0,0,.6); }
+  #brk .bar { position: absolute; left: 0; right: 0; bottom: 0; height: .9vh; min-height: 5px;
+    background: rgba(255,255,255,.12); }
+  #brk .bar i { display: block; height: 100%; width: 0; background: var(--fg); opacity: .75; }
+  #brk.done .time { font-size: clamp(40px, 11vw, 240px); letter-spacing: .06em; }
+  #vid { position: fixed; inset: 0; background: #000; opacity: 0; transition: opacity .45s ease; }
+  #vid.on { opacity: 1; }
+  #vid video { width: 100%; height: 100%; object-fit: contain; display: block; background: #000; }
+  #vid img { width: 100%; height: 100%; object-fit: contain; display: none; }
+  #hint { position: fixed; left: 50%; bottom: 3vh; transform: translateX(-50%); padding: .7em 1.3em;
+    border-radius: 999px; background: rgba(20,20,24,.82); color: #e9e9ef; font: 500 15px 'Segoe UI', system-ui;
+    box-shadow: 0 6px 24px rgba(0,0,0,.4); transition: opacity .4s; white-space: nowrap; }
+  #hint.off { opacity: 0; pointer-events: none; }
+  #dot { position: fixed; right: 12px; bottom: 12px; width: 9px; height: 9px; border-radius: 50%;
+    background: #888; opacity: 0; transition: opacity .6s; }
+  #dot.on { opacity: .35; }
+  /* галерея фонов */
+  #gallery { display: none; position: fixed; inset: 0; overflow: auto; background: #111114; color: #eee;
+    font: 15px 'Segoe UI', system-ui, sans-serif; padding: 28px 32px 40px; user-select: text; }
+  #gallery h1 { font: 600 22px 'Segoe UI', system-ui; margin: 0 0 6px; }
+  #gallery p { margin: 0 0 22px; color: #a6a6b2; }
+  #gallery .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 18px; }
+  #gallery .tile { position: relative; aspect-ratio: 16 / 9; border-radius: 12px; overflow: hidden; cursor: pointer;
+    border: 2px solid rgba(255,255,255,.08); background: #000; transition: border-color .15s, transform .15s; }
+  #gallery .tile:hover { border-color: rgba(255,255,255,.35); transform: translateY(-2px); }
+  #gallery .tile.sel { border-color: #E9A72C; box-shadow: 0 0 0 3px rgba(233,167,44,.25); }
+  #gallery .tile canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+  #gallery .tile span { position: absolute; left: 10px; bottom: 8px; padding: 3px 10px; border-radius: 999px;
+    background: rgba(0,0,0,.55); font-weight: 600; font-size: 14px; }
+  #gallery .msg { margin-top: 18px; color: #E9A72C; min-height: 1.4em; }
+  .nofade *, .nofade .layer { transition: none !important; }   /* ?nofade — для снимков в тестах */
+</style>
+</head>
+<body>
+<div id="bgs"><div class="layer" id="bgA"></div><div class="layer" id="bgB" style="opacity:0"></div></div>
+<div class="layer" id="caption"></div>
+<div class="layer" id="brk">
+  <div class="bgwrap"></div>
+  <div class="scrim"></div>
+  <div class="inner"><div class="title"></div><div class="time"></div><div class="sub"></div></div>
+  <div class="bar"><i></i></div>
+</div>
+<div id="vid"><video playsinline preload="auto"></video><img alt=""></div>
+<div id="hint" class="off">Щёлкните по странице один раз — включится звук роликов</div>
+<div id="dot"></div>
+<div id="gallery">
+  <h1>Фон экрана эфира</h1>
+  <p>Щёлкните по фону — он подставится в шаблон в AutoPrintCode. Все фоны здесь живые, как на экране эфира.</p>
+  <div class="grid"></div>
+  <div class="msg"></div>
+</div>
+<script>
+"use strict";
+// ======================================================= анимации фона
+// Каждая: () => ({init(w,h)?, frame(ctx,w,h,t,dt)}); t, dt — секунды. Рисуют в CSS-пикселях.
+const rnd = (a, b) => a + Math.random() * (b - a);
+if (new URLSearchParams(location.search).has('nofade')) document.documentElement.classList.add('nofade');
+const ANIM = {
+  gradient: () => {
+    const blobs = [
+      { c: [26, 74, 118], r: .78, sx: .11, sy: .15, px: 0, py: 1 },
+      { c: [16, 96, 102], r: .66, sx: .09, sy: .08, px: 2, py: 3 },
+      { c: [52, 60, 92], r: .72, sx: .06, sy: .11, px: 4, py: .5 },
+    ];
+    return { frame(ctx, w, h, t) {
+      ctx.fillStyle = '#04060b'; ctx.fillRect(0, 0, w, h);
+      ctx.globalCompositeOperation = 'lighter';
+      for (const b of blobs) {
+        const x = w * (.5 + .4 * Math.sin(t * b.sx + b.px)), y = h * (.5 + .4 * Math.cos(t * b.sy + b.py));
+        const R = Math.max(w, h) * b.r, g = ctx.createRadialGradient(x, y, 0, x, y, R);
+        g.addColorStop(0, `rgba(${b.c},.6)`); g.addColorStop(1, 'rgba(0,0,0,0)');
+        ctx.fillStyle = g; ctx.fillRect(0, 0, w, h);
+      }
+      ctx.globalCompositeOperation = 'source-over';
+    } };
+  },
+  aurora: () => {
+    let stars = [];
+    const bands = [[[40, 220, 160], .30, .9, 0], [[50, 140, 255], .40, .7, 2], [[110, 255, 210], .22, 1.2, 4]];
+    return {
+      init(w, h) { stars = Array.from({ length: Math.round(w * h / 5000) }, () => [rnd(0, w), rnd(0, h * .8), rnd(.2, 1)]); },
+      frame(ctx, w, h, t) {
+        const sky = ctx.createLinearGradient(0, 0, 0, h);
+        sky.addColorStop(0, '#01030a'); sky.addColorStop(1, '#06121a');
+        ctx.fillStyle = sky; ctx.fillRect(0, 0, w, h);
+        for (const [x, y, a] of stars) { ctx.fillStyle = `rgba(220,235,255,${a * (.55 + .45 * Math.sin(t * a * 2 + x))})`; ctx.fillRect(x, y, 1.3, 1.3); }
+        ctx.globalCompositeOperation = 'lighter';
+        for (const [c, yb, sp, ph] of bands) {
+          const base = h * yb, amp = h * .09;
+          for (let k = 0; k < 3; k++) {
+            ctx.beginPath();
+            for (let i = 0; i <= 90; i++) {
+              const x = w * i / 90;
+              const y = base + amp * Math.sin(i / 90 * 4 + t * .22 * sp + ph + k * .6) + amp * .5 * Math.sin(i / 90 * 9 - t * .15 * sp + ph);
+              i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+            }
+            ctx.lineTo(w, h); ctx.lineTo(0, h); ctx.closePath();
+            const g = ctx.createLinearGradient(0, base - amp, 0, base + h * .42);
+            g.addColorStop(0, `rgba(${c},0)`); g.addColorStop(.12, `rgba(${c},.13)`); g.addColorStop(1, `rgba(${c},0)`);
+            ctx.fillStyle = g; ctx.fill();
+          }
+        }
+        ctx.globalCompositeOperation = 'source-over';
+      } };
+  },
+  lights: () => {
+    let P = [];
+    const pal = ['255,236,200', '255,196,120', '255,220,160', '190,210,255', '255,250,235'];
+    return {
+      init(w, h) {
+        P = Array.from({ length: Math.min(240, Math.round(w * h / 8000)) }, () => ({
+          x: rnd(0, w), y: rnd(0, h), r: rnd(.7, 2.4), f: rnd(.4, 1.8), p: rnd(0, 6.3),
+          vx: rnd(-5, 5), vy: rnd(-3, 3), c: pal[Math.floor(Math.random() * pal.length)], big: Math.random() < .12 }));
+      },
+      frame(ctx, w, h, t, dt) {
+        ctx.fillStyle = '#030304'; ctx.fillRect(0, 0, w, h);
+        ctx.globalCompositeOperation = 'lighter';
+        for (const p of P) {
+          p.x = (p.x + p.vx * dt + w) % w; p.y = (p.y + p.vy * dt + h) % h;
+          const a = .12 + .88 * Math.pow(.5 + .5 * Math.sin(t * p.f + p.p), 2);
+          const R = p.big ? p.r * 16 : p.r * 4.5;
+          const g = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, R);
+          g.addColorStop(0, `rgba(${p.c},${a * (p.big ? .30 : 1)})`);
+          g.addColorStop(p.big ? .6 : .22, `rgba(${p.c},${a * (p.big ? .10 : .32)})`);
+          g.addColorStop(1, `rgba(${p.c},0)`);
+          ctx.fillStyle = g; ctx.beginPath(); ctx.arc(p.x, p.y, R, 0, 7); ctx.fill();
+        }
+        ctx.globalCompositeOperation = 'source-over';
+      } };
+  },
+  bubbles: () => {
+    let B = [];
+    const mk = (w, h, first) => { const r = rnd(14, Math.max(20, Math.min(w, h) * .1));
+      return { x: rnd(0, w), y: first ? rnd(0, h) : h + r + rnd(0, h * .3), r, v: rnd(16, 46), sw: rnd(.4, 1.4), ph: rnd(0, 6.3), hue: rnd(0, 360) }; };
+    return {
+      init(w, h) { B = Array.from({ length: Math.max(10, Math.min(60, Math.round(w * h / 45000))) }, () => mk(w, h, true)); },
+      frame(ctx, w, h, t, dt) {
+        const g0 = ctx.createLinearGradient(0, 0, 0, h);
+        g0.addColorStop(0, '#031019'); g0.addColorStop(1, '#010407');
+        ctx.fillStyle = g0; ctx.fillRect(0, 0, w, h);
+        for (const b of B) {
+          b.y -= b.v * dt;
+          if (b.y < -b.r * 2) Object.assign(b, mk(w, h, false));
+          const x = b.x + Math.sin(t * b.sw + b.ph) * b.r * .6;
+          const g = ctx.createRadialGradient(x - b.r * .3, b.y - b.r * .35, b.r * .1, x, b.y, b.r);
+          g.addColorStop(0, 'rgba(255,255,255,.08)'); g.addColorStop(.82, 'rgba(150,215,255,.05)'); g.addColorStop(1, 'rgba(200,240,255,.30)');
+          ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x, b.y, b.r, 0, 7); ctx.fill();
+          ctx.lineWidth = Math.max(1, b.r * .035);
+          ctx.strokeStyle = `hsla(${(b.hue + t * 25) % 360},85%,75%,.35)`; ctx.stroke();
+          ctx.fillStyle = 'rgba(255,255,255,.55)';
+          ctx.beginPath(); ctx.ellipse(x - b.r * .38, b.y - b.r * .42, b.r * .16, b.r * .08, -.7, 0, 7); ctx.fill();
+        }
+      } };
+  },
+  cube: () => {
+    const V = [[-1,-1,-1],[1,-1,-1],[1,1,-1],[-1,1,-1],[-1,-1,1],[1,-1,1],[1,1,1],[-1,1,1]];
+    const F = [[0,3,2,1],[4,5,6,7],[0,1,5,4],[2,3,7,6],[1,2,6,5],[0,4,7,3]];
+    const L = (() => { const v = [-.4, -.7, -.6], n = Math.hypot(...v); return v.map(c => c / n); })();
+    return { frame(ctx, w, h, t) {
+      const bg = ctx.createRadialGradient(w / 2, h * .45, 0, w / 2, h * .45, Math.max(w, h) * .7);
+      bg.addColorStop(0, '#111c2a'); bg.addColorStop(1, '#020305');
+      ctx.fillStyle = bg; ctx.fillRect(0, 0, w, h);
+      const s = Math.min(w, h) * .16, cx = w / 2, cy = h * .46;
+      const ay = t * .5, ax = .5 + Math.sin(t * .23) * .35, az = t * .11;
+      const R = V.map(([x, y, z]) => {
+        let X = x * Math.cos(ay) + z * Math.sin(ay), Z = -x * Math.sin(ay) + z * Math.cos(ay);
+        let Y = y * Math.cos(ax) - Z * Math.sin(ax); Z = y * Math.sin(ax) + Z * Math.cos(ax);
+        const X2 = X * Math.cos(az) - Y * Math.sin(az), Y2 = X * Math.sin(az) + Y * Math.cos(az);
+        return [X2, Y2, Z];
+      });
+      const P = R.map(([x, y, z]) => { const k = 4.5 / (z + 4.5); return [cx + x * s * k, cy + y * s * k]; });
+      // тень
+      const sh = ctx.createRadialGradient(cx, cy + s * 2.3, 0, cx, cy + s * 2.3, s * 1.8);
+      sh.addColorStop(0, 'rgba(120,180,255,.20)'); sh.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.fillStyle = sh; ctx.beginPath(); ctx.ellipse(cx, cy + s * 2.3, s * 1.8, s * .35, 0, 0, 7); ctx.fill();
+      const faces = F.map(f => {
+        const z = f.reduce((a, i) => a + R[i][2], 0) / 4;
+        const [a, b, c] = [R[f[0]], R[f[1]], R[f[2]]];
+        const u = [b[0] - a[0], b[1] - a[1], b[2] - a[2]], v = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
+        let n = [u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]];
+        const nl = Math.hypot(...n) || 1; n = n.map(c => c / nl);
+        const light = Math.max(0, -(n[0] * L[0] + n[1] * L[1] + n[2] * L[2]));
+        return { f, z, light };
+      }).sort((p, q) => q.z - p.z);
+      ctx.lineJoin = 'round';
+      for (const { f, light } of faces) {
+        ctx.beginPath(); f.forEach((i, k) => k ? ctx.lineTo(...P[i]) : ctx.moveTo(...P[i])); ctx.closePath();
+        ctx.fillStyle = `rgba(${Math.round(40 + 90 * light)},${Math.round(110 + 90 * light)},${Math.round(170 + 70 * light)},${.16 + .30 * light})`;
+        ctx.fill();
+        ctx.shadowColor = 'rgba(140,200,255,.9)'; ctx.shadowBlur = 14;
+        ctx.strokeStyle = 'rgba(170,215,255,.85)'; ctx.lineWidth = Math.max(1.2, s * .025); ctx.stroke();
+        ctx.shadowBlur = 0;
+      }
+    } };
+  },
+  stars: () => {
+    let S = [];
+    const mk = (s, far) => { s.x = rnd(-1, 1); s.y = rnd(-1, 1); s.z = far ? 1 : rnd(.05, 1); return s; };
+    return {
+      init(w, h) { S = Array.from({ length: Math.min(700, Math.round(w * h / 3000)) }, () => mk({}, false)); },
+      frame(ctx, w, h, t, dt) {
+        ctx.fillStyle = '#010207'; ctx.fillRect(0, 0, w, h);
+        const cx = w / 2, cy = h / 2, f = Math.max(w, h) * .5;
+        ctx.lineCap = 'round';
+        for (const s of S) {
+          const pz = s.z; s.z -= dt * .09;
+          if (s.z <= .03) { mk(s, true); continue; }
+          const x = cx + s.x / s.z * f * .5, y = cy + s.y / s.z * f * .5;
+          if (x < -10 || x > w + 10 || y < -10 || y > h + 10) { mk(s, true); continue; }
+          const px = cx + s.x / pz * f * .5, py = cy + s.y / pz * f * .5;
+          const a = Math.min(1, (1 - s.z) * 1.3);
+          ctx.strokeStyle = `rgba(215,228,255,${a})`; ctx.lineWidth = Math.max(.7, (1 - s.z) * 2.6);
+          ctx.beginPath(); ctx.moveTo(px, py); ctx.lineTo(x + .01, y); ctx.stroke();
+        }
+      } };
+  },
+  pipes: () => {
+    // «Трубы»: растут по клеткам, поворачивают; когда экран заполнится — плавно гаснут и всё сначала
+    const COL = [[196, 64, 64], [64, 164, 96], [64, 112, 204], [212, 172, 56], [168, 92, 192], [56, 172, 184]];
+    const D = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+    let cell, cols, rows, used, pipes, segs, fade, acc;
+    const free = (x, y) => x >= 0 && y >= 0 && x < cols && y < rows && !used[y * cols + x];
+    const newPipe = () => {
+      for (let k = 0; k < 40; k++) {
+        const x = Math.floor(rnd(0, cols)), y = Math.floor(rnd(0, rows));
+        if (free(x, y)) { used[y * cols + x] = 1; return { x, y, d: Math.floor(rnd(0, 4)), c: COL[Math.floor(rnd(0, COL.length))], fresh: true }; }
+      }
+      return null;
+    };
+    const C = (p) => [(p.x + .5) * cell, (p.y + .5) * cell];
+    const ball = (ctx, x, y, c, r) => {
+      const g = ctx.createRadialGradient(x - r * .35, y - r * .35, r * .1, x, y, r);
+      g.addColorStop(0, `rgb(${c.map(v => Math.min(255, v + 90))})`); g.addColorStop(.6, `rgb(${c})`);
+      g.addColorStop(1, `rgb(${c.map(v => v * .45 | 0)})`);
+      ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x, y, r, 0, 7); ctx.fill();
+    };
+    const tube = (ctx, a, b, c) => {
+      const lw = cell * .36;
+      ctx.lineCap = 'round';
+      ctx.strokeStyle = `rgb(${c.map(v => v * .42 | 0)})`; ctx.lineWidth = lw; ctx.beginPath(); ctx.moveTo(...a); ctx.lineTo(...b); ctx.stroke();
+      ctx.strokeStyle = `rgb(${c})`; ctx.lineWidth = lw * .72; ctx.beginPath(); ctx.moveTo(...a); ctx.lineTo(...b); ctx.stroke();
+      const horiz = Math.abs(b[0] - a[0]) > Math.abs(b[1] - a[1]);
+      const o = lw * .16, dx = horiz ? 0 : -o, dy = horiz ? -o : 0;
+      ctx.strokeStyle = `rgba(${c.map(v => Math.min(255, v + 110))},.85)`; ctx.lineWidth = lw * .16;
+      ctx.beginPath(); ctx.moveTo(a[0] + dx, a[1] + dy); ctx.lineTo(b[0] + dx, b[1] + dy); ctx.stroke();
+    };
+    return {
+      init(w, h, ctx) {
+        cell = Math.max(18, Math.min(w, h) / 14); cols = Math.ceil(w / cell); rows = Math.ceil(h / cell);
+        used = new Uint8Array(cols * rows); pipes = []; segs = 0; fade = 0; acc = 0;
+        ctx.fillStyle = '#000'; ctx.fillRect(0, 0, w, h);
+      },
+      frame(ctx, w, h, t, dt) {
+        if (fade > 0) {
+          fade -= dt; ctx.fillStyle = 'rgba(0,0,0,.08)'; ctx.fillRect(0, 0, w, h);
+          if (fade <= 0) this.init(w, h, ctx);
+          return;
+        }
+        acc += dt * 14;
+        while (acc >= 1) {
+          acc -= 1;
+          while (pipes.length < 3) { const p = newPipe(); if (!p) break; pipes.push(p); }
+          for (const p of pipes) {
+            const opts = D.map((d, i) => i).filter(i => free(p.x + D[i][0], p.y + D[i][1]));
+            if (!opts.length) { const [x, y] = C(p); ball(ctx, x, y, p.c, cell * .26); p.dead = true; continue; }
+            let nd = p.d;
+            if (!opts.includes(nd) || Math.random() < .22) nd = opts[Math.floor(rnd(0, opts.length))];
+            const a = C(p), turn = nd !== p.d || p.fresh;
+            p.x += D[nd][0]; p.y += D[nd][1]; used[p.y * cols + p.x] = 1;
+            const b = C(p);
+            tube(ctx, a, b, p.c);
+            if (turn) ball(ctx, a[0], a[1], p.c, cell * .26);
+            p.d = nd; p.fresh = false; segs++;
+          }
+          pipes = pipes.filter(p => !p.dead);
+          if (segs > cols * rows * .55) { fade = 1.6; break; }
+        }
+      } };
+  },
+};
+
+// ======================================================= слой фона
+const DPR = () => Math.min(window.devicePixelRatio || 1, 2);
+const scenes = new Set();
+class Scene {
+  constructor(host) { this.host = host; this.kind = ''; this.value = ''; }
+  set(bg) {
+    const kind = bg ? bg.kind : 'color', value = bg ? (bg.url || bg.value) : '#000000';
+    if (kind === this.kind && value === this.value) return false;
+    this.clear(); this.kind = kind; this.value = value;
+    if (kind === 'color') this.host.style.background = value;
+    else if (kind === 'image') {
+      this.host.style.background = '#000';
+      const d = document.createElement('div'); d.className = 'bg-image';
+      d.style.backgroundImage = `url("${value}")`; this.host.appendChild(d);
+    } else if (kind === 'anim' && ANIM[value]) {
+      this.host.style.background = '#000';
+      this.canvas = document.createElement('canvas'); this.host.appendChild(this.canvas);
+      this.ctx = this.canvas.getContext('2d'); this.anim = ANIM[value](); this.w = 0; this.h = 0;
+      this.t0 = performance.now(); this.last = this.t0; scenes.add(this);
+    } else this.host.style.background = '#000';
+    return true;
+  }
+  clear() {
+    scenes.delete(this); this.host.innerHTML = ''; this.host.style.background = '';
+    this.canvas = this.ctx = this.anim = null; this.kind = this.value = '';
+  }
+  tick(now) {
+    const r = this.host.getBoundingClientRect(), w = Math.max(1, r.width), h = Math.max(1, r.height), dpr = DPR();
+    if (w !== this.w || h !== this.h || this.canvas.width !== Math.round(w * dpr)) {
+      this.w = w; this.h = h; this.canvas.width = Math.round(w * dpr); this.canvas.height = Math.round(h * dpr);
+      this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      this.anim.init && this.anim.init(w, h, this.ctx);
+    }
+    const t = (now - this.t0) / 1000, dt = Math.min(.1, (now - this.last) / 1000); this.last = now;
+    this.anim.frame(this.ctx, w, h, t, dt);
+  }
+}
+let lastFrame = 0;
+function step(now) { lastFrame = performance.now(); for (const s of scenes) { try { s.tick(now); } catch (e) { console.error(e); scenes.delete(s); } } }
+function loop(now) { step(now); requestAnimationFrame(loop); }
+requestAnimationFrame(loop);
+// кадров нет (вкладка в фоне, снимок без окна) — двигаем анимацию таймером, реже
+setInterval(() => { const n = performance.now(); if (n - lastFrame > 250) step(n); }, 66);
+
+// ======================================================= галерея фонов
+const TITLES = { gradient: 'Градиент', aurora: 'Сияние', lights: 'Огоньки', bubbles: 'Пузыри', cube: 'Куб', stars: 'Звёзды', pipes: 'Трубы' };
+if (location.pathname === '/gallery') {
+  document.getElementById('gallery').style.display = 'block';
+  const sel = new URLSearchParams(location.search).get('select') || '';
+  const grid = document.querySelector('#gallery .grid'), msg = document.querySelector('#gallery .msg');
+  const items = [['color:#000000', 'Чёрный']].concat(Object.keys(ANIM).map(k => ['anim:' + k, TITLES[k] || k]));
+  for (const [key, title] of items) {
+    const tile = document.createElement('div'); tile.className = 'tile' + (key === sel ? ' sel' : '');
+    const host = document.createElement('div'); host.style.cssText = 'position:absolute;inset:0';
+    tile.appendChild(host);
+    const label = document.createElement('span'); label.textContent = title; tile.appendChild(label);
+    grid.appendChild(tile);
+    const [kind, value] = [key.split(':')[0], key.slice(key.indexOf(':') + 1)];
+    new Scene(host).set({ kind, value });
+    tile.onclick = () => {
+      document.querySelectorAll('#gallery .tile').forEach(t => t.classList.toggle('sel', t === tile));
+      fetch('/pick', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ background: key }) })
+        .then(() => { msg.textContent = `Выбран фон «${title}» — он уже в шаблоне. Вкладку можно закрыть.`; })
+        .catch(() => { msg.textContent = 'Нет связи с AutoPrintCode — он запущен?'; });
+    };
+  }
+} else {
+  startScreen();
+}
+
+// ======================================================= экран эфира
+function startScreen() {
+  const bgA = new Scene(document.getElementById('bgA')), bgB = new Scene(document.getElementById('bgB'));
+  let front = bgA, back = bgB;
+  const brkEl = document.getElementById('brk'), brkBg = new Scene(brkEl.querySelector('.bgwrap'));
+  const capEl = document.getElementById('caption'), vidEl = document.getElementById('vid');
+  const video = vidEl.querySelector('video'), img = vidEl.querySelector('img');
+  const hint = document.getElementById('hint'), dot = document.getElementById('dot');
+  let S = { mode: 'idle' }, offset = 0, unlocked = false, blocked = false, exSeq = -1, exRestart = -1, brkTimer = 0;
+  const fontsLoaded = new Set();
+
+  const report = (data) => fetch('/report', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data) }).catch(() => {});
+
+  let bgGen = 0;
+  function setBackground(bg) {
+    // новый фон проявляется поверх прежнего, прежний убирается потом — зрители не видят «дыры»
+    const key = bg ? (bg.kind + ':' + (bg.url || bg.value)) : 'color:#000000';
+    if (front.kind + ':' + front.value === key) return;
+    const g = ++bgGen;
+    back.set(bg);
+    back.host.style.transition = 'none'; back.host.style.opacity = 0; back.host.style.zIndex = 1; front.host.style.zIndex = 0;
+    void back.host.offsetWidth;
+    back.host.style.transition = ''; back.host.style.opacity = 1;
+    const old = front; front = back; back = old;
+    setTimeout(() => { if (g === bgGen) { old.clear(); old.host.style.opacity = 0; } }, 700);
+  }
+
+  function applyFont(font, color) {
+    let family = (font && font.family) || 'Montserrat';
+    if (font && font.url) {
+      family = 'EfirFont' + Math.abs([...font.url].reduce((a, c) => (a * 31 + c.charCodeAt(0)) | 0, 7));
+      if (!fontsLoaded.has(family)) {
+        const st = document.createElement('style');
+        st.textContent = `@font-face { font-family: '${family}'; src: url("${font.url}"); font-display: block; }`;
+        document.head.appendChild(st); fontsLoaded.add(family);
+      }
+    }
+    document.documentElement.style.setProperty('--font', `'${family}', 'Montserrat', 'Bahnschrift', 'Segoe UI', sans-serif`);
+    document.documentElement.style.setProperty('--fg', color || '#fff');
+  }
+
+  function now() { return Date.now() + offset; }
+
+  function drawBreak() {
+    const b = S.brk; if (!b) return;
+    const left = b.paused_left != null ? b.paused_left : b.ends_at - now();
+    const t = brkEl.querySelector('.title'), tm = brkEl.querySelector('.time'), sub = brkEl.querySelector('.sub');
+    const done = left <= 0;
+    brkEl.classList.toggle('done', done);
+    if (done) { t.textContent = ''; tm.textContent = b.done || b.title; sub.textContent = b.done ? 'перерыв завершён' : ''; }
+    else if (b.countdown) {
+      t.textContent = b.title;
+      const s = Math.ceil(left / 1000), h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), sec = s % 60;
+      tm.textContent = (h ? h + ':' + String(m).padStart(2, '0') : String(m).padStart(2, '0')) + ':' + String(sec).padStart(2, '0');
+      sub.textContent = b.paused_left != null ? 'пауза' : '';
+    } else { t.textContent = ''; tm.textContent = b.title; sub.textContent = ''; }
+    tm.style.fontSize = (!done && !b.countdown) ? 'clamp(40px, 11vw, 240px)' : '';
+    const frac = b.total ? Math.min(1, Math.max(0, 1 - left / b.total)) : 0;
+    brkEl.querySelector('.bar').style.display = (b.countdown && !done) ? '' : 'none';
+    brkEl.querySelector('.bar i').style.width = (frac * 100).toFixed(2) + '%';
+  }
+
+  function showVideo(ex) {
+    const isImg = /\.(png|jpe?g|gif|webp|bmp)$/i.test(ex.url.split('?')[0]);
+    if (ex.seq !== exSeq) {
+      exSeq = ex.seq; exRestart = ex.restart; blocked = false;
+      if (isImg) { video.pause(); video.removeAttribute('src'); video.load(); video.style.display = 'none'; img.style.display = 'block'; img.src = ex.url; }
+      else { img.style.display = 'none'; video.style.display = 'block'; video.src = ex.url; video.currentTime = 0; }
+    } else if (ex.restart !== exRestart && !isImg) { exRestart = ex.restart; video.currentTime = 0; }
+    vidEl.classList.add('on');
+    if (isImg) return;
+    video.volume = Math.max(0, Math.min(1, ex.volume == null ? 1 : ex.volume));
+    if (ex.paused) { video.pause(); return; }
+    if (video.paused && !video.ended) play();
+  }
+
+  function play() {
+    video.muted = false;
+    const p = video.play();
+    if (p) p.catch(err => {
+      if (err && err.name === 'NotAllowedError') {          // браузер не даёт звук без щелчка по странице
+        blocked = true; video.muted = true; video.play().catch(() => {});
+        hint.classList.remove('off'); report({ type: 'blocked', seq: exSeq });
+      } else report({ type: 'video_error', seq: exSeq, message: String(err && err.message || err) });
+    });
+  }
+
+  function hideVideo() {
+    if (!vidEl.classList.contains('on') && exSeq < 0) return;
+    vidEl.classList.remove('on');
+    exSeq = -1;
+    setTimeout(() => { if (!vidEl.classList.contains('on')) { video.pause(); video.removeAttribute('src'); video.load(); img.removeAttribute('src'); } }, 500);
+  }
+
+  function apply(st) {
+    S = st; offset = (st.server_now || Date.now()) - Date.now();
+    applyFont(st.font, st.color);
+    setBackground(st.bg);
+    capEl.textContent = st.caption || '';
+    capEl.style.display = st.caption ? 'flex' : 'none';
+    if (st.mode === 'break' && st.brk) {
+      if (st.brk.bg) brkBg.set(st.brk.bg); else brkBg.clear();    // без своего фона — виден основной
+      brkEl.classList.add('on'); drawBreak();
+      if (!brkTimer) brkTimer = setInterval(drawBreak, 200);
+    } else {
+      brkEl.classList.remove('on');
+      if (brkTimer) { clearInterval(brkTimer); brkTimer = 0; }
+      setTimeout(() => { if (!brkEl.classList.contains('on')) brkBg.clear(); }, 700);
+    }
+    if (st.mode === 'exercise' && st.exercise && st.exercise.url) showVideo(st.exercise); else hideVideo();
+  }
+
+  // звук: первый щелчок по странице разрешает воспроизведение со звуком до перезагрузки вкладки
+  const unlock = () => {
+    if (unlocked) return;
+    unlocked = true; hint.classList.add('off');
+    if (blocked && !video.paused) { video.muted = false; blocked = false; }
+    report({ type: 'unlock' });
+  };
+  window.addEventListener('pointerdown', unlock, true);
+  window.addEventListener('keydown', unlock, true);
+  if (navigator.userActivation && navigator.userActivation.hasBeenActive) unlocked = true;
+  else hint.classList.remove('off');
+
+  video.addEventListener('ended', () => report({ type: 'ended', seq: exSeq }));
+  video.addEventListener('error', () => { if (exSeq >= 0 && video.getAttribute('src')) report({ type: 'video_error', seq: exSeq, message: 'Файл не открылся' }); });
+  setInterval(() => {
+    if (exSeq >= 0 && video.getAttribute('src') && video.style.display !== 'none')
+      report({ type: 'video', seq: exSeq, pos: video.currentTime || 0, dur: isFinite(video.duration) ? video.duration : 0,
+               paused: video.paused, muted: video.muted });
+  }, 1000);
+
+  let offTimer = 0;
+  function connect() {
+    const es = new EventSource('/events');
+    es.onopen = () => { clearTimeout(offTimer); dot.classList.remove('on');
+      report({ type: 'hello', unlocked, w: innerWidth, h: innerHeight }); };
+    es.onmessage = (e) => { try { apply(JSON.parse(e.data)); } catch (err) { console.error(err); } };
+    es.onerror = () => { clearTimeout(offTimer); offTimer = setTimeout(() => dot.classList.add('on'), 8000); };
+  }
+  connect();
+  window.addEventListener('resize', () => report({ type: 'hello', unlocked, w: innerWidth, h: innerHeight }));
+}
+</script>
+</body>
+</html>

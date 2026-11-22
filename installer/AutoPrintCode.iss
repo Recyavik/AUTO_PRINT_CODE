@@ -36,7 +36,7 @@
 
 #define AppName "AutoPrintCode"
 #define AppExe "AutoPrintCode.exe"
-#define AppUrl "https://github.com/Recyavik/AUTO_PRINT_CODE"
+#define AppUrl "https://github.com/DanT2000/AUTO_PRINT_CODE"
 ; AppId не менять: по нему установщик находит прежнюю версию и обновляет её
 #define AppGuid "{BC0222C7-A45D-4D77-A7C6-1EB7F2C4FB28}"
 
@@ -107,11 +107,17 @@ ru.ModeUpdate=Обновить установленную версию %1 → {#
 en.ModeUpdate=Update the installed version %1 → {#AppVersion}
 ru.ModePortable=Портативная версия — распаковать в папку
 en.ModePortable=Portable — unpack to a folder
+ru.OldPrograms=Старые программы:
+en.OldPrograms=Old programs:
+ru.RemoveTimer=Удалить «Таймер вебинара» — он теперь внутри AutoPrintCode (раздел «Эфир»); шаблоны, видео зарядки и фон перенесутся
+en.RemoveTimer=Remove «Webinar timer» — it is now part of AutoPrintCode («Efir»); templates, video and background are moved over
 ru.NotWritable=В папку%n%n%1%n%nнет права записи (нужны права администратора).%n%nВыберите другую папку, например:%n%2
 en.NotWritable=No write access to%n%n%1%n%n(administrator rights required).%n%nPlease choose another folder, for example:%n%2
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Check: not IsPortable
+; «Таймер вебинара» (отдельная программа Виктора) теперь — раздел «Эфир»: шаблоны, видео и фон переносятся
+Name: "removetimer"; Description: "{cm:RemoveTimer}"; GroupDescription: "{cm:OldPrograms}"; Check: TimerInstalled and not IsPortable
 
 [InstallDelete]
 ; библиотеки прежней версии убираются целиком, чтобы не смешались с новыми; data\ не трогается
@@ -145,6 +151,94 @@ var
   AutoDir: String;   // папка, которую подставили сами (если человек её не менял — меняем при смене режима)
   OldUserCopy: Boolean;   // установка для всех, а у пользователя стоит копия «только для меня» — удалить её
   OldUserDir, OldUninstaller: String;
+
+const
+  // старый AutoPrintCode Виктора (другой AppId, ставился в ту же папку) и его «Таймер вебинара»
+  VictorAppKey = 'Software\Microsoft\Windows\CurrentVersion\Uninstall\{EEEA90BF-80BD-47E9-BC98-2C3C3F21B616}_is1';
+  TimerAppKey = 'Software\Microsoft\Windows\CurrentVersion\Uninstall\{E4F5E0C0-61A9-4003-8571-50BDDAAC123E}_is1';
+
+function FindUninstaller(Key: String; var Uninst, Dir: String): Boolean;
+begin
+  Result := (RegQueryStringValue(HKCU, Key, 'UninstallString', Uninst) and RegQueryStringValue(HKCU, Key, 'InstallLocation', Dir))
+    or (RegQueryStringValue(HKLM, Key, 'UninstallString', Uninst) and RegQueryStringValue(HKLM, Key, 'InstallLocation', Dir));
+  if Result then
+    Dir := RemoveBackslashUnlessRoot(Dir);
+end;
+
+function TimerInstalled: Boolean;
+var
+  U, D: String;
+begin
+  Result := FindUninstaller(TimerAppKey, U, D);
+end;
+
+procedure RunUninstaller(Uninst: String; WaitFor: String);
+var
+  Code, N: Integer;
+begin
+  if not Exec(RemoveQuotes(Uninst), '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART', '', SW_HIDE, ewWaitUntilTerminated, Code) then
+    Log('Uninstaller failed: ' + Uninst + ' ' + SysErrorMessage(Code))
+  else begin
+    // деинсталлятор Inno копирует себя во временную папку и сразу возвращается — ждём, пока он уберёт себя
+    N := 0;
+    while (WaitFor <> '') and FileExists(WaitFor) and (N < 120) do begin
+      Sleep(500);
+      N := N + 1;
+    end;
+  end;
+end;
+
+procedure CopyTree(Src, Dst: String);
+var
+  F: TFindRec;
+begin
+  if not DirExists(Src) then
+    exit;
+  ForceDirectories(Dst);
+  if FindFirst(AddBackslash(Src) + '*', F) then
+  try
+    repeat
+      if (F.Name <> '.') and (F.Name <> '..') then begin
+        if F.Attributes and FILE_ATTRIBUTE_DIRECTORY <> 0 then
+          CopyTree(AddBackslash(Src) + F.Name, AddBackslash(Dst) + F.Name)
+        else if not FileCopy(AddBackslash(Src) + F.Name, AddBackslash(Dst) + F.Name, False) then
+          Log('Not copied: ' + AddBackslash(Src) + F.Name);
+      end;
+    until not FindNext(F);
+  finally
+    FindClose(F);
+  end;
+end;
+
+function DataDir: String;
+begin
+  // где программа держит данные: установка для всех — %APPDATA%, иначе data рядом с программой
+  if IsAdminInstallMode then
+    Result := ExpandConstant('{userappdata}\{#AppName}')
+  else
+    Result := ExpandConstant('{app}\data');
+end;
+
+procedure RemoveOldPrograms;
+var
+  U, D, Keep: String;
+begin
+  // старый AutoPrintCode Виктора: запись в «Приложениях» и его файлы убираем ДО установки (папка data остаётся)
+  if FindUninstaller(VictorAppKey, U, D) then begin
+    Log('Removing old AutoPrintCode (Victor): ' + D);
+    RunUninstaller(U, RemoveQuotes(U));
+  end;
+  if WizardIsTaskSelected('removetimer') and FindUninstaller(TimerAppKey, U, D) then begin
+    // сначала — копия шаблонов, настроек и файлов таймера: AutoPrintCode перенесёт их в «Эфир» при первом открытии
+    Keep := AddBackslash(DataDir) + 'efir\webinar-timer';
+    Log('Saving webinar timer data to ' + Keep);
+    CopyTree(AddBackslash(D) + 'data', AddBackslash(Keep) + 'data');
+    CopyTree(AddBackslash(D) + 'media', AddBackslash(Keep) + 'media');
+    CopyTree(AddBackslash(D) + 'templates', AddBackslash(Keep) + 'templates');
+    Log('Removing webinar timer: ' + D);
+    RunUninstaller(U, RemoveQuotes(U));
+  end;
+end;
 
 function UninstallKey: String;
 begin
@@ -265,6 +359,8 @@ procedure CurStepChanged(CurStep: TSetupStep);
 var
   Code, N: Integer;
 begin
+  if (CurStep = ssInstall) and not IsPortable then
+    RemoveOldPrograms;
   // новая копия для всех поставлена — прежнюю «только для меня» убрать (её data\ остаётся: программа
   // перенесёт занятия и настройки при первом запуске). Портативную установку это не касается
   if (CurStep = ssPostInstall) and OldUserCopy and not IsPortable

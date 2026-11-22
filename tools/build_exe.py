@@ -70,7 +70,7 @@ REQUIRED = [
     f"{NAME}.exe", "_internal/PySide6/Qt6Multimedia.dll", "_internal/PySide6/Qt6Network.dll",
     "_internal/PySide6/Qt6Svg.dll", "_internal/PySide6/plugins/multimedia/windowsmediaplugin.dll",
     "_internal/PySide6/plugins/platforms/qwindows.dll", "_internal/PySide6/plugins/imageformats/qsvg.dll",
-    "_internal/PySide6/plugins/iconengines/qsvgicon.dll", "_internal/autoprint/sounds/SOURCES.md",
+    "_internal/PySide6/plugins/iconengines/qsvgicon.dll", "_internal/autoprint/sounds/SOURCES.md", "_internal/autoprint/efir/page/screen.html",
 ]
 
 SPEC = '''# -*- mode: python ; coding: utf-8 -*-
@@ -188,6 +188,8 @@ def collect_datas() -> list[tuple[str, str]]:
     if not datas:
         sys.exit("Нет звуков в autoprint/sounds — сборка без них была бы немой")
     datas.append((str(sounds / "SOURCES.md"), "autoprint/sounds"))
+    page = ROOT / "autoprint" / "efir" / "page"          # страница экрана эфира (вкладка браузера)
+    datas += [(str(f), "autoprint/efir/page") for f in sorted(page.glob("*.html"))]
     return datas
 
 
@@ -199,7 +201,7 @@ def run_pyinstaller(version: str, icon: Path) -> None:
     version_file = BUILD / "version_info.txt"
     version_file.write_text(VERSION_INFO.format(
         nums=numeric_version(version), version=version, name=NAME, exe=f"{NAME}.exe",
-        comments="Печатает заготовленный код в любое окно — https://github.com/Recyavik/AUTO_PRINT_CODE"),
+        comments="Печатает заготовленный код в любое окно — https://github.com/DanT2000/AUTO_PRINT_CODE"),
         encoding="utf-8")
     spec = BUILD / f"{NAME}.spec"
     spec.write_text(SPEC.format(

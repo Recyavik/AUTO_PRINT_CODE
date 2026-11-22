@@ -8,6 +8,7 @@ from pathlib import Path
 from PySide6.QtCore import QByteArray, QEvent, QSize, Qt, QTimer
 from PySide6.QtGui import QCursor, QKeySequence, QShortcut
 from PySide6.QtWidgets import (QApplication, QFileDialog, QHBoxLayout, QInputDialog, QListWidgetItem, QMenu,
+                               QPushButton,
                                QMessageBox, QStackedWidget, QSystemTrayIcon, QToolButton, QVBoxLayout, QWidget)
 
 from .. import APP_NAME, __version__, system, taskbar, updater
@@ -25,6 +26,7 @@ from .. import highlighter
 from . import icons, logo
 from .blocks import BlockWidget, typing_slice
 from .control_strip import STATE_TEXT, ControlStrip
+from .efir_control import EfirController
 from .frameless import FramelessWindow
 from .library import ROLE_COUNT, ROLE_ID, LibraryPanel
 from .prompter import Prompter
@@ -118,6 +120,8 @@ class MainWindow(FramelessWindow):
         self.settings_win: SettingsWindow | None = None
         self.views: dict[str, TemplateView] = {}
 
+        self.efir = EfirController(self)    # «Эфир»: шаблоны вебинаров, таймер, вкладка эфира
+        self.efir.message.connect(lambda t, warn: self._notify(t, warn=warn))
         self._build_ui()
         self._build_tray()
         theme.changed.connect(self._on_theme)
@@ -125,6 +129,7 @@ class MainWindow(FramelessWindow):
         self._apply_settings()
         self._apply_hotkeys()
         self._restore_session()
+        QTimer.singleShot(1200, self.efir.restore)   # эфир шёл до перезапуска — вернуть таймер
 
         # автопроверка: вскоре после запуска, затем раз в час смотрим, не пора ли
         QTimer.singleShot(8000, self._auto_check_updates)
@@ -156,6 +161,21 @@ class MainWindow(FramelessWindow):
         self.btn_report = IconButton("bug", "Сообщить об ошибке", 17, box=32)
         self.btn_report.setObjectName("titleTool")
         self.btn_report.clicked.connect(self.open_report)
+        # «Эфир» — плашкой сверху: шаблоны вебинаров, таймер и вкладка эфира для учеников
+        self.btn_efir = QPushButton()
+        self.btn_efir.setObjectName("efirPill")
+        self.btn_efir.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_efir.setToolTip("Эфир: таймер вебинара по шаблону и экран для учеников — фон, зарядка, перерыв")
+        self.btn_efir.clicked.connect(self._efir_clicked)
+        self.btn_efir.setFixedHeight(28)
+        self.btn_efir.setMaximumWidth(360)
+        tb.right.addWidget(self.btn_efir)
+        tb.right.addSpacing(8)
+        self._efir_timer = QTimer(self)
+        self._efir_timer.setInterval(1000)
+        self._efir_timer.timeout.connect(self._update_efir_pill)
+        self._efir_timer.start()
+        self.efir.live_changed.connect(self._update_efir_pill)
         tb.right.addWidget(self.btn_report)
         tb.right.addWidget(self.btn_settings)
         tb.right.addWidget(self.btn_about)
@@ -240,6 +260,7 @@ class MainWindow(FramelessWindow):
         m.addSeparator()
         m.addAction(icons.icon("file-code"), "Добавить пример занятия (все возможности)", self._add_tour_sample)
         m.addAction(icons.icon("file-code"), "Добавить пример пошагового урока", self._add_steps_sample)
+        m.addAction(icons.icon("radio"), "Эфир — шаблоны вебинаров…", self.efir.show_window)
         m.addAction(icons.icon("external"), ("Закрыть окно суфлёра" if self.prompter_ctl.visible()
                                              else "Суфлёр в отдельном окне"), lambda: self.prompter_ctl.toggle())
         m.addAction(icons.icon("lines"), "Все блоки — обычный размер\tCtrl+Shift+0", self._reset_zoom)
@@ -258,6 +279,7 @@ class MainWindow(FramelessWindow):
         menu.aboutToShow.connect(self._remember_press)
         menu.addAction("Стоп", self.cmd_stop)
         menu.addAction("Суфлёр в отдельном окне", lambda: self.prompter_ctl.toggle())
+        menu.addAction("Эфир…", self._efir_clicked)
         menu.addSeparator()
         self.tray_update = menu.addAction("Обновление…", self.open_update_dialog)
         self.tray_update.setVisible(False)
@@ -280,6 +302,7 @@ class MainWindow(FramelessWindow):
         highlighter.set_palette("dark" if theme.dark else "light")
         self.logo_btn.setIcon(logo.make_icon(logo.IDLE, theme.c("accent")))
         self.restyle_frame()
+        self._update_efir_pill()
         self._on_state(self.engine.state)
         self.library.list.viewport().update()
 
@@ -1415,6 +1438,43 @@ class MainWindow(FramelessWindow):
             self.tray.showMessage(APP_NAME, text, self.tray_icons[logo.PAUSED if warn else logo.IDLE], 3000)
 
     # ================================================================ прочее
+    def _efir_clicked(self) -> None:
+        """Плашка «Эфир»: эфир идёт — показать таймер, иначе — шаблоны вебинаров."""
+        if self.efir.live_webinar() is not None:
+            self.efir.show_timer()
+        else:
+            self.efir.show_window()
+
+    def _update_efir_pill(self) -> None:
+        b = getattr(self, "btn_efir", None)
+        if b is None:
+            return
+        w = self.efir.live_webinar()
+        text = " Эфир"
+        live = False
+        if w is not None:
+            ag = self.efir.agenda()
+            live = True
+            if ag.phase == "live" and ag.current:
+                from ..efir.model import fmt_left
+                text = f" Эфир · {ag.current.activity.name} · {fmt_left(ag.left_s)}"
+            elif ag.phase == "before":
+                text = f" Эфир · {w.title} · в {w.start}"
+            else:
+                text = f" Эфир · {w.title}"
+        if b.text() != text:
+            b.setText(text)
+        token = "ok" if live else "accent"
+        key = (token, theme.dark)
+        if getattr(b, "_style_key", None) != key:
+            b._style_key = key
+            b.setIcon(icons.icon("radio", token, 15))
+            soft = theme.css("accent_soft")
+            col = theme.css(token)
+            b.setStyleSheet(f"QPushButton#efirPill {{ color: {col}; border: 1px solid {col}; border-radius: 13px; "
+                            f"padding: 3px 12px 3px 9px; font-weight: 600; background: transparent; }}"
+                            f"QPushButton#efirPill:hover {{ background: {soft}; }}")
+
     def _show_window(self) -> None:
         if self.isMaximized():
             self.showMaximized()
@@ -1539,7 +1599,8 @@ class MainWindow(FramelessWindow):
         self._notify(f"{APP_NAME} обновлён: {d.get('from')} → {d.get('to')}.", tray=True)
 
     def closeEvent(self, e) -> None:
-        if self.settings.close_to_tray and not self._quitting and self.tray.isVisible():
+        live = self.efir.live_webinar() is not None    # идёт эфир — таймер не должен пропасть вместе с окном
+        if (self.settings.close_to_tray or live) and not self._quitting and self.tray.isVisible():
             # «закрыть» = спрятать в трей; выход — из меню логотипа или значка в трее
             e.ignore()
             self._save_session()
@@ -1561,6 +1622,7 @@ class MainWindow(FramelessWindow):
         if self.settings_win:
             self.settings_win.close()
         self.prompter_ctl.shutdown()
+        self.efir.shutdown()
         self.engine.stop()
         self._save_timer.stop()
         self._save_store()

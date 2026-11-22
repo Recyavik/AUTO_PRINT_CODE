@@ -44,7 +44,8 @@ from .storage import DATA_DIR, _in_program_files, app_dir
 
 log = logging.getLogger("autoprint.update")
 
-REPO = "Recyavik/AUTO_PRINT_CODE"
+# Виктор (Recyavik) ушёл из проекта — обновления только из этого репозитория, его версии не подтягиваются
+REPO = "DanT2000/AUTO_PRINT_CODE"
 API = f"https://api.github.com/repos/{REPO}"
 RELEASES_PAGE = f"https://github.com/{REPO}/releases"
 GIT_URL = f"https://github.com/{REPO}.git"

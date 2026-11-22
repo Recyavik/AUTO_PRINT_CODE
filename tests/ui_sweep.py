@@ -67,7 +67,9 @@ class Spy(QObject):
                 where = " ← ".join(f"{Path(f.filename).name}:{f.lineno}" for f in reversed(fr[-3:]))
                 self.stray.setdefault(f"{cls} «{obj.objectName()}» {where}", set()).add(self.phase)
             elif obj.windowType() in (Qt.WindowType.Dialog, Qt.WindowType.Window) and obj.parentWidget() is None \
-                    and cls != "MainWindow":
+                    and cls not in ("MainWindow", "TimerWindow"):
+                # таймер эфира — нарочно своё окно с кнопкой на панели задач: его сворачивают, и он не должен
+                # пропадать, когда сворачивают главное окно
                 self.unowned.setdefault(cls, set()).add(self.phase)
         return False
 
