@@ -119,6 +119,73 @@ class WheelTest(unittest.TestCase):
 
 
 
+
+class RealWheelTest(unittest.TestCase):
+    """Ревью №1: колесо настоящей мыши. Qt отдаёт фокус счётчику (WheelFocus) раньше любых фильтров —
+    поэтому событие шлём через окно (QTest.wheelEvent), как это делает Windows, а не sendEvent в виджет."""
+
+    @classmethod
+    def setUpClass(cls):
+        from autoprint.ui.widgets import install_wheel_guard
+        install_wheel_guard(app)
+
+    def real_wheel(self, area: QWidget, child: QWidget, dy: int = -120) -> None:
+        from PySide6.QtTest import QTest
+        pos = QPointF(child.mapTo(area, QPoint(child.width() // 2, child.height() // 2)))
+        QTest.wheelEvent(area.windowHandle(), pos, QPoint(0, dy))
+        pump(40)
+
+    def page(self, child: QWidget):
+        return WheelTest.page(self, child)
+
+    def test_real_wheel_unfocused_spin(self):
+        sp = QSpinBox()
+        sp.setRange(0, 100)
+        sp.setValue(50)
+        area, _ = self.page(sp)
+        self.real_wheel(area, sp)
+        self.assertEqual(sp.value(), 50)
+        self.assertGreater(area.verticalScrollBar().value(), 0)
+        area.close()
+
+    def test_real_wheel_unfocused_combo(self):
+        cb = QComboBox()
+        cb.addItems(["Обычный", "Перерыв", "Зарядка"])
+        area, _ = self.page(cb)
+        self.real_wheel(area, cb)
+        self.assertEqual(cb.currentIndex(), 0)
+        area.close()
+
+    def test_real_wheel_stage_minutes_in_lesson(self):
+        """Тот самый случай: прокручиваешь занятие — минуты этапа под мышью не меняются."""
+        from autoprint.storage import BLOCK_MARKDOWN, BLOCK_STAGE, Block, Template
+        from autoprint.ui.template_view import TemplateView
+        t = Template(title="x", blocks=[Block(BLOCK_STAGE, "", title="Этап", minutes=10)]
+                     + [Block(BLOCK_MARKDOWN, f"текст {i}", role="say") for i in range(30)])
+        v = TemplateView(t)
+        v.resize(900, 500)
+        v.show()
+        pump(80)
+        st = v.widgets[0]
+        self.real_wheel(v, st.minutes)
+        self.real_wheel(v, st.minutes)
+        self.assertEqual(st.minutes.value(), 10)
+        self.assertGreater(v.scroll.verticalScrollBar().value(), 0)
+        v.close()
+
+    def test_click_then_wheel_changes(self):
+        from PySide6.QtTest import QTest
+        sp = QSpinBox()
+        sp.setRange(0, 100)
+        sp.setValue(50)
+        area, _ = self.page(sp)
+        QTest.mouseClick(sp.lineEdit(), Qt.MouseButton.LeftButton)
+        pump(30)
+        self.real_wheel(area, sp)
+        self.assertNotEqual(sp.value(), 50)
+        area.close()
+
+
 # ================================================================ Task 2: тема без зависаний
 
 def big_template(n: int = 120, title: str = "Большое занятие"):

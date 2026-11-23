@@ -40,7 +40,11 @@ class WheelGuard(QObject):
     пока прокручиваешь ленту. Ставится на всё приложение (install_wheel_guard)."""
 
     def eventFilter(self, obj, ev) -> bool:
-        if ev.type() != QEvent.Type.Wheel or not isinstance(obj, QWidget):
+        t = ev.type()
+        if t == QEvent.Type.Polish:
+            _no_wheel_focus(obj)
+            return False
+        if t != QEvent.Type.Wheel or not isinstance(obj, QWidget):
             return False
         if ev.modifiers() & Qt.KeyboardModifier.ControlModifier:
             return False                    # Ctrl+колесо — масштаб блока (ZoomWheelFilter)
@@ -60,6 +64,14 @@ class WheelGuard(QObject):
         return True
 
 
+def _no_wheel_focus(w) -> None:
+    """Счётчики и списки по умолчанию берут фокус от колеса (WheelFocus): у настоящей мыши Qt отдаёт им фокус
+    раньше любых фильтров — и значение менялось. Фокус — только щелчком или Tab."""
+    if isinstance(w, (QAbstractSpinBox, QComboBox)) or (isinstance(w, QAbstractSlider) and not isinstance(w, QScrollBar)):
+        if w.focusPolicy() == Qt.FocusPolicy.WheelFocus:
+            w.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+
+
 def install_wheel_guard(app: QApplication) -> WheelGuard:
     guard = app.property("_wheel_guard_obj")
     if isinstance(guard, WheelGuard):
@@ -67,6 +79,8 @@ def install_wheel_guard(app: QApplication) -> WheelGuard:
     guard = WheelGuard(app)
     app.installEventFilter(guard)
     app.setProperty("_wheel_guard_obj", guard)
+    for w in QApplication.allWidgets():      # созданные до установки — тоже
+        _no_wheel_focus(w)
     return guard
 
 
