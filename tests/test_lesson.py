@@ -251,5 +251,86 @@ class MaterialsTest(unittest.TestCase):
             materials.extract(str(f))
 
 
+SCENARIO_ANSWER = """Вот сценарий:
+```json
+{"format": "autoprintcode-lesson", "version": 2, "title": "Тёмная тема",
+ "blocks": [
+  {"type": "task", "text": "## Цель\\nПереключение светлой и тёмной темы."},
+  {"type": "stage", "title": "Зачем нужна тёмная тема", "min": 10, "part": "Тёмная тема", "note": "теория"},
+  {"type": "say", "text": "Сейчас тёмная тема — главный тренд."},
+  {"type": "ask", "text": "Какие темы вы предпочитаете?", "answer": ["пишут в чат", "глаза меньше устают"]},
+  {"type": "image", "slide": 3, "caption": "Пример YouTube"},
+  {"type": "stage", "title": "Перерыв", "minutes": 10, "kind": "перерыв"},
+  {"type": "stage", "title": "Создание тёмной темы", "min": 25, "kind": "practice"},
+  {"type": "show", "text": "Задание на платформе"},
+  {"type": "code", "lang": "css", "code": ".darkTheme {\\n  color: #fff;\\n}"},
+  {"type": "trap", "text": "- чистый #000"},
+ ]}
+```"""
+
+
+class ScenarioAiTest(unittest.TestCase):
+    def test_prompt_mentions_blocks(self):
+        from autoprint import lesson_ai as L
+        opt = L.Options(style=L.STYLE_SCENARIO, minutes=80, break_min=10)
+        p = L.build_prompt("Методичка: тёмная тема", opt)
+        for word in ('"stage"', '"say"', '"ask"', '"answer"', '"do"', '"show"', '"image"', '"slide"', "80",
+                     '"kind": "break"', "10 мин", "Методичка: тёмная тема"):
+            self.assertIn(word, p)
+        self.assertIn("Сценарий урока", L.STYLES.values())
+
+    def test_parse_scenario(self):
+        from autoprint import lesson_ai as L
+        asked = []
+
+        def slide(n):
+            asked.append(n)
+            return str(TMP / f"slide-{n}.png")
+
+        r = L.parse_lesson(SCENARIO_ANSWER, slide=slide)
+        t = r.template
+        kinds = [(b.type, b.role if b.type == BLOCK_MARKDOWN else b.title) for b in t.blocks]
+        self.assertEqual(kinds[0], (BLOCK_MARKDOWN, "task"))
+        st = [b for b in t.blocks if b.type == BLOCK_STAGE]
+        self.assertEqual([(b.title, b.minutes, b.stage_kind) for b in st],
+                         [("Зачем нужна тёмная тема", 10, ""), ("Перерыв", 10, "break"),
+                          ("Создание тёмной темы", 25, "")])
+        self.assertEqual((st[0].part, st[0].text), ("Тёмная тема", "теория"))
+        ask = next(b for b in t.blocks if b.role == "ask")
+        self.assertEqual(ask.text, "Какие темы вы предпочитаете?\n→ пишут в чат\n→ глаза меньше устают")
+        img = next(b for b in t.blocks if b.type == BLOCK_IMAGE)
+        self.assertEqual((asked, img.text, img.title), ([3], str(TMP / "slide-3.png"), "Пример YouTube"))
+        self.assertEqual(t.active_block, t.code_blocks()[0].id)
+        self.assertEqual(t.title, "Тёмная тема")
+        self.assertIn("этапов: 3", r.summary)
+
+    def test_parse_no_code_ok(self):
+        from autoprint import lesson_ai as L
+        r = L.parse_lesson('{"blocks": [{"type": "stage", "title": "Вступление", "min": 5},'
+                           ' {"type": "say", "text": "Привет"}]}')
+        self.assertEqual(len(r.template.blocks), 2)
+        self.assertEqual(r.template.active_block, "")
+
+    def test_parse_nothing_error(self):
+        from autoprint import lesson_ai as L
+        with self.assertRaises(L.LessonError):
+            L.parse_lesson('{"blocks": [{"type": "say", "text": "только речь"}]}')
+
+    def test_image_without_source_warns(self):
+        from autoprint import lesson_ai as L
+        r = L.parse_lesson('{"blocks": [{"type": "stage", "title": "А", "min": 5},'
+                           ' {"type": "image", "slide": 4}, {"type": "image", "url": "https://x.y/a.png"},'
+                           ' {"type": "image", "url": "javascript:alert(1)"}]}')
+        imgs = [b for b in r.template.blocks if b.type == BLOCK_IMAGE]
+        self.assertEqual([b.text for b in imgs], ["https://x.y/a.png"])
+        self.assertTrue(any("слайд 4" in w.lower() for w in r.warnings))
+
+    def test_unknown_type_warns(self):
+        from autoprint import lesson_ai as L
+        r = L.parse_lesson('{"blocks": [{"type": "stage", "title": "А", "min": 5}, {"type": "wow", "text": "т"}]}')
+        self.assertTrue(r.warnings)
+        self.assertEqual(r.template.blocks[1].role, "text")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

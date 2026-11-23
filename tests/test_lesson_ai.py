@@ -323,6 +323,8 @@ def test_marks() -> None:
           and '"lines"' not in prompt)
     exp_steps = [3, 3, 3, 1, 1, 2, 2, 3]   # import наверху с шагом 3, его комментарий тоже
     for style in L.STYLES:
+        if style == L.STYLE_SCENARIO:
+            continue        # сценарий урока — не разбор кода: разметки большого кода у него нет
         ans = L._MARKS_EXAMPLES[style]
         p = L.parse_lesson(ans, material=CODE, style=style)
         codes = p.template.code_blocks()

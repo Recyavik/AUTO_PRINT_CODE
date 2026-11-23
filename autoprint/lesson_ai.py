@@ -36,18 +36,20 @@ import difflib
 import json
 import re
 from dataclasses import dataclass, field
+from typing import Callable
 
 from .comments import comment_line, comment_spans, strip_comments, supported
 from .importers import guess_lang
-from .storage import BLOCK_CODE, BLOCK_MARKDOWN, ROLES, Block, Template
+from .storage import BLOCK_CODE, BLOCK_IMAGE, BLOCK_MARKDOWN, BLOCK_STAGE, ROLES, Block, Template
 
 FORMAT = "autoprintcode-lesson"
 
-STYLE_COMMENTS, STYLE_STEPS, STYLE_PARTS = "comments", "steps", "parts"
+STYLE_COMMENTS, STYLE_STEPS, STYLE_PARTS, STYLE_SCENARIO = "comments", "steps", "parts", "scenario"
 STYLES = {
     STYLE_COMMENTS: "С комментариями",
     STYLE_STEPS: "По шагам",
     STYLE_PARTS: "По частям",
+    STYLE_SCENARIO: "Сценарий урока",   # суфлёр урока: этапы со временем, что сказать / спросить / показать
 }
 DETAIL_SHORT, DETAIL_FULL = "short", "full"
 
@@ -65,6 +67,8 @@ class Options:
     detail: str = DETAIL_SHORT   # комментарии: коротко | подробно
     lang: str = ""               # язык кода, если известен ("" — пусть определит нейросеть)
     marks: bool = False          # большой код: ответ — разметка строк, код берётся из материала
+    minutes: int = 90            # сценарий урока: длительность урока
+    break_min: int = 0           # сценарий урока: перерыв (0 — только если он есть в материале)
 
 
 def source_lines(material: str) -> list[str]:
@@ -104,7 +108,14 @@ _STYLE_RULES = {
 
 def build_prompt(material: str, opt: Options) -> str:
     """Промпт целиком для «Скопировать промпт»: правила, формат, пример — и материал пользователя в конце."""
-    return instruction(opt) + material_message(material, opt.marks)
+    return instruction(opt) + material_for(material, opt)
+
+
+def material_for(material: str, opt: Options) -> str:
+    """Материал отдельным сообщением — в том виде, что нужен разбору (сценарий, разметка, обычный)."""
+    if opt.style == STYLE_SCENARIO:
+        return f"\nМАТЕРИАЛ (методичка, презентация или расшифровка урока):\n<<<\n{material.strip()}\n>>>\n"
+    return material_message(material, opt.marks)
 
 
 def material_message(material: str, numbered: bool = False) -> str:
@@ -117,6 +128,8 @@ def material_message(material: str, numbered: bool = False) -> str:
 
 def instruction(opt: Options) -> str:
     """Правила, формат и пример — без материала (по API это системное сообщение, материал — отдельным)."""
+    if opt.style == STYLE_SCENARIO:
+        return _scenario_instruction(opt)
     if opt.marks:
         return _marks_instruction(opt)
     keep = ("Код НЕ МЕНЯЙ: ни имён, ни логики, ни ПОРЯДКА строк, ни форматирования — только добавь комментарии "
@@ -256,6 +269,84 @@ docstring, комментарии, импорты и пустые строки. 
 """
 
 
+_SCENARIO_EXAMPLE = """{"format": "autoprintcode-lesson", "version": 2, "title": "Урок 3. Тёмная тема",
+ "blocks": [
+  {"type": "task", "text": "## Цель урока\\nРеализовать переключение светлой и тёмной темы.\\n- правила оформления тёмных тем\\n- функция toggle"},
+  {"type": "stage", "title": "Вступление", "min": 2, "part": "Летучка"},
+  {"type": "say", "text": "Очень рад видеть вас всех снова! Как ваши впечатления после прошлого урока?"},
+  {"type": "important", "text": "Спроси, есть ли организационные вопросы, и ответь на них."},
+  {"type": "stage", "title": "Зачем нужна тёмная тема", "min": 10, "part": "Тёмная тема", "note": "теория"},
+  {"type": "show", "text": "Задание на платформе «Зачем нужна тёмная тема?»"},
+  {"type": "say", "text": "Сейчас тёмная тема — главный тренд в дизайне. Большинство сайтов имеют светлую и тёмную темы."},
+  {"type": "ask", "text": "Какие темы вы предпочитаете: тёмные или светлые? Зачем нужна тёмная тема?", "answer": "Пишут в чат. Ждём: глаза меньше устают, яркий экран мешает уснуть, экономит заряд."},
+  {"type": "tell", "text": "- в темноте глаза меньше устают\\n- яркий свет мешает выработке мелатонина\\n- экономит энергию"},
+  {"type": "image", "slide": 7, "caption": "Тёмная тема YouTube: нет чистого чёрного"},
+  {"type": "do", "text": "Попроси учеников открыть YouTube и переключить тему."},
+  {"type": "stage", "title": "Перерыв", "min": 10, "kind": "break"},
+  {"type": "stage", "title": "Создание тёмной темы", "min": 25, "part": "Тёмная тема", "note": "практика на платформе"},
+  {"type": "say", "text": "Перейдём к практике: создадим тёмную тему и запрограммируем кнопку для переключения."},
+  {"type": "code", "lang": "css", "code": ".darkTheme {\\n    background-color: #121212;\\n    color: #fff;\\n}"},
+  {"type": "trap", "text": "- чистый чёрный #000 — правило 1 нарушено\\n- забыли класс lightTheme на body"},
+  {"type": "extra", "text": "Сделайте ещё и цветную тему — третьим классом."}
+ ]}"""
+_STYLE_RULES[STYLE_SCENARIO] = "ЭТАПЫ. Разбей урок на этапы"   # первая строка правил сценария
+
+
+def _scenario_instruction(opt: Options) -> str:
+    """Промпт «Сценарий урока»: методичка или презентация → этапы с минутами и блоки-подсказки."""
+    minutes = max(5, int(opt.minutes or 90))
+    if opt.break_min > 0:
+        brk = (f'Добавь перерыв на {opt.break_min} мин отдельным этапом {{"type": "stage", "title": "Перерыв", '
+               f'"min": {opt.break_min}, "kind": "break"}} примерно в середине урока (если в материале перерыв уже '
+               f'есть — возьми его место). Его минуты входят в {minutes}.')
+    else:
+        brk = 'Перерыв отдельным этапом ("kind": "break") добавляй, только если он есть в материале.'
+    detail = ("Пиши коротко: реплики «Говоришь» — 1–3 предложения, тезисы — по одной строке."
+              if opt.detail == DETAIL_SHORT else
+              "Можно подробнее: реплики «Говоришь» — до 5 предложений, тезисы — с пояснением «зачем».")
+    return f"""Ты помогаешь преподавателю подготовить СУФЛЁР УРОКА для программы AutoPrintCode. Суфлёр — сценарий
+урока по этапам: на каждом этапе — что сказать, что спросить, что сделать, что показать ученикам. Преподаватель
+ведёт урок по нему вживую, поэтому всё идёт в том порядке, в каком происходит на уроке, коротко и конкретно.
+Пиши по-русски.
+
+ЭТАПЫ. Разбей урок на этапы — блоки {{"type": "stage", "title": "короткое название", "min": минуты,
+"part": "раздел", "note": "пометка"}}. "part" — раздел урока, если в материале есть разделы (например,
+«Летучка», «Тёмная тема»); "note" — коротко, что это за этап (теория, практика, где идёт: на платформе,
+в редакторе). Сумма минут всех этапов — ровно {minutes}. Если в материале есть план с минутами — следуй ему.
+{brk}
+Зарядка, гимнастика для глаз, физкультминутка — отдельный этап с "kind": "exercise".
+
+БЛОКИ ЭТАПА идут после него, по порядку урока:
+- "say" — Говоришь: что преподаватель говорит почти дословно, живой речью. Если в материале речь выделена
+  (цветом, ⟦…⟧, кавычками, репликой с «—» в начале) — переноси её сюда почти дословно, строгие определения —
+  дословно.
+- "tell" — Расскажи: тезисы, которые объясняет своими словами (список «- …»).
+- "ask" — Спроси: вопрос классу в "text", ожидаемый ответ — в "answer".
+- "do" — Делаешь: действие преподавателя, вслух не читается (открыть задание, проверить чат, дать ссылку).
+- "important" — Важно: то, что нельзя пропустить, 1–2 предложения.
+- "show" — Показываешь: что в этот момент видят ученики (слайд, задание на платформе, сайт, редактор).
+  Пиши общими словами, без внутреннего устройства конкретной платформы, если оно не нужно для понимания.
+- "code" — код, который пишут вместе с учениками: "lang" и "code". Код бери из материала без изменений.
+- "trap" — Ловушки: типичные ошибки учеников и на чём режет проверка (список).
+- "extra" — Для быстрых: дополнительное задание тем, кто закончил раньше.
+- "image" — картинка слайда: {{"type": "image", "slide": N, "caption": "подпись"}}, если в материале есть
+  страницы или слайды («=== Страница N ===», «=== Слайд N ===») и этот слайд стоит держать перед глазами на
+  этапе. Не больше одной картинки на этап.
+- "task", "explain", "hint", "text" — обычный текст (условие задачи, пояснение, подсказка), если нужен.
+Цель урока и что ученики должны уметь после него — блоком "task" ДО первого этапа.
+В "text" — Markdown: списки «- », **жирный**, `код`, ссылки [текст](адрес). Ссылки из материала сохраняй.
+Не выдумывай фактов, которых нет в материале. Пустые блоки не добавляй.
+{detail}
+
+ОТВЕТ — ТОЛЬКО JSON, без пояснений до и после:
+{{"format": "{FORMAT}", "version": 2, "title": "название урока", "blocks": [ ... ]}}
+Внутри строк JSON экранируй кавычки и переводы строк как положено (\\" и \\n).
+
+Пример ответа (по смыслу, не копируй):
+{_SCENARIO_EXAMPLE}
+"""
+
+
 _EXAMPLES = {
     STYLE_COMMENTS: """{"format": "autoprintcode-lesson", "version": 1, "title": "Сумма списка",
  "blocks": [
@@ -281,6 +372,7 @@ _EXAMPLES = {
   {"type": "code", "lang": "python", "code": "# Остаток от деления на 2 равен нулю — число чётное\\nevens = [n for n in nums if n % 2 == 0]"}
  ]}""",
 }
+_EXAMPLES[STYLE_SCENARIO] = _SCENARIO_EXAMPLE
 
 
 # ---------------------------------------------------------------- разбор ответа
@@ -300,13 +392,51 @@ class Parsed:
         codes = t.code_blocks()
         steps = sum(len(set(b.steps)) for b in codes if b.steps and len(set(b.steps)) > 1)
         parts = [f"блоков: {len(t.blocks)}", f"кода: {len(codes)}"]
+        stages = [b for b in t.blocks if b.type == BLOCK_STAGE]
+        if stages:
+            parts.insert(0, f"этапов: {len(stages)} · {sum(b.minutes for b in stages)} мин")
         if steps:
             parts.append(f"шагов: {steps}")
         return " · ".join(parts)
 
 
 _TYPE_ROLE = {"task": "task", "explain": "explain", "hint": "hint", "text": "text", "markdown": "text",
-              "условие": "task", "пояснение": "explain", "подсказка": "hint"}
+              "условие": "task", "пояснение": "explain", "подсказка": "hint",
+              # суфлёр урока
+              "say": "say", "tell": "tell", "ask": "ask", "do": "do", "important": "important", "show": "show",
+              "trap": "trap", "traps": "trap", "extra": "extra", "question": "ask", "action": "do",
+              "говоришь": "say", "расскажи": "tell", "спроси": "ask", "делаешь": "do", "важно": "important",
+              "показываешь": "show", "ловушки": "trap", "для быстрых": "extra"}
+_STAGE_TYPES = {"stage", "этап"}
+_IMAGE_TYPES = {"image", "picture", "slide", "картинка", "слайд"}
+_STAGE_KINDS = {"break": "break", "перерыв": "break", "exercise": "exercise", "зарядка": "exercise",
+                "гимнастика": "exercise", "normal": "", "": ""}
+
+
+def _stage_block(raw: dict, n: int) -> Block:
+    from .efir.model import KIND_BREAK, KIND_EXERCISE, guess_kind
+    title = str(raw.get("title") or raw.get("name") or "").strip() or f"Этап {n}"
+    try:
+        minutes = max(0, min(24 * 60, int(raw.get("min", raw.get("minutes", raw.get("duration"))) or 0)))
+    except (TypeError, ValueError):
+        minutes = 0
+    kind = _STAGE_KINDS.get(str(raw.get("kind") or "").strip().lower())
+    if kind is None:     # «practice», «теория» — не вид этапа: смотрим на название (Перерыв, Гимнастика для глаз)
+        kind = ""
+    if not kind:
+        g = guess_kind(title)
+        kind = "break" if g == KIND_BREAK else "exercise" if g == KIND_EXERCISE else ""
+    note = str(raw.get("note") or raw.get("text") or "").strip()
+    return Block(BLOCK_STAGE, note, title=title[:120], minutes=minutes, stage_kind=kind,
+                 part=str(raw.get("part") or "").strip()[:120])
+
+
+def _answers(raw) -> list[str]:
+    if isinstance(raw, list):
+        items = [str(x) for x in raw]
+    else:
+        items = str(raw or "").split("\n")
+    return [re.sub(r"^\s*(→|->)\s*", "", x).strip() for x in items if str(x).strip()]
 
 
 def extract_json(text: str):
@@ -362,9 +492,11 @@ def _lines(raw, n_block: int, warnings: list[str]) -> tuple[str, list[int]]:
     return "\n".join(texts), compact
 
 
-def parse_lesson(text: str, title: str = "", material: str = "", style: str = "") -> Parsed:
+def parse_lesson(text: str, title: str = "", material: str = "", style: str = "",
+                 slide: Callable[[int], str | None] | None = None) -> Parsed:
     """Ответ нейросети (или наш JSON) → занятие. LessonError — если разобрать нельзя.
-    material и style нужны «разметке» большого кода: код берётся из материала."""
+    material и style нужны «разметке» большого кода: код берётся из материала.
+    slide(N) — путь к картинке слайда N материала (PDF) для блоков {"type": "image", "slide": N}."""
     data = extract_json(text)
     if data is None:
         raise LessonError("В ответе не нашёлся JSON. Попросите нейросеть ответить строго в формате из промпта "
@@ -382,7 +514,24 @@ def parse_lesson(text: str, title: str = "", material: str = "", style: str = ""
         if not isinstance(raw, dict):
             warnings.append(f"Блок {i} пропущен: это не объект.")
             continue
-        kind = str(raw.get("type", "")).lower()
+        kind = str(raw.get("type", "")).strip().lower()
+        if kind in _STAGE_TYPES:
+            blocks.append(_stage_block(raw, sum(b.type == BLOCK_STAGE for b in blocks) + 1))
+            continue
+        if kind in _IMAGE_TYPES:
+            n = _int(raw.get("slide", raw.get("page")))
+            url = str(raw.get("url") or raw.get("src") or "").strip()
+            path = slide(n) if n and slide else None
+            if not path and re.match(r"https?://", url, re.I):
+                path = url
+            caption = str(raw.get("caption") or raw.get("title") or raw.get("text") or "").strip()
+            if path:
+                blocks.append(Block(BLOCK_IMAGE, path, title=caption[:200]))
+            elif n:
+                warnings.append(f"Блок {i}: картинку «слайд {n}» не вставить — нет PDF с таким слайдом.")
+            else:
+                warnings.append(f"Блок {i}: картинка без файла и адреса — пропущена.")
+            continue
         if kind == "code" or "code" in raw or "lines" in raw:
             n_code += 1
             lang = str(raw.get("lang") or "python").lower()
@@ -405,13 +554,16 @@ def parse_lesson(text: str, title: str = "", material: str = "", style: str = ""
             if kind and kind not in _TYPE_ROLE:
                 warnings.append(f"Блок {i}: неизвестный тип «{kind}» — стал обычным текстом.")
             body = str(raw.get("text") or "").replace("\r\n", "\n").strip()
+            if role == "ask" and raw.get("answer"):
+                body = "\n".join([body] + [f"→ {a}" for a in _answers(raw["answer"])]).strip()
             if body:
                 blocks.append(Block(BLOCK_MARKDOWN, body, role=role if role in ROLES else "text"))
-    if not any(b.type == BLOCK_CODE for b in blocks):
-        raise LessonError("В ответе нет ни одного блока кода.")
+    has_code = any(b.type == BLOCK_CODE for b in blocks)
+    if not has_code and not any(b.type == BLOCK_STAGE for b in blocks):
+        raise LessonError("В ответе нет ни этапов урока, ни блоков кода.")
     name = str(data.get("title") or title or "Новое занятие").strip()[:120]
     t = Template(title=name, blocks=blocks)
-    t.active_block = next(b.id for b in blocks if b.type == BLOCK_CODE)
+    t.active_block = next((b.id for b in blocks if b.type == BLOCK_CODE), "")
     return Parsed(t, warnings)
 
 
