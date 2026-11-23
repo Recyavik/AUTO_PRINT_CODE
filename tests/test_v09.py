@@ -145,6 +145,14 @@ def make_main(port: int):
     return win, store
 
 
+def drop_main(win) -> None:
+    """Главное окно теста — удалить совсем: иначе следующая смена темы перекрашивает и его."""
+    import shiboken6
+    win.hide()
+    shiboken6.delete(win)
+    pump(10)
+
+
 class ThemeTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -155,6 +163,7 @@ class ThemeTest(unittest.TestCase):
     def tearDownClass(cls):
         theme.set_mode("dark")
         cls.win.efir.shutdown()
+        drop_main(cls.win)
 
     def test_block_widget_count(self):
         from autoprint.storage import BLOCK_CODE, BLOCK_MARKDOWN, Block, Template
@@ -500,6 +509,7 @@ class LessonStartTest(unittest.TestCase):
         cls.win.efir.stop_live()
         cls.win.efir.shutdown()
         store_mod.efir_dir = cls._efir_dir
+        drop_main(cls.win)
 
     def tearDown(self):
         self.win.lesson.command({"cmd": "stop"})
