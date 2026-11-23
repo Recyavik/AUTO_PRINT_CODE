@@ -36,7 +36,7 @@ from .settings_window import HOTKEYS, SettingsWindow
 from .template_view import TemplateView, ZoomWheelFilter, _plural
 from .theme import STATE_TOKENS, theme
 from .updates import MODE_AUTO, MODE_DOWNLOAD, UpdateDialog, UpdateManager
-from .widgets import IconButton, Toast
+from .widgets import IconButton, Toast, install_wheel_guard
 
 log = logging.getLogger("autoprint")
 
@@ -68,6 +68,7 @@ class MainWindow(FramelessWindow):
         self.store = store
         self._zoom_filter = ZoomWheelFilter(self)
         QApplication.instance().installEventFilter(self._zoom_filter)
+        install_wheel_guard(QApplication.instance())   # колесо не меняет счётчики и списки без щелчка по ним
         self.tray_icons = {k: logo.make_icon(k) for k in (logo.IDLE, logo.RUNNING, logo.PAUSED)}
         self.setWindowIcon(logo.make_icon(logo.APP))
         self.resize(1320, 840)

@@ -1,12 +1,13 @@
 """Элементы интерфейса в стиле PasteTalk: переключатель, сегменты, карточка со строками, тост и т. п."""
 from __future__ import annotations
 
-from PySide6.QtCore import (QEasingCurve, QEvent, QPoint, QPropertyAnimation, QRect, QRectF, QSize, Qt, QTimer,
-                            QVariantAnimation, Signal)
+from PySide6.QtCore import (QEasingCurve, QEvent, QObject, QPoint, QPropertyAnimation, QRect, QRectF, QSize, Qt,
+                            QTimer, QVariantAnimation, Signal)
 from PySide6.QtGui import QFont, QFontMetrics, QPainter, QPen
-from PySide6.QtWidgets import (QAbstractButton, QButtonGroup, QComboBox, QDoubleSpinBox, QFrame,
-                               QGraphicsOpacityEffect, QHBoxLayout, QLabel, QLayout, QPushButton, QSizePolicy,
-                               QSlider, QSpinBox, QToolButton, QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (QAbstractButton, QAbstractScrollArea, QAbstractSlider, QAbstractSpinBox,
+                               QApplication, QButtonGroup, QComboBox, QDoubleSpinBox, QFrame,
+                               QGraphicsOpacityEffect, QHBoxLayout, QLabel, QLayout, QPushButton, QScrollBar,
+                               QSizePolicy, QSlider, QSpinBox, QToolButton, QVBoxLayout, QWidget)
 
 from . import icons
 from .theme import theme
@@ -17,6 +18,56 @@ def repolish(w: QWidget) -> None:
     w.style().unpolish(w)
     w.style().polish(w)
     w.update()
+
+
+# ---------------------------------------------------------------- колёсико
+
+def _wheel_target(w: QWidget | None) -> QWidget | None:
+    """Счётчик, список или ползунок, которому достанется колесо (событие приходит и в их внутреннее поле)."""
+    for _ in range(3):
+        if w is None:
+            return None
+        if isinstance(w, (QAbstractSpinBox, QComboBox)) or \
+                (isinstance(w, QAbstractSlider) and not isinstance(w, QScrollBar)):
+            return w
+        w = w.parentWidget()
+    return None
+
+
+class WheelGuard(QObject):
+    """Колёсико над счётчиком, выпадающим списком или ползунком меняет значение, только если по нему уже
+    щёлкнули (у него фокус). Иначе колесо крутит страницу вокруг — минуты и типы блоков не «уезжают»,
+    пока прокручиваешь ленту. Ставится на всё приложение (install_wheel_guard)."""
+
+    def eventFilter(self, obj, ev) -> bool:
+        if ev.type() != QEvent.Type.Wheel or not isinstance(obj, QWidget):
+            return False
+        if ev.modifiers() & Qt.KeyboardModifier.ControlModifier:
+            return False                    # Ctrl+колесо — масштаб блока (ZoomWheelFilter)
+        target = _wheel_target(obj)
+        if target is None:
+            return False
+        fw = QApplication.focusWidget()
+        if fw is not None and (fw is target or target.isAncestorOf(fw)):
+            return False                    # щёлкнули — значение меняется колесом, как обычно
+        area = target.parentWidget()
+        while area is not None and not isinstance(area, QAbstractScrollArea):
+            area = area.parentWidget()
+        if area is not None:
+            d = ev.angleDelta()
+            bar = area.horizontalScrollBar() if abs(d.x()) > abs(d.y()) else area.verticalScrollBar()
+            QApplication.sendEvent(bar, ev)
+        return True
+
+
+def install_wheel_guard(app: QApplication) -> WheelGuard:
+    guard = app.property("_wheel_guard_obj")
+    if isinstance(guard, WheelGuard):
+        return guard
+    guard = WheelGuard(app)
+    app.installEventFilter(guard)
+    app.setProperty("_wheel_guard_obj", guard)
+    return guard
 
 
 # ---------------------------------------------------------------- переключатель
