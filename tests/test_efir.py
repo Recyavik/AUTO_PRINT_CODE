@@ -188,8 +188,8 @@ class StoreTest(unittest.TestCase):
     def test_broken_file_falls_back_to_backup(self):
         s = WebinarStore(self.path)
         s.add([sample_webinar()])
-        shutil.copy2(self.path, self.path.with_suffix(".json.bak"))
-        self.path.write_text("{broken", encoding="utf-8")
+        shutil.copy2(s.path, s.path.with_suffix(".json.bak"))          # 0.10: расписания — schedules.json
+        s.path.write_text("{broken", encoding="utf-8")
         self.assertEqual(len(WebinarStore(self.path).webinars), 1)
 
     def test_legacy_import(self):
@@ -493,15 +493,20 @@ class ControllerTest(unittest.TestCase):
         ed.add_row()
         ed.rows[-1].name.setText("Перерыв")
         ed.rows[-1]._name_edited("Перерыв")
-        ed.bg.set_value("anim:pipes")
-        ed.break_bg.set_value("")
         ed.break_min.setValue(15)
-        ed.countdown.setChecked(False)
-        ed._on_picked("anim:aurora")                                  # без запроса галереи — не трогаем
-        self.assertEqual(ed.bg.value(), "anim:pipes")
-        ed._pick_target = ed.break_bg
-        ed._on_picked("anim:aurora")
         ed.save()
+        # 0.10: фон, зарядки, экран перерыва — в оформлении (своё окно редактора)
+        ctl.edit_look(ctl.store.get(self.w.id).look_id)
+        led = ctl.editors[-1]
+        self.assertEqual(led.mode, "look")
+        led.bg.set_value("anim:pipes")
+        led.break_bg.set_value("")
+        led.countdown.setChecked(False)
+        led._on_picked("anim:aurora")                                 # без запроса галереи — не трогаем
+        self.assertEqual(led.bg.value(), "anim:pipes")
+        led._pick_target = led.break_bg
+        led._on_picked("anim:aurora")
+        led.save()
         w = ctl.store.get(self.w.id)
         self.assertEqual(w.title, "Финансовый университет")
         self.assertEqual(w.schedule[0].min, 3)

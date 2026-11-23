@@ -1,4 +1,5 @@
-"""Окно «Эфир»: шаблоны вебинаров — запустить, изменить, создать, импорт/экспорт, промпт для нейросети."""
+"""Окно «Эфир»: расписания вебинаров (запустить, изменить, импорт/экспорт, нейросеть) и оформления экрана эфира
+(фон, зарядки, экран перерыва) — две вкладки. Расписание ссылается на оформление; урок выбирает своё."""
 from __future__ import annotations
 
 import threading
@@ -10,11 +11,11 @@ from PySide6.QtWidgets import (QFileDialog, QFrame, QHBoxLayout, QInputDialog, Q
                                QScrollArea,
                                QToolButton, QVBoxLayout, QWidget)
 
-from ..efir.model import ANIMATION_NAMES, Webinar, ai_prompt, export_json, fmt_minutes, parse_webinars
+from ..efir.model import ANIMATION_NAMES, Look, Webinar, ai_prompt, export_json, fmt_minutes, parse_webinars
 from . import icons
 from .frameless import FramelessWindow
 from .theme import theme
-from .widgets import IconButton, Note, Toast, accent_button, button, label
+from .widgets import IconButton, Note, Segmented, Toast, accent_button, button, label
 
 
 def bg_title(spec: str) -> str:
@@ -47,9 +48,9 @@ class WebinarCard(QFrame):
         title = label(w.title + ("   ● идёт эфир" if live else ""), "rowTitle")
         title.setStyleSheet("font-size: 15px; font-weight: 600;" + (f"color: {theme.css('ok')};" if live else ""))
         text.addWidget(title)
-        ex = len(w.exercises)
-        meta = (f"{fmt_minutes(w.total_min)} · блоков: {len(w.schedule)} · "
-                f"перерыв {w.break_min} мин · зарядок: {ex if ex else 'нет'} · фон: {bg_title(w.background)}")
+        look = win.ctl.store.look(w.look_id)
+        meta = (f"{fmt_minutes(w.total_min)} · блоков: {len(w.schedule)} · перерыв {w.break_min} мин · "
+                f"оформление: {look.title if look else 'нет'}")
         m = label(meta, "rowSub", wrap=True)
         text.addWidget(m)
         names = " → ".join(a.name for a in w.schedule[:8]) + (" → …" if len(w.schedule) > 8 else "")
@@ -80,6 +81,50 @@ class WebinarCard(QFrame):
             lay.addWidget(b, 0, Qt.AlignmentFlag.AlignVCenter)
 
 
+class LookCard(QFrame):
+    """Оформление экрана эфира: фон, зарядки, экран перерыва; какие расписания его используют."""
+
+    def __init__(self, win: "EfirWindow", lk: Look) -> None:
+        super().__init__()
+        self.setObjectName("card")
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(16, 12, 12, 12)
+        lay.setSpacing(12)
+        ic = QLabel()
+        ic.setPixmap(icons.pixmap("palette", theme.c("accent"), 22))
+        ic.setFixedSize(26, 26)
+        lay.addWidget(ic, 0, Qt.AlignmentFlag.AlignTop)
+        text = QVBoxLayout()
+        text.setSpacing(3)
+        title = label(lk.title, "rowTitle")
+        title.setStyleSheet("font-size: 15px; font-weight: 600;")
+        text.addWidget(title)
+        ex = len(lk.exercises)
+        brk = ("надпись «" + lk.break_title + "»" if lk.break_show_title else "без надписи") + \
+              (", отсчёт" if lk.break_countdown else "")
+        text.addWidget(label(f"фон: {bg_title(lk.background)} · зарядок: {ex if ex else 'нет'} · перерыв: {brk}",
+                             "rowSub", wrap=True))
+        users = win.ctl.store.users_of(lk.id)
+        sub = label(("Расписания: " + ", ".join(w.title for w in users)) if users else "Не используется расписаниями",
+                    "dim", wrap=True)
+        sub.setStyleSheet("font-size: 12px;")
+        text.addWidget(sub)
+        lay.addLayout(text, 1)
+        edit = accent_button(" Изменить", "pencil")
+        edit.setFixedHeight(34)
+        edit.clicked.connect(lambda: win.ctl.edit_look(lk.id))
+        more = IconButton("more", "Ещё", 16, box=34, framed=True)
+        more.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        more.setStyleSheet("QToolButton::menu-indicator { image: none; width: 0; }")
+        menu = QMenu(more)
+        menu.addAction(icons.icon("copy"), "Сделать копию", lambda: win.duplicate_look(lk.id))
+        menu.addSeparator()
+        menu.addAction(icons.icon("trash"), "Удалить…", lambda: win.remove_look(lk.id))
+        more.setMenu(menu)
+        for b in (edit, more):
+            lay.addWidget(b, 0, Qt.AlignmentFlag.AlignVCenter)
+
+
 AI_SYSTEM = ("Ты помогаешь преподавателю составить расписание вебинара для программы AutoPrintCode. "
              "Отвечай только JSON в указанном формате, без пояснений.")
 
@@ -88,7 +133,7 @@ class EfirWindow(FramelessWindow):
     _ai_done = Signal(str, str)      # ответ нейросети, ошибка (из потока)
 
     def __init__(self, ctl, parent=None) -> None:
-        super().__init__("Эфир — шаблоны вебинаров", minimize=False, maximize=True, parent=parent)
+        super().__init__("Эфир", minimize=False, maximize=True, parent=parent)
         self.ctl = ctl
         self.settings = ctl.settings
         self.setObjectName("efirWindow")
@@ -107,13 +152,12 @@ class EfirWindow(FramelessWindow):
         head.setSpacing(8)
         tl = QVBoxLayout()
         tl.setSpacing(2)
-        tl.addWidget(label("Шаблоны вебинаров", "pageTitle"))
-        lede = label("Шаблон — это расписание и всё для экрана эфира: фон, зарядки, перерыв. «Запустить» — "
-                     "таймер для вас и вкладка браузера для учеников.", "lede", wrap=True)
-        tl.addWidget(lede)
+        tl.addWidget(label("Эфир", "pageTitle"))
+        self.lede = label("", "lede", wrap=True)
+        tl.addWidget(self.lede)
         head.addLayout(tl, 1)
         self.btn_new = accent_button(" Новый", "plus")
-        self.btn_new.clicked.connect(lambda: self.ctl.edit(None))
+        self.btn_new.clicked.connect(lambda: self.ctl.edit_look(None) if self.tab() == "looks" else self.ctl.edit(None))
         self.btn_import = button(" Импорт", "import")
         imp = QMenu(self.btn_import)
         imp.addAction(icons.icon("file-text"), "Из файла JSON…", self.import_file)
@@ -135,6 +179,13 @@ class EfirWindow(FramelessWindow):
             b.setFixedHeight(34)
             head.addWidget(b, 0, Qt.AlignmentFlag.AlignTop)
         root.addLayout(head)
+        self.tabs = Segmented([("schedules", "Расписания"), ("looks", "Оформления")])
+        self.tabs.set_value("schedules")
+        self.tabs.changed.connect(lambda _k: self.refill())
+        tr = QHBoxLayout()
+        tr.addWidget(self.tabs)
+        tr.addStretch(1)
+        root.addLayout(tr)
 
         self.scroll = QScrollArea()
         self.scroll.setWidgetResizable(True)
@@ -180,6 +231,9 @@ class EfirWindow(FramelessWindow):
         self.refill()
 
     # ------------------------------------------------------------ список
+    def tab(self) -> str:
+        return self.tabs.value() or "schedules"
+
     def refill(self) -> None:
         while self.list_lay.count():
             it = self.list_lay.takeAt(0)
@@ -188,6 +242,22 @@ class EfirWindow(FramelessWindow):
                 wd.setParent(None)               # сразу из окна; удалится потом
                 wd.deleteLater()
         live = self.ctl.store.live
+        looks_tab = self.tab() == "looks"
+        self.btn_import.setVisible(not looks_tab)
+        self.btn_ai.setVisible(not looks_tab)
+        self.lede.setText("Оформление — что видят ученики на экране эфира: фон, видео зарядок, экран перерыва. "
+                          "Его выбирают расписания и уроки." if looks_tab else
+                          "Расписание — блоки по минутам и оформление экрана. «Запустить» — таймер для вас и "
+                          "вкладка браузера для учеников. Уроки запускаются с экрана урока.")
+        if looks_tab:
+            if not self.ctl.store.looks:
+                self.list_lay.addWidget(Note("Оформлений пока нет. Нажмите «Новый»: фон, зарядки, экран перерыва.",
+                                             "info"))
+            for lk in self.ctl.store.looks:
+                self.list_lay.addWidget(LookCard(self, lk))
+            self.list_lay.addStretch(1)
+            self._tab()
+            return
         items = self.ctl.store.visible()
         if not items:
             note = Note("Шаблонов пока нет. Нажмите «Новый» — задайте расписание, фон, зарядки и перерыв. "
@@ -225,6 +295,30 @@ class EfirWindow(FramelessWindow):
         w = self.ctl.store.get(wid)
         if w:
             self.ctl.store.add([w.copy(w.title + " — копия")])
+            self.ctl.webinars_changed.emit()
+
+    def duplicate_look(self, lid: str) -> None:
+        lk = self.ctl.store.look(lid)
+        if lk is None:
+            return
+        c = Look(**{**lk.to_dict(), "exercises": list(lk.exercises)})
+        c.id = Look().id
+        c.title = lk.title + " — копия"
+        self.ctl.save_look(c)
+
+    def remove_look(self, lid: str) -> None:
+        lk = self.ctl.store.look(lid)
+        if lk is None:
+            return
+        users = self.ctl.store.users_of(lid)
+        if users:
+            QMessageBox.information(self, "Оформление используется",
+                                    "Это оформление выбрано в расписаниях: " + ", ".join(w.title for w in users)
+                                    + ". Сначала выберите там другое оформление.")
+            return
+        if QMessageBox.question(self, "Удалить оформление", f"Удалить оформление «{lk.title}»?") \
+                == QMessageBox.StandardButton.Yes:
+            self.ctl.store.remove_look(lid)
             self.ctl.webinars_changed.emit()
 
     def move(self, wid: str, d: int) -> None:

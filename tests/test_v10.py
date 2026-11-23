@@ -555,6 +555,160 @@ class StateTest(unittest.TestCase):
             pump()
 
 
+# ================================================================ Task 12: оформление отдельно от расписаний
+
+class LooksTest(unittest.TestCase):
+    def setUp(self):
+        self.dir = TMP / f"efir-{time.time_ns()}"
+        self.dir.mkdir()
+
+    def test_split_compose(self):
+        from autoprint.efir.model import Activity, Exercise, Webinar, compose, split
+        w = Webinar(title="1Т", schedule=[Activity("Теория", 20), Activity("Перерыв", 10, "break")],
+                    background="anim:stars", caption="Сейчас начнём", exercises=[Exercise("Глаза", "C:/v.mp4")],
+                    break_min=12, break_title="ОТДЫХ", text_color="#FFEE00")
+        s, look = split(w)
+        self.assertEqual((s.title, s.break_min, [a.name for a in s.schedule]), ("1Т", 12, ["Теория", "Перерыв"]))
+        self.assertEqual((look.background, look.caption, look.break_title), ("anim:stars", "Сейчас начнём", "ОТДЫХ"))
+        back = compose(s, look)
+        a, b = w.to_dict(), back.to_dict()
+        for d in (a, b):
+            d.pop("id"); d.pop("look_id")
+        self.assertEqual(a, b)
+
+    def test_migration_from_webinars_json(self):
+        from autoprint.efir.model import Activity, Webinar
+        from autoprint.efir.store import WebinarStore
+        old = [Webinar(title="Пара 1", schedule=[Activity("A", 10)], background="anim:cube", id="w1aaaa"),
+               Webinar(title="Пара 2", schedule=[Activity("B", 20)], background="anim:cube", id="w2bbbb"),
+               Webinar(title="Урок", schedule=[Activity("C", 5)], lesson_id="L1", id="wlesson")]
+        raw = {"version": 1, "webinars": [w.to_dict() for w in old], "live": None}
+        (self.dir / "webinars.json").write_text(json.dumps(raw, ensure_ascii=False), encoding="utf-8")
+        before = (self.dir / "webinars.json").read_text(encoding="utf-8")
+        s = WebinarStore(self.dir / "webinars.json")
+        self.assertEqual(len(s.looks), 1)                                   # одинаковые оформления — одно
+        self.assertEqual(s.looks[0].title, "Оформление · Пара 1")
+        self.assertEqual([w.title for w in s.visible()], ["Пара 1", "Пара 2"])
+        self.assertTrue(all(w.look_id == s.looks[0].id for w in s.visible()))
+        self.assertIsNone(s.get("wlesson"))                                  # служебный эфир урока не переносится
+        self.assertTrue((self.dir / "schedules.json").exists() and (self.dir / "looks.json").exists())
+        self.assertEqual((self.dir / "webinars.json").read_text(encoding="utf-8"), before)   # откат на 0.9
+        s.put(s.get("w1aaaa"))
+        again = WebinarStore(self.dir / "webinars.json")
+        self.assertEqual([w.id for w in again.visible()], ["w1aaaa", "w2bbbb"])
+        self.assertEqual(len(again.looks), 1)
+        self.assertEqual((self.dir / "webinars.json").read_text(encoding="utf-8"), before)
+
+    def test_put_look_updates_schedules(self):
+        from autoprint.efir.model import Activity, Webinar
+        from autoprint.efir.store import WebinarStore
+        s = WebinarStore(self.dir / "webinars.json")
+        s.add([Webinar(title="Пара", schedule=[Activity("A", 10)])])
+        w = s.visible()[0]
+        look = s.look(w.look_id)
+        look.background = "anim:aurora"
+        s.put_look(look)
+        self.assertEqual(s.get(w.id).background, "anim:aurora")
+        self.assertEqual(WebinarStore(self.dir / "webinars.json").get(w.id).background, "anim:aurora")
+        self.assertFalse(s.remove_look(look.id))                             # расписание ссылается — нельзя
+        self.assertIsNotNone(s.look(look.id))
+
+    def test_lesson_webinar(self):
+        from autoprint.efir.model import Look
+        from autoprint.scenario import webinar_for
+        t = Template("Урок", [stage("Теория", 20), stage("Перерыв", 15, stage_kind="break"), stage("Практика", 30)])
+        look = Look(title="ФУ", background="anim:stars")
+        w = webinar_for(t, look)
+        self.assertEqual((w.break_min, w.background, w.look_id), (15, "anim:stars", look.id))
+        t2 = Template("Без перерыва", [stage("Теория", 20)])
+        self.assertEqual(webinar_for(t2, None).break_min, 10)
+
+
+def efir_controller(name: str, port: int):
+    """«Эфир» на своей временной папке (без главного окна)."""
+    from autoprint.efir import store as store_mod
+    from autoprint.ui.efir_control import EfirController
+
+    class Main:
+        settings = Settings()
+    Main.settings.efir_port = port
+    folder = TMP / f"efir-{name}-{time.time_ns()}"
+    old = store_mod.efir_dir
+    store_mod.efir_dir = lambda: folder
+    try:
+        ctl = EfirController(None)
+    finally:
+        store_mod.efir_dir = old
+    ctl.settings = Main.settings
+    return ctl
+
+
+class EfirWindowTest(unittest.TestCase):
+    """Task 15: окно «Эфир» — «Расписания» и «Оформления»."""
+
+    def setUp(self):
+        from autoprint.efir.model import Activity, Webinar
+        self.ctl = efir_controller("win", 18970)
+        self.w = self.ctl.store.add([Webinar(title="Пара 1Т", schedule=[Activity("Теория", 40)],
+                                             background="anim:stars")])[0]
+
+    def tearDown(self):
+        for ed in list(self.ctl.editors):
+            ed._dirty = False
+            ed.close()
+        if self.ctl.window is not None:
+            self.ctl.window.close()
+        self.ctl.server.stop()
+        pump()
+
+    def test_tabs(self):
+        from autoprint.ui.efir_window import LookCard, WebinarCard
+        self.ctl.show_window()
+        win = self.ctl.window
+        pump()
+        self.assertEqual([c.w.title for c in win.findChildren(WebinarCard)], ["Пара 1Т"])
+        win.tabs.set_value("looks")
+        win.refill()
+        pump()
+        self.assertEqual(len(win.findChildren(LookCard)), 1)
+        self.assertFalse(win.btn_import.isVisibleTo(win))
+
+    def test_look_editor_saves(self):
+        self.ctl.edit_look(self.w.look_id)
+        led = self.ctl.editors[-1]
+        led.bg.set_value("anim:aurora")
+        led.save()
+        self.assertEqual(self.ctl.store.look(self.w.look_id).background, "anim:aurora")
+        self.assertEqual(self.ctl.store.get(self.w.id).background, "anim:aurora")     # расписание видит новое
+        self.assertEqual([a.name for a in self.ctl.store.get(self.w.id).schedule], ["Теория"])
+
+    def test_cant_delete_used_look(self):
+        from PySide6.QtWidgets import QMessageBox
+        import autoprint.ui.efir_window as EW
+        self.ctl.show_window()
+        shown = []
+        old = EW.QMessageBox.information
+        EW.QMessageBox.information = staticmethod(lambda *a, **k: shown.append(a[1]) or QMessageBox.StandardButton.Ok)
+        try:
+            self.ctl.window.remove_look(self.w.look_id)
+        finally:
+            EW.QMessageBox.information = old
+        self.assertTrue(shown)
+        self.assertIsNotNone(self.ctl.store.look(self.w.look_id))
+
+    def test_schedule_editor_picks_look(self):
+        from autoprint.efir.model import Look
+        other = Look(title="ФУ", background="anim:cube")
+        self.ctl.store.put_look(other)
+        self.ctl.edit(self.w.id)
+        ed = self.ctl.editors[-1]
+        self.assertFalse(ed.bg.isVisibleTo(ed))                                     # фона в расписании нет
+        ed.look_combo.setCurrentIndex(ed.look_combo.findData(other.id))
+        ed.save()
+        w = self.ctl.store.get(self.w.id)
+        self.assertEqual((w.look_id, w.background), (other.id, "anim:cube"))
+
+
 # ================================================================ Task 7: правки урока со страницы
 
 class EditTest(unittest.TestCase):

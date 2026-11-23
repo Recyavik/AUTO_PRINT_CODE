@@ -47,28 +47,19 @@ def total_minutes(t: Template) -> int:
     return sum(max(0, int(b.minutes or 0)) for b in t.blocks if b.type == BLOCK_STAGE)
 
 
-def webinar_for(t: Template, preset=None):
+def webinar_for(t: Template, look=None):
     """Эфир урока: расписание — этапы урока (этапы на 0 минут — мгновенные, в таймер не идут), оформление
-    экрана (фон, зарядки, перерыв, шрифт) — из шаблона «Эфира» preset. Пресет не меняется."""
-    from .efir.model import (DEMO_NONE, KIND_BREAK, KIND_EXERCISE, KIND_NORMAL, Activity, Webinar,
-                             webinar_from_dict)
+    экрана (фон, зарядки, перерыв, шрифт) — look (efir.model.Look). Перерыв по умолчанию — минуты первого
+    этапа-перерыва, иначе 10 (перерыв вне плана)."""
+    from .efir.model import DEMO_NONE, KIND_BREAK, KIND_EXERCISE, KIND_NORMAL, Activity, Webinar, compose
     kinds = {"break": KIND_BREAK, "exercise": KIND_EXERCISE}
     schedule = [Activity(name=s.block.title or "Этап", min=s.end_min - s.start_min,
                          kind=kinds.get(s.block.stage_kind, KIND_NORMAL), demo=DEMO_NONE)
                 for s in stages(t)[1] if s.end_min > s.start_min]
-    if preset is not None:
-        d = preset.to_dict()
-        d["schedule"] = [{"name": "x", "min": 1}]        # заменим ниже; разбор требует непустое расписание
-        w = webinar_from_dict(d)
-    else:
-        w = Webinar()
-    w.schedule = schedule
-    w.id, w.lesson_id, w.title = "lesson-" + t.id, t.id, t.title
-    w.start = t.start        # пусто — «время по плану» = момент запуска урока (ставит launch_lesson), не старт пресета
-    brk = next((a.min for a in schedule if a.kind == KIND_BREAK), 0)
-    if brk:
-        w.break_min = brk
-    return w
+    sched = Webinar(title=t.title, schedule=schedule, id="lesson-" + t.id, lesson_id=t.id)
+    sched.start = t.start    # пусто — «время по плану» = момент запуска урока (ставит launch_lesson)
+    sched.break_min = next((a.min for a in schedule if a.kind == KIND_BREAK), 0) or 10
+    return compose(sched, look)
 
 
 # ---------------------------------------------------------------- Markdown → HTML (для страницы суфлёра)

@@ -714,12 +714,14 @@ class ControllerTest(unittest.TestCase):
         self.assertTrue(self.win.efir.server.running)
 
     def test_preset_saved(self):
-        from autoprint.efir.model import Activity, Webinar
-        w = Webinar(title="ФУ", schedule=[Activity("Пара", 90)], background="anim:stars")
-        self.win.efir.store.add([w])
-        self.win.lesson.command({"cmd": "preset", "id": w.id})
-        self.assertEqual((self.t.preset, self.win.settings.lesson_preset), (w.id, w.id))
-        self.assertEqual(self.snap()["lesson"]["preset"], w.id)
+        """0.10: урок выбирает оформление (Template.look); preset 0.9 не меняется — откат."""
+        from autoprint.efir.model import Look
+        look = Look(title="ФУ", background="anim:stars")
+        self.win.efir.store.put_look(look)
+        self.win.lesson.command({"cmd": "preset", "id": look.id})
+        self.assertEqual((self.t.look, self.win.settings.lesson_look), (look.id, look.id))
+        self.assertEqual(self.snap()["lesson"]["preset"], look.id)
+        self.assertIn({"id": look.id, "title": "ФУ"}, self.snap()["lesson"]["presets"])
 
     def test_armed_stage_not_printed(self):
         st = next(b for b in self.t.blocks if b.type == BLOCK_STAGE and b.text)    # с пометкой «теория»
@@ -731,29 +733,24 @@ class ControllerTest(unittest.TestCase):
             self.t.active_block = keep
 
     def test_edit_from_timer_keeps_lesson(self):
-        """Ревью №2: «Изменить шаблон…» в таймере идущего урока правит оформление (пресет), а не служебный эфир."""
-        from autoprint.efir.model import Activity, Webinar
-        preset = Webinar(title="Пресет урока", schedule=[Activity("Пара", 90)], background="anim:cube")
-        self.win.efir.store.add([preset])
-        self.win.lesson.command({"cmd": "preset", "id": preset.id})
+        """Ревью №2: «Изменить…» в таймере идущего урока правит его оформление, а не служебный эфир."""
+        from autoprint.efir.model import Look
+        look = Look(title="Оформление урока", background="anim:cube")
+        self.win.efir.store.put_look(look)
+        self.win.lesson.command({"cmd": "preset", "id": look.id})
         self.win.lesson.command({"cmd": "start", "now": True})
         try:
             ctl = self.win.efir
             ctl.edit_live()
             ed = ctl.editors[-1]
-            self.assertEqual(ed.w.id, preset.id)
-            w = ed.result()
-            w.background = "anim:stars"
-            ctl.save_webinar(w)
+            self.assertEqual((ed.mode, ed.look.id), ("look", look.id))
+            lk = ed.result()
+            lk.background = "anim:stars"
+            ctl.save_look(lk)
             pump(450)
             self.assertEqual(ctl.live_lesson_id(), self.t.id)                       # урок по-прежнему идёт
             self.assertEqual(ctl.live_webinar().background, "anim:stars")           # оформление — сразу
-            self.assertEqual([x.title for x in ctl.store.visible()].count("Пресет урока"), 1)
-            lesson_w = ctl.live_webinar()
-            ed2 = type(ed)(ctl, lesson_w, None)                                     # служебный эфир в редакторе
-            self.assertEqual(ed2.result().lesson_id, self.t.id)
-            ed2._dirty = False
-            ed2.close()
+            self.assertEqual([x.title for x in ctl.store.looks].count("Оформление урока"), 1)
         finally:
             for e in list(self.win.efir.editors):
                 e._dirty = False

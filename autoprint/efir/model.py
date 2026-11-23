@@ -103,6 +103,7 @@ class Webinar:
     text_color: str = "#FFFFFF"
     id: str = field(default_factory=new_id)
     lesson_id: str = ""              # эфир урока из суфлёра (расписание — его этапы); в списке шаблонов не виден
+    look_id: str = ""                # оформление (efir/looks.json); поля вида выше — его копия для экрана и таймера
 
     @property
     def total_min(self) -> int:
@@ -117,6 +118,77 @@ class Webinar:
         if title:
             w.title = title
         return w
+
+
+# ---------------------------------------------------------------- оформление отдельно от расписания (0.10)
+# Расписание (Webinar: название, строки, перерыв по умолчанию) ссылается на оформление (Look: фон, зарядки, экран
+# перерыва, шрифт). Экран эфира и таймер работают с «собранным» Webinar — поля вида в нём копия оформления.
+LOOK_FIELDS = ("background", "caption", "exercises", "break_countdown", "break_background", "break_title",
+               "break_show_title", "break_done", "font", "text_color")
+
+
+@dataclass
+class Look:
+    title: str = "Оформление"
+    background: str = BG_BLACK
+    caption: str = ""
+    exercises: list[Exercise] = field(default_factory=list)
+    break_countdown: bool = True
+    break_background: str = ""
+    break_title: str = "ПЕРЕРЫВ"
+    break_show_title: bool = True
+    break_done: str = "ПРОДОЛЖАЕМ"
+    font: str = DEFAULT_FONT
+    text_color: str = "#FFFFFF"
+    id: str = field(default_factory=new_id)
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+    def same_look(self, other: "Look") -> bool:
+        a, b = self.to_dict(), other.to_dict()
+        return all(a[k] == b[k] for k in LOOK_FIELDS)
+
+
+def look_from_dict(d: dict) -> Look:
+    """Оформление из словаря (те же правила, что у полей вида в шаблоне)."""
+    w = webinar_from_dict({**(d if isinstance(d, dict) else {}), "schedule": [{"name": "x", "min": 1}]})
+    lk = Look(title=_str((d or {}).get("title"), "") or "Оформление")
+    for k in LOOK_FIELDS:
+        setattr(lk, k, getattr(w, k))
+    if isinstance(d, dict) and _str(d.get("id")) and re.fullmatch(r"[0-9a-zA-Z_-]{4,40}", d["id"]):
+        lk.id = d["id"]
+    return lk
+
+
+def split(w: Webinar) -> tuple[Webinar, Look]:
+    """Шаблон → (расписание, его оформление). Оформление — новое (id), если у шаблона его ещё нет."""
+    look = Look(title=f"Оформление · {w.title}")
+    if w.look_id:
+        look.id = w.look_id
+    for k in LOOK_FIELDS:
+        v = getattr(w, k)
+        setattr(look, k, [Exercise(e.title, e.path) for e in v] if k == "exercises" else v)
+    sched = Webinar(title=w.title, start=w.start, schedule=list(w.schedule), break_min=w.break_min, id=w.id,
+                    lesson_id=w.lesson_id, look_id=look.id)
+    return sched, look
+
+
+def compose(s: Webinar, look: Look | None) -> Webinar:
+    """Расписание + оформление → шаблон для экрана эфира и таймера."""
+    w = Webinar(title=s.title, start=s.start, schedule=list(s.schedule), break_min=s.break_min, id=s.id,
+                lesson_id=s.lesson_id, look_id=look.id if look else "")
+    if look is not None:
+        for k in LOOK_FIELDS:
+            v = getattr(look, k)
+            setattr(w, k, [Exercise(e.title, e.path) for e in v] if k == "exercises" else v)
+    return w
+
+
+def schedule_dict(w: Webinar) -> dict:
+    """Что пишется в schedules.json: только расписание и ссылка на оформление."""
+    return {"title": w.title, "start": w.start, "schedule": [asdict(a) for a in w.schedule], "break_min": w.break_min,
+            "id": w.id, "lesson_id": w.lesson_id, "look_id": w.look_id}
 
 
 # ---------------------------------------------------------------- JSON
@@ -200,6 +272,7 @@ def webinar_from_dict(d: dict) -> Webinar:
     if _str(d.get("id")) and re.fullmatch(r"[0-9a-zA-Z_-]{4,40}", d["id"]):
         w.id = d["id"]
     w.lesson_id = _str(d.get("lesson_id"))
+    w.look_id = _str(d.get("look_id"))
     return w
 
 

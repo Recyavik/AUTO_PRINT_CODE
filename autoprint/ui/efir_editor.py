@@ -9,8 +9,8 @@ from PySide6.QtWidgets import (QColorDialog, QComboBox, QFileDialog, QFrame, QHB
                                QMessageBox, QPushButton, QScrollArea, QSpinBox, QVBoxLayout, QWidget)
 
 from ..efir.model import (ANIMATIONS, BG_BLACK, DEMO_NONE, DEMO_OFF, DEMO_ON, DEMOS, FONTS, KIND_BREAK,
-                          KIND_EXERCISE, KIND_NORMAL, Activity, Exercise, Webinar, ai_prompt, export_json,
-                          fmt_minutes, guess_kind, sample_webinar)
+                          KIND_EXERCISE, KIND_NORMAL, LOOK_FIELDS, Activity, Exercise, Look, Webinar, ai_prompt,
+                          compose, export_json, fmt_minutes, guess_kind, sample_webinar, schedule_dict)
 from . import icons
 from .frameless import FramelessWindow
 from .theme import theme
@@ -258,16 +258,29 @@ class ExerciseRow(QFrame):
 
 
 class EditorWindow(FramelessWindow):
-    def __init__(self, ctl, w: Webinar | None, parent=None) -> None:
-        super().__init__("Шаблон вебинара", minimize=False, maximize=True, parent=parent)
+    def __init__(self, ctl, w, parent=None, mode: str = "schedule") -> None:
+        """mode: schedule — расписание вебинара (w: Webinar); look — оформление экрана эфира (w: Look)."""
+        super().__init__("Оформление экрана эфира" if mode == "look" else "Расписание вебинара", minimize=False,
+                         maximize=True, parent=parent)
         self.ctl = ctl
         self.settings = ctl.settings
+        self.mode = mode
         self.is_new = w is None
-        self.w = w.copy() if w else sample_webinar()
-        if w:
-            self.w.id = w.id                    # правка того же шаблона
+        if mode == "look":
+            self.look = Look(**{**w.to_dict(), "exercises": list(w.exercises)}) if w else Look(title="Новое оформление")
+            # поля формы — у «собранного» шаблона: оформление + пустое расписание
+            self.w = compose(Webinar(title=self.look.title, schedule=[Activity("—", 1)]), self.look)
+            self.w.title = self.look.title
         else:
-            self.w.title = "Новый вебинар"
+            self.look = None
+            self.w = w.copy() if w else sample_webinar()
+            if w:
+                self.w.id = w.id                    # правка того же расписания
+                self.w.look_id = w.look_id
+            else:
+                self.w.title = "Новый вебинар"
+                looks = ctl.store.looks
+                self.w.look_id = looks[0].id if looks else ""
         self._pick_target: BackgroundPicker | None = None
         self._dirty = False
         self.setObjectName("efirEditor")
@@ -297,14 +310,42 @@ class EditorWindow(FramelessWindow):
         row = QHBoxLayout()
         row.setSpacing(10)
         self.title = QLineEdit(self.w.title)
-        self.title.setPlaceholderText("Например: 1Т — первая пара")
+        self.title.setPlaceholderText("Например: Финансовый университет" if mode == "look" else "Например: 1Т — первая пара")
         self.title.setStyleSheet("font-size: 15px;")
         self.title.textEdited.connect(self._touch)
         row.addWidget(label("Название", "rowTitle"))
         row.addWidget(self.title, 1)
         lay.addLayout(row)
-        lay.addWidget(label("Время начала в шаблоне не хранится — его выбирают при запуске («Сейчас» или «в 18:00»).",
-                            "dim", wrap=True))
+
+        sched_box = QWidget()
+        sl = QVBoxLayout(sched_box)
+        sl.setContentsMargins(0, 0, 0, 0)
+        sl.setSpacing(6)
+        look_box = QWidget()
+        ll = QVBoxLayout(look_box)
+        ll.setContentsMargins(0, 0, 0, 0)
+        ll.setSpacing(6)
+        lay.addWidget(sched_box)
+        lay.addWidget(look_box)
+        sched_box.setVisible(mode != "look")
+        look_box.setVisible(mode == "look")
+        sl.addWidget(label("Время начала в расписании не хранится — его выбирают при запуске («Сейчас» или «в 18:00»).",
+                           "dim", wrap=True))
+        lr = QHBoxLayout()
+        lr.setSpacing(10)
+        lr.addWidget(label("Оформление", "rowTitle"))
+        self.look_combo = QComboBox()
+        self.look_combo.setMinimumWidth(260)
+        for lk in ctl.store.looks:
+            self.look_combo.addItem(lk.title, lk.id)
+        if not ctl.store.looks:
+            self.look_combo.addItem("Чёрный фон (новое оформление)", "")
+        k = self.look_combo.findData(self.w.look_id)
+        self.look_combo.setCurrentIndex(max(0, k))
+        self.look_combo.activated.connect(self._touch)
+        lr.addWidget(self.look_combo)
+        lr.addWidget(label("фон, зарядки и экран перерыва — во вкладке «Оформления»", "dim"), 1)
+        sl.addLayout(lr)
 
         # ---- расписание: итог — сразу в заголовке
         sh = QHBoxLayout()
@@ -312,40 +353,40 @@ class EditorWindow(FramelessWindow):
         sh.addStretch(1)
         self.total = label("", "rowTitle")
         sh.addWidget(self.total, 0, Qt.AlignmentFlag.AlignBottom)
-        lay.addLayout(sh)
+        sl.addLayout(sh)
         self.rows_host = QVBoxLayout()
         self.rows_host.setSpacing(4)
-        lay.addLayout(self.rows_host)
+        sl.addLayout(self.rows_host)
         add = button(" Добавить блок", "plus")
         add.clicked.connect(lambda: self.add_row())
         ar = QHBoxLayout()
         ar.addWidget(add)
         ar.addStretch(1)
-        lay.addLayout(ar)
+        sl.addLayout(ar)
         self.rows: list[ActivityRow] = []
         for a in self.w.schedule:
             self.add_row(a, focus=False)
 
         # ---- экран эфира: фон
-        lay.addWidget(group_title("Экран эфира — фон (он же занавес)"))
-        lay.addWidget(label("Виден ученикам, пока нет зарядки и перерыва. По умолчанию — чёрный: "
+        ll.addWidget(group_title("Экран эфира — фон (он же занавес)"))
+        ll.addWidget(label("Виден ученикам, пока нет зарядки и перерыва. По умолчанию — чёрный: "
                             "без логотипов и фирменных цветов.", "dim", wrap=True))
         self.bg = BackgroundPicker(self, self.w.background)
-        lay.addWidget(self.bg)
+        ll.addWidget(self.bg)
         cr = QHBoxLayout()
         cr.addWidget(label("Надпись на фоне", "rowTitle"))
         self.caption = QLineEdit(self.w.caption)
         self.caption.setPlaceholderText("Необязательно, например «Сейчас продолжим»")
         cr.addWidget(self.caption, 1)
-        lay.addLayout(cr)
+        ll.addLayout(cr)
 
         # ---- зарядки
-        lay.addWidget(group_title("Зарядки"))
-        lay.addWidget(label("Видео со звуком на экран эфира. Доиграло — снова фон. Зарядок нет — нет и кнопки "
+        ll.addWidget(group_title("Зарядки"))
+        ll.addWidget(label("Видео со звуком на экран эфира. Доиграло — снова фон. Зарядок нет — нет и кнопки "
                             "«Зарядка» в таймере; несколько — кнопка предложит выбрать.", "dim", wrap=True))
         self.ex_host = QVBoxLayout()
         self.ex_host.setSpacing(4)
-        lay.addLayout(self.ex_host)
+        ll.addLayout(self.ex_host)
         self.ex_rows: list[ExerciseRow] = []
         for ex in self.w.exercises:
             self._add_exercise_row(ex)
@@ -354,10 +395,10 @@ class EditorWindow(FramelessWindow):
         b.clicked.connect(self.add_exercise)
         er.addWidget(b)
         er.addStretch(1)
-        lay.addLayout(er)
+        ll.addLayout(er)
 
-        # ---- перерыв
-        lay.addWidget(group_title("Перерыв"))
+        # ---- перерыв: длина по умолчанию — расписанию, экран — оформлению
+        sl.addWidget(group_title("Перерыв"))
         br = QHBoxLayout()
         br.setSpacing(10)
         br.addWidget(label("По умолчанию", "rowTitle"))
@@ -367,17 +408,18 @@ class EditorWindow(FramelessWindow):
         self.break_min.setSuffix(" мин")
         self.break_min.setFixedWidth(96)
         br.addWidget(self.break_min)
-        br.addWidget(label("— подставится в «Перерыв» таймера; поменять можно и при запуске, и во время (±1 мин).",
+        br.addWidget(label("— перерыв вне плана; строка «перерыв» в расписании задаёт свои минуты; во время — ±1 мин.",
                            "dim"), 1)
-        lay.addLayout(br)
+        sl.addLayout(br)
+        ll.addWidget(group_title("Экран перерыва"))
         bb = QHBoxLayout()
         bb.addWidget(label("Фон перерыва", "rowTitle"))
-        lay.addLayout(bb)
+        ll.addLayout(bb)
         self.break_bg = BackgroundPicker(self, self.w.break_background, allow_same=True)
-        lay.addWidget(self.break_bg)
+        ll.addWidget(self.break_bg)
 
         # ---- надпись на экране перерыва
-        lay.addWidget(group_title("Надпись на экране перерыва"))
+        ll.addWidget(group_title("Надпись на экране перерыва"))
         tr = QHBoxLayout()
         tr.setSpacing(10)
         self.show_title = Switch("Показывать надпись")
@@ -393,7 +435,7 @@ class EditorWindow(FramelessWindow):
         self.countdown.setChecked(self.w.break_countdown)
         tr.addWidget(self.countdown)
         tr.addStretch(1)
-        lay.addLayout(tr)
+        ll.addLayout(tr)
         dr = QHBoxLayout()
         dr.setSpacing(10)
         dr.addWidget(label("Когда время вышло", "rowTitle"))
@@ -402,7 +444,7 @@ class EditorWindow(FramelessWindow):
         self.break_done.setPlaceholderText("Пусто — снова надпись")
         dr.addWidget(self.break_done)
         dr.addStretch(1)
-        lay.addLayout(dr)
+        ll.addLayout(dr)
         fr = QHBoxLayout()
         fr.setSpacing(10)
         fr.addWidget(label("Шрифт", "rowTitle"))
@@ -429,9 +471,9 @@ class EditorWindow(FramelessWindow):
         prev.setToolTip("Экран перерыва с этими настройками — в новой вкладке браузера (ученики его не видят)")
         prev.clicked.connect(self.preview_break)
         fr.addWidget(prev)
-        lay.addLayout(fr)
-        lay.addSpacing(10)
-        lay.addWidget(Note("Совет: перед эфиром откройте вкладку эфира (окно «Эфир» → «Открыть вкладку»), "
+        ll.addLayout(fr)
+        ll.addSpacing(10)
+        ll.addWidget(Note("Совет: перед эфиром откройте вкладку эфира (окно «Эфир» → «Открыть вкладку»), "
                            "щёлкните по ней один раз — браузер разрешит звук роликов, — и захватите её в "
                            "демонстрации.", "info"))
         lay.addStretch(1)
@@ -447,8 +489,9 @@ class EditorWindow(FramelessWindow):
         b_ai = button(" Для нейросети", "sparkles")
         b_ai.setToolTip("Скопировать промпт с этим расписанием как примером")
         b_ai.clicked.connect(self._copy_ai)
-        bl.addWidget(b_json)
-        bl.addWidget(b_ai)
+        if mode != "look":
+            bl.addWidget(b_json)
+            bl.addWidget(b_ai)
         bl.addStretch(1)
         cancel = button("Отмена")
         cancel.clicked.connect(self.close)
@@ -468,7 +511,16 @@ class EditorWindow(FramelessWindow):
             self.restoreGeometry(QByteArray.fromBase64(geo.encode()))
         self.update_times()
         self._dirty = False
-        self.titlebar.title.setText("Новый шаблон вебинара" if self.is_new else f"Шаблон: {self.w.title}")
+        if mode == "look":
+            self.titlebar.title.setText("Новое оформление" if self.is_new else f"Оформление: {self.look.title}")
+        else:
+            self.titlebar.title.setText("Новое расписание" if self.is_new else f"Расписание: {self.w.title}")
+        # E11: правка любого поля оформления — «есть несохранённое» (раньше «Отмена» теряла их молча)
+        for wd in (self.caption, self.break_title, self.break_done):
+            wd.textEdited.connect(self._touch)
+        for sw in (self.show_title, self.countdown):
+            sw.toggled.connect(self._touch)
+        self.break_min.valueChanged.connect(self._touch)
         if self.is_new:
             QTimer.singleShot(0, lambda: (self.title.setFocus(), self.title.selectAll()))
 
@@ -580,7 +632,7 @@ QFrame#efirBottom {{ background: {t.css('panel')}; border-top: 1px solid {t.css(
         self.color_btn.setToolTip(self._color)
 
     def preview_break(self) -> str:
-        url = self.ctl.preview_break(self.result())
+        url = self.ctl.preview_break(self._look_fields())
         if url:
             self.toast.show_message("Предпросмотр перерыва открыт в браузере — ученики его не видят", ms=5000)
         return url
@@ -598,8 +650,27 @@ QFrame#efirBottom {{ background: {t.css('panel')}; border-top: 1px solid {t.css(
             self.show_and_raise()
 
     # ------------------------------------------------------------ сохранить
-    def result(self) -> Webinar:
-        w = Webinar(id=self.w.id, lesson_id=self.w.lesson_id)   # эфир урока из суфлёра остаётся эфиром урока
+    def result(self):
+        """Расписание (Webinar, собранный с выбранным оформлением) или оформление (Look) — по режиму."""
+        if self.mode == "look":
+            lk = Look(id=self.look.id, title=self.title.text().strip() or "Оформление")
+            w = self._look_fields()
+            for k in LOOK_FIELDS:
+                setattr(lk, k, getattr(w, k))
+            return lk
+        w = Webinar(id=self.w.id, lesson_id=self.w.lesson_id)   # эфир урока остаётся эфиром урока
+        w.title = self.title.text().strip() or "Вебинар"
+        w.start = self.w.start
+        w.schedule = [r.activity() for r in self.rows]
+        w.break_min = self.break_min.value()
+        lid = self.look_combo.currentData() or ""
+        look = self.ctl.store.look(lid)
+        if look is not None:
+            return compose(w, look)
+        return w                                # оформления ещё нет — сохранится новое (чёрный фон)
+
+    def _look_fields(self) -> Webinar:
+        w = Webinar(id=self.w.id, lesson_id=self.w.lesson_id)
         w.title = self.title.text().strip() or "Вебинар"
         w.start = self.w.start                  # прошлое время старта — подставится при следующем запуске
         w.schedule = [r.activity() for r in self.rows]
@@ -617,10 +688,14 @@ QFrame#efirBottom {{ background: {t.css('panel')}; border-top: 1px solid {t.css(
         return w
 
     def save(self) -> None:
-        w = self.result()
-        self.ctl.save_webinar(w)
+        r = self.result()
+        if self.mode == "look":
+            self.ctl.save_look(r)
+            self.look = r
+        else:
+            self.ctl.save_webinar(r)
+            self.w = r
         self._dirty = False
-        self.w = w
         self.close()
 
     def _export(self) -> None:
@@ -657,7 +732,8 @@ QFrame#efirBottom {{ background: {t.css('panel')}; border-top: 1px solid {t.css(
                 e.ignore()
                 return
             if r == QMessageBox.StandardButton.Save:
-                self.ctl.save_webinar(self.result())
+                res = self.result()
+                self.ctl.save_look(res) if self.mode == "look" else self.ctl.save_webinar(res)
         if self.settings is not None:
             self.settings.efir_editor_geometry = bytes(self.saveGeometry().toBase64()).decode()
             self.settings.save()
@@ -668,6 +744,9 @@ QFrame#efirBottom {{ background: {t.css('panel')}; border-top: 1px solid {t.css(
         super().closeEvent(e)
 
     def _changed(self) -> bool:
-        old = self.ctl.store.get(self.w.id)
         new = self.result()
-        return old is None or old.to_dict() != new.to_dict()
+        if self.mode == "look":
+            old = self.ctl.store.look(self.look.id)
+            return old is None or old.to_dict() != new.to_dict()
+        old = self.ctl.store.get(self.w.id)
+        return old is None or schedule_dict(old) != schedule_dict(new)

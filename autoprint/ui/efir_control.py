@@ -235,20 +235,26 @@ class EfirController(QObject):
         self.live_changed.emit()
         self.show_timer()
 
-    def lesson_preset(self, t) -> Webinar | None:
-        """Оформление эфира урока: шаблон урока, иначе последний выбранный, иначе первый в списке."""
-        for wid in (t.preset, getattr(self.settings, "lesson_preset", "")):
-            w = self.store.get(wid) if wid else None
-            if w is not None and not w.lesson_id:
-                return w
-        visible = self.store.visible()
-        return visible[0] if visible else None
+    def lesson_look(self, t):
+        """Оформление эфира урока: своё (Template.look), иначе — оформление шаблона, выбранного в 0.9
+        (Template.preset), иначе последнее выбранное, иначе первое."""
+        st = self.store
+        for lid in (getattr(t, "look", ""), getattr(self.settings, "lesson_look", "")):
+            if lid and st.look(lid) is not None:
+                return st.look(lid)
+        for wid in (getattr(t, "preset", ""), getattr(self.settings, "lesson_preset", "")):
+            w = st.get(wid) if wid else None
+            if w is not None and st.look(w.look_id) is not None:
+                return st.look(w.look_id)
+        return st.looks[0] if st.looks else None
+
+    lesson_preset = lesson_look
 
     def launch_lesson(self, t, start: str | None = None, show: bool = True) -> bool:
         """Эфир по этапам урока из суфлёра. start: "" — сейчас, "ЧЧ:ММ" — в это время, None — тот же урок уже
         идёт — время не сбивается, только расписание обновляется (иначе — сейчас). False — нет этапов с минутами."""
         from ..scenario import webinar_for
-        w = webinar_for(t, self.lesson_preset(t))
+        w = webinar_for(t, self.lesson_look(t))
         if not w.schedule:
             self.message.emit("У урока нет этапов с минутами — эфир по нему не начать", True)
             return False
@@ -261,9 +267,8 @@ class EfirController(QObject):
         else:
             anchor = now
         w.start = anchor.strftime("%H:%M")
-        # служебные эфиры прошлых уроков больше не нужны
-        self.store.webinars = [x for x in self.store.webinars if not x.lesson_id or x.id == w.id]
-        self.store.put(w)
+        self.store.drop_lesson_schedules(keep=w.id)      # служебные эфиры прошлых уроков больше не нужны
+        w = self.store.put(w)
         self.store.set_live(w.id, anchor)
         self.webinar = w
         self.ensure_server()
@@ -278,23 +283,19 @@ class EfirController(QObject):
         return w.lesson_id if w else ""
 
     def edit_live(self) -> None:
-        """«Изменить шаблон…» в таймере. Идёт урок из суфлёра — правится его оформление (шаблон-пресет):
-        расписание урока — его этапы, их правят в занятии, а служебный эфир урока руками не трогают."""
+        """«Изменить…» в таймере. Идёт урок — правится его оформление (расписание урока — его этапы, их правят на
+        экране урока); идёт вебинар — его расписание."""
         w = self.live_webinar()
         if w is None:
             return
         if not w.lesson_id:
             self.edit(w.id)
             return
-        store = getattr(self.main, "store", None)
-        t = store.get(w.lesson_id) if store is not None else None
-        preset = self.lesson_preset(t) if t is not None else None
-        if preset is None:
-            self.message.emit("Оформление урока берётся из шаблона «Эфира» — создайте шаблон (фон, зарядки, "
-                              "перерыв) и выберите его на странице суфлёра", True)
+        if not w.look_id or self.store.look(w.look_id) is None:
+            self.message.emit("У урока нет оформления экрана эфира — создайте его в «Эфир → Оформления»", True)
             self.show_window()
             return
-        self.edit(preset.id)
+        self.edit_look(w.look_id)
 
     def refresh_live(self) -> None:
         """Шаблон идущего эфира поправили в редакторе — подхватить фон, зарядки, перерыв."""
@@ -460,6 +461,21 @@ class EfirController(QObject):
         if self.timer_window is None:
             self.timer_window = TimerWindow(self)
         self.timer_window.show_and_raise()
+
+    def edit_look(self, lid: str | None = None) -> None:
+        from .efir_editor import EditorWindow
+        look = self.store.look(lid) if lid else None
+        ed = EditorWindow(self, look, self.window if self.window is not None else self._owner(), mode="look")
+        self.editors.append(ed)
+        ed.closed.connect(lambda e=ed: self.editors.remove(e) if e in self.editors else None)
+        ed.show_and_raise()
+
+    def save_look(self, look) -> None:
+        self.store.put_look(look)
+        self.webinars_changed.emit()
+        live = self.live_webinar()
+        if live is not None and live.look_id == look.id:
+            self.refresh_live()
 
     def edit(self, wid: str | None = None, parent=None) -> None:
         from .efir_editor import EditorWindow

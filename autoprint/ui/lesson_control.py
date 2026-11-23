@@ -158,10 +158,10 @@ class LessonController(QObject):
         if t is not None and live is not None and self.efir.live_lesson_id() == t.id:
             anchor = int(live.anchor.timestamp() * 1000)
             self._sync_live(t)
-        preset = self.efir.lesson_preset(t) if t is not None else None
+        preset = self.efir.lesson_look(t) if t is not None else None
         state = scenario.lesson_state(
             t, live_anchor_ms=anchor, armed=t.active_block if t is not None else "",
-            media_url=self.efir.server.media_url, presets=[(w.id, w.title) for w in self.efir.store.visible()],
+            media_url=self.efir.server.media_url, presets=[(lk.id, lk.title) for lk in self.efir.store.looks],
             preset=preset.id if preset is not None else "", dark=theme.dark, efir_mode=self.efir.mode,
             tab=self.efir.tab_status()[0], hotkey=self.main.settings.hotkey_toggle,
             printer=self.main.printer.snapshot(), lessons=scenario.lessons_state(self.main.store.templates),
@@ -360,7 +360,7 @@ class LessonController(QObject):
     def _ensure_screen(self, t: Template) -> None:
         """Перерыв или зарядка до «Начать урок»: оформление экрана — из пресета урока."""
         if self.efir.webinar is None:
-            self.efir.webinar = scenario.webinar_for(t, self.efir.lesson_preset(t))
+            self.efir.webinar = scenario.webinar_for(t, self.efir.lesson_look(t))
 
     def _set_start(self, t: Template, start: str) -> None:
         """Начало урока «ЧЧ:ММ»: идёт урок — его время сдвигается; не идёт — запоминается для «Начать в…»."""
@@ -372,12 +372,12 @@ class LessonController(QObject):
         if self.efir.live_lesson_id() == t.id and start:
             self.efir.set_start(start)
 
-    def _set_preset(self, t: Template, wid: str) -> None:
-        w = self.efir.store.get(wid)
-        if w is None or w.lesson_id:
+    def _set_preset(self, t: Template, lid: str) -> None:
+        """Оформление экрана эфира для урока (Template.look; preset 0.9 не трогаем — откат)."""
+        if self.efir.store.look(lid) is None:
             return
-        t.preset = wid
-        self.main.settings.lesson_preset = wid
+        t.look = lid
+        self.main.settings.lesson_look = lid
         self.main._settings_timer.start()
         self.main._save_timer.start()
         if self.efir.live_lesson_id() == t.id:

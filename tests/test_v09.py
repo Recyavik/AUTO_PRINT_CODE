@@ -543,17 +543,18 @@ class EfirEditorTest(unittest.TestCase):
         from autoprint.efir.model import sample_webinar
         from autoprint.ui.efir_editor import EditorWindow
         self.ctl = efir_ctl("editor")
-        self.w = sample_webinar()
-        self.ctl.store.add([self.w])
-        self.ed = EditorWindow(self.ctl, self.w)
+        self.w = self.ctl.store.add([sample_webinar()])[0]
+        self.ed = EditorWindow(self.ctl, self.w)                                      # расписание
         self.ed.show()
+        self.led = EditorWindow(self.ctl, self.ctl.store.look(self.w.look_id), mode="look")   # оформление (0.10)
         pump(30)
 
     def tearDown(self):
         import shiboken6
-        self.ed._dirty = False
-        self.ed.close()
-        shiboken6.delete(self.ed)
+        for ed in (self.ed, self.led):
+            ed._dirty = False
+            ed.close()
+            shiboken6.delete(ed)
         self.ctl.server.stop()
 
     def test_total_on_top(self):
@@ -589,18 +590,18 @@ class EfirEditorTest(unittest.TestCase):
         QFileDialog.getOpenFileNames = staticmethod(lambda *x, **k: ([str(a), str(b)], ""))
         QFileDialog.getOpenFileName = staticmethod(lambda *x, **k: ("", ""))    # одиночный выбор — не диалог
         try:
-            n = len(self.ed.ex_rows)
-            self.ed.add_exercise()
+            n = len(self.led.ex_rows)
+            self.led.add_exercise()
         finally:
             QFileDialog.getOpenFileNames, QFileDialog.getOpenFileName = old, old1
-        self.assertEqual([r.exercise().title for r in self.ed.ex_rows[n:]], ["Гимнастика", "Шея"])
+        self.assertEqual([r.exercise().title for r in self.led.ex_rows[n:]], ["Гимнастика", "Шея"])
 
     def test_break_show_title_roundtrip(self):
-        from autoprint.efir.model import webinar_from_dict
-        self.ed.show_title.setChecked(False)
-        w = self.ed.result()
-        self.assertFalse(w.break_show_title)
-        self.assertFalse(webinar_from_dict(w.to_dict()).break_show_title)
+        from autoprint.efir.model import look_from_dict, webinar_from_dict
+        self.led.show_title.setChecked(False)
+        lk = self.led.result()
+        self.assertFalse(lk.break_show_title)
+        self.assertFalse(look_from_dict(lk.to_dict()).break_show_title)
         self.assertTrue(webinar_from_dict({"schedule": [{"name": "А", "min": 5}]}).break_show_title)
 
     def test_state_hides_title(self):
@@ -611,8 +612,8 @@ class EfirEditorTest(unittest.TestCase):
         self.ctl.show_background()
 
     def test_preview_published(self):
-        self.ed.break_title.setText("ОТДЫХАЕМ")
-        url = self.ed.preview_break()
+        self.led.break_title.setText("ОТДЫХАЕМ")
+        url = self.led.preview_break()
         self.assertIn("ch=preview", url)
         st = self.ctl.server.snapshot("preview")
         self.assertEqual((st["mode"], st["brk"]["title"]), ("break", "ОТДЫХАЕМ"))
