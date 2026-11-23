@@ -74,6 +74,14 @@ def apply_migrations(s: Settings) -> bool:
     return changed
 
 
+def efir_token(phase: str, mode: str) -> str:
+    """Цвет кнопки «Эфир»: обычный — эфира нет или он кончился, жёлтый — до начала, перерыв или зарядка,
+    красный — эфир идёт."""
+    if mode in ("break", "exercise"):
+        return "accent"
+    return {"before": "accent", "live": "live"}.get(phase, "dim")
+
+
 def title_logo_icon():
     """Знак программы в шапке — фирменный, одинаковый в обеих темах (как на панели задач)."""
     return logo.make_icon(logo.APP)
@@ -186,13 +194,15 @@ class MainWindow(FramelessWindow):
         self.btn_report.setObjectName("titleTool")
         self.btn_report.clicked.connect(self.open_report)
         # «Эфир» — плашкой сверху: шаблоны вебинаров, таймер и вкладка эфира для учеников
-        self.btn_efir = QPushButton()
-        self.btn_efir.setObjectName("efirPill")
+        self.btn_efir = QToolButton()
+        self.btn_efir.setObjectName("efirBtn")
         self.btn_efir.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_efir.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        self.btn_efir.setIconSize(QSize(16, 16))
         self.btn_efir.setToolTip("Эфир: таймер вебинара по шаблону и экран для учеников — фон, зарядка, перерыв")
         self.btn_efir.clicked.connect(self._efir_clicked)
-        self.btn_efir.setFixedHeight(28)
-        self.btn_efir.setMaximumWidth(360)
+        self.btn_efir.setFixedHeight(32)
+        self.btn_efir.setMaximumWidth(320)
         tb.right.addWidget(self.btn_efir)
         tb.right.addSpacing(8)
         self._efir_timer = QTimer(self)
@@ -1543,34 +1553,45 @@ class MainWindow(FramelessWindow):
             self.efir.show_window()
 
     def _update_efir_pill(self) -> None:
+        """Кнопка «Эфир» в шапке — такая же плоская, как «Настройки»; цвет и короткий текст — по состоянию."""
         b = getattr(self, "btn_efir", None)
         if b is None:
             return
-        w = self.efir.live_webinar()
-        text = " Эфир"
-        live = False
+        from ..efir.model import fmt_left
+        ctl = self.efir
+        w = ctl.live_webinar()
+        mode = ctl.mode
+        phase = ""
+        tip = "Эфир: таймер вебинара по шаблону и экран для учеников — фон, зарядка, перерыв"
+        if mode == "break":
+            text = f"Перерыв · {fmt_left(max(0.0, ctl.break_left()))}"
+        elif mode == "exercise":
+            text = "Зарядка"
+        else:
+            text = "Эфир"
         if w is not None:
-            ag = self.efir.agenda()
-            live = True
-            if ag.phase == "live" and ag.current:
-                from ..efir.model import fmt_left
-                text = f" Эфир · {ag.current.activity.name} · {fmt_left(ag.left_s)}"
-            elif ag.phase == "before":
-                text = f" Эфир · {w.title} · в {ag.start:%H:%M}"
-            else:
-                text = f" Эфир · {w.title}"
+            ag = ctl.agenda()
+            phase = ag.phase
+            if mode not in ("break", "exercise"):
+                if phase == "before":
+                    text = f"Эфир · через {fmt_left(ag.left_s)}"
+                elif phase == "live" and ag.current:
+                    name = ag.current.activity.name
+                    name = name if len(name) <= 24 else name[:23].rstrip() + "…"
+                    text = f"{name} · {fmt_left(ag.left_s)}"
+                else:
+                    text = "Эфир завершён"
+            tip = f"{w.title}: эфир {ag.start:%H:%M}–{ag.end:%H:%M}. Щёлкните — таймер" if ag.start else tip
         if b.text() != text:
             b.setText(text)
-        token = "ok" if live else "accent"
+        b.setToolTip(tip)
+        token = efir_token(phase, mode)
         key = (token, theme.dark)
         if getattr(b, "_style_key", None) != key:
             b._style_key = key
-            b.setIcon(icons.icon("radio", token, 15))
-            soft = theme.css("accent_soft")
-            col = theme.css(token)
-            b.setStyleSheet(f"QPushButton#efirPill {{ color: {col}; border: 1px solid {col}; border-radius: 13px; "
-                            f"padding: 3px 12px 3px 9px; font-weight: 600; background: transparent; }}"
-                            f"QPushButton#efirPill:hover {{ background: {soft}; }}")
+            b.setIcon(icons.icon("radio", token, 16))
+            col = theme.css("dim" if token == "dim" else token)
+            b.setStyleSheet(f"QToolButton#efirBtn {{ color: {col}; }}")
 
     def _show_window(self) -> None:
         if self.isMaximized():

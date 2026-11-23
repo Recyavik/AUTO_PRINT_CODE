@@ -49,6 +49,27 @@ def _clamp(v: float, lo: float, hi: float) -> float:
     return max(lo, min(hi, v))
 
 
+def agenda_window(n: int, cur: int, k: int = 2) -> tuple[int, int]:
+    """Какие блоки повестки показывать: k до текущего, текущий и k после — срез [a, b). Всё расписание
+    в маленьком окне превращалось в мелкий текст; пять строк читаются с любого расстояния."""
+    if n <= 0:
+        return 0, 0
+    cur = max(0, min(cur, n - 1))
+    return max(0, cur - k), min(n, cur + k + 1)
+
+
+def board_mode(w: float, h: float) -> str:
+    """Раскладка табло по размеру: strip — широкое низкое окно (повестка полосой справа), side — повестка
+    списком справа, below — список под табло (высокое узкое окно), hero — только «что сейчас»."""
+    if w >= 640 and h < 230 and w >= 2.6 * h:
+        return "strip"
+    if w >= 560 and h >= 230:
+        return "side"
+    if h >= 380 and w >= 260 and h >= w * 0.9:
+        return "below"
+    return "hero"
+
+
 class Board(QWidget):
     """Табло: рисуется целиком само — так текст масштабируется под любой размер окна."""
     row_activated = Signal(int)
@@ -59,6 +80,7 @@ class Board(QWidget):
         self.setMinimumSize(60, 30)
         self._rows: list[tuple[QRectF, int]] = []
         self._list_rect = QRectF()
+        self.mode = "hero"
         self.setMouseTracking(True)
 
     def drag_at(self, pt: QPointF) -> bool:
@@ -87,20 +109,20 @@ class Board(QWidget):
         ag = agenda_at(segs, datetime.now())
         w, h = r.width(), r.height()
         self._rows, self._list_rect = [], QRectF()
-        side = w >= 560 and h >= 230
-        below = not side and h >= 380 and w >= 260 and h >= w * 0.9
+        self.mode = board_mode(w, h) if segs else "hero"
         pad = _clamp(min(w, h) * 0.05, 4, 18)
-        if (side or below) and segs:
-            if side:
-                lw = _clamp(w * 0.42, 240, 520)
-                hero = QRectF(r.left(), r.top(), w - lw, h)
-                lst = QRectF(r.right() - lw, r.top(), lw, h).adjusted(0, pad, -pad, -pad)
-            else:
-                hh = _clamp(h * 0.45, 180, 320)
-                hero = QRectF(r.left(), r.top(), w, hh)
-                lst = QRectF(r.left(), r.top() + hh, w, h - hh).adjusted(pad, 0, -pad, -pad)
-            self._draw_hero(p, hero, ag)
-            self._draw_list(p, lst, segs, ag)
+        if self.mode == "side":
+            lw = _clamp(w * 0.42, 240, 560)
+            self._draw_hero(p, QRectF(r.left(), r.top(), w - lw, h), ag)
+            self._draw_list(p, QRectF(r.right() - lw, r.top(), lw, h).adjusted(0, pad, -pad, -pad), segs, ag)
+        elif self.mode == "below":
+            hh = _clamp(h * 0.45, 180, 320)
+            self._draw_hero(p, QRectF(r.left(), r.top(), w, hh), ag)
+            self._draw_list(p, QRectF(r.left(), r.top() + hh, w, h - hh).adjusted(pad, 0, -pad, -pad), segs, ag)
+        elif self.mode == "strip":
+            hw = _clamp(w * 0.32, 200, 440)
+            self._draw_hero(p, QRectF(r.left(), r.top(), hw, h), ag)
+            self._draw_strip(p, QRectF(r.left() + hw, r.top(), w - hw, h).adjusted(0, pad, -pad, -pad), segs, ag)
         else:
             self._draw_hero(p, r, ag)
         # общий ход эфира — тонкая полоса по низу
@@ -243,7 +265,17 @@ class Board(QWidget):
             p.drawText(row, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, f"{datetime.now():%H:%M:%S}")
             p.drawText(row, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignRight, span)
 
+    @staticmethod
+    def _focus_index(segs: list[Segment], ag: Agenda) -> int:
+        return ag.index if ag.phase == "live" else (0 if ag.phase == "before" else len(segs) - 1)
+
+    def _more(self, p: QPainter, rect: QRectF, text: str, align) -> None:
+        p.setFont(_font(_clamp(rect.height() * 0.62, 10, 14), display=False))
+        p.setPen(theme.c("faint"))
+        p.drawText(rect, align | Qt.AlignmentFlag.AlignVCenter, text)
+
     def _draw_list(self, p: QPainter, r: QRectF, segs: list[Segment], ag: Agenda) -> None:
+        """Повестка списком: два блока до, текущий (подсвечен), два после; строки растут вместе с окном."""
         self._list_rect = QRectF(r)
         path = QPainterPath()
         path.addRoundedRect(r, 10, 10)
@@ -251,45 +283,121 @@ class Board(QWidget):
         p.setPen(QPen(theme.c("stroke"), 1))
         p.drawPath(path)
         inner = r.adjusted(6, 6, -6, -6)
-        rh = _clamp(inner.height() / max(1, len(segs)), 22, 34)
-        n = max(1, int(inner.height() // rh))
-        cur = ag.index if ag.phase == "live" else (0 if ag.phase == "before" else len(segs) - 1)
-        first = int(_clamp(cur - 2, 0, max(0, len(segs) - n)))
-        px = _clamp(rh * 0.44, 11, 15)
-        y = inner.top()
-        for s in segs[first:first + n]:
+        cur = self._focus_index(segs, ag)
+        a, b = agenda_window(len(segs), cur)
+        note_h = _clamp(inner.height() * 0.08, 14, 22)
+        top, bottom = a > 0, b < len(segs)
+        avail = inner.height() - note_h * (top + bottom)
+        rh = _clamp(avail / 5, 22, 96)
+        px = _clamp(rh * 0.40, 11, 28)
+        used = rh * (b - a) + note_h * (top + bottom)
+        y = inner.top() + max(0.0, (inner.height() - used) / 2)      # большое окно — список посередине
+        if top:
+            self._more(p, QRectF(inner.left() + 10, y, inner.width() - 20, note_h), f"↑ ещё {a} раньше",
+                       Qt.AlignmentFlag.AlignLeft)
+            y += note_h
+        for s in segs[a:b]:
             row = QRectF(inner.left(), y, inner.width(), rh)
             self._rows.append((row, s.index))
-            is_cur = ag.phase == "live" and s.index == ag.index
-            past = (ag.phase == "live" and s.index < ag.index) or ag.phase == "after"
-            if is_cur:
-                hl = QPainterPath()
-                hl.addRoundedRect(row, 6, 6)
-                p.fillPath(hl, theme.c("accent_soft"))
-                p.fillRect(QRectF(row.left(), row.top() + 4, 3, row.height() - 8), theme.c("accent"))
-            kind_col = {KIND_BREAK: theme.c("accent"), KIND_EXERCISE: theme.c("role_explain")}.get(s.activity.kind)
-            x = row.left() + 10
-            p.setFont(_font(px * 0.95, display=False, tnum=True))
-            p.setPen(theme.c("faint") if past else theme.c("dim"))
-            tw = QFontMetricsF(p.font()).horizontalAdvance("00:00") + 10
-            p.drawText(QRectF(x, row.top(), tw, rh), Qt.AlignmentFlag.AlignVCenter, f"{s.start:%H:%M}")
-            x += tw
-            mins = f"{s.activity.min} мин"
-            mw = QFontMetricsF(p.font()).horizontalAdvance(mins) + 8
-            p.drawText(QRectF(row.right() - mw - 6, row.top(), mw, rh),
-                       Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignRight, mins)
-            if s.activity.demo == DEMO_ON:
-                p.setPen(Qt.PenStyle.NoPen)
-                p.setBrush(theme.c("ok") if not past else theme.c("faint"))
-                p.drawEllipse(QPointF(row.right() - mw - 12, row.center().y()), 3, 3)
-                p.setBrush(Qt.BrushStyle.NoBrush)
-            p.setFont(_font(px, QFont.Weight.DemiBold if is_cur else QFont.Weight.Normal, display=False))
-            col = theme.c("faint") if past else (kind_col or theme.c("text"))
-            p.setPen(col)
-            name_w = row.right() - mw - 22 - x
-            p.drawText(QRectF(x, row.top(), name_w, rh), Qt.AlignmentFlag.AlignVCenter,
-                       _elide(p, s.activity.name, name_w))
+            self._draw_row(p, row, s, ag, px)
             y += rh
+        if bottom:
+            self._more(p, QRectF(inner.left() + 10, y, inner.width() - 20, note_h),
+                       f"↓ ещё {len(segs) - b} дальше", Qt.AlignmentFlag.AlignLeft)
+
+    def _draw_row(self, p: QPainter, row: QRectF, s: Segment, ag: Agenda, px: float) -> None:
+        rh = row.height()
+        is_cur = ag.phase == "live" and s.index == ag.index
+        is_next = ag.phase == "before" and s.index == 0
+        past = (ag.phase == "live" and s.index < ag.index) or ag.phase == "after"
+        if is_cur or is_next:
+            hl = QPainterPath()
+            hl.addRoundedRect(row.adjusted(0, 1, 0, -1), 8, 8)
+            if is_cur:
+                p.fillPath(hl, theme.c("accent_soft"))
+                p.fillRect(QRectF(row.left(), row.top() + rh * 0.18, 4, rh * 0.64), theme.c("accent"))
+            else:
+                p.setPen(QPen(theme.c("accent"), 1.2))
+                p.drawPath(hl)
+        kind_col = {KIND_BREAK: theme.c("accent"), KIND_EXERCISE: theme.c("role_explain")}.get(s.activity.kind)
+        x = row.left() + 12
+        p.setFont(_font(px * 0.9, display=False, tnum=True))
+        p.setPen(theme.c("faint") if past else theme.c("dim"))
+        fm = QFontMetricsF(p.font())
+        tw = fm.horizontalAdvance("00:00") + px * 0.7
+        p.drawText(QRectF(x, row.top(), tw, rh), Qt.AlignmentFlag.AlignVCenter, f"{s.start:%H:%M}")
+        x += tw
+        mins = f"{s.activity.min} мин"
+        mw = fm.horizontalAdvance(mins) + 10
+        p.drawText(QRectF(row.right() - mw - 8, row.top(), mw, rh),
+                   Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignRight, mins)
+        if s.activity.demo == DEMO_ON:
+            p.setPen(Qt.PenStyle.NoPen)
+            p.setBrush(theme.c("ok") if not past else theme.c("faint"))
+            d = _clamp(px * 0.22, 3, 5)
+            p.drawEllipse(QPointF(row.right() - mw - 14, row.center().y()), d, d)
+            p.setBrush(Qt.BrushStyle.NoBrush)
+        p.setFont(_font(px, QFont.Weight.Bold if is_cur else QFont.Weight.Medium, display=False))
+        p.setPen(theme.c("faint") if past else (kind_col or theme.c("text")))
+        name_w = row.right() - mw - 26 - x
+        p.drawText(QRectF(x, row.top(), name_w, rh), Qt.AlignmentFlag.AlignVCenter, _elide(p, s.activity.name, name_w))
+
+    def _draw_strip(self, p: QPainter, r: QRectF, segs: list[Segment], ag: Agenda) -> None:
+        """Широкое низкое окно: те же пять блоков полосой слева направо — текущий посередине и подсвечен."""
+        self._list_rect = QRectF(r)
+        cur = self._focus_index(segs, ag)
+        a, b = agenda_window(len(segs), cur)
+        side = _clamp(r.width() * 0.05, 26, 60)
+        left, right = a > 0, b < len(segs)
+        inner = r.adjusted(side if left else 0, 0, -(side if right else 0), 0)
+        if left:
+            self._more(p, QRectF(r.left(), r.top(), side, r.height()), f"‹ {a}", Qt.AlignmentFlag.AlignCenter)
+        if right:
+            self._more(p, QRectF(r.right() - side, r.top(), side, r.height()), f"{len(segs) - b} ›",
+                       Qt.AlignmentFlag.AlignCenter)
+        gap = 6
+        cw = (inner.width() - gap * 4) / 5
+        x = inner.left() + (5 - (b - a)) * (cw + gap) / 2 if b - a < 5 else inner.left()
+        h = inner.height()
+        px = _clamp(min(h * 0.2, cw * 0.11), 10, 24)
+        for s in segs[a:b]:
+            cell = QRectF(x, inner.top(), cw, h)
+            self._rows.append((cell, s.index))
+            is_cur = ag.phase == "live" and s.index == ag.index
+            is_next = ag.phase == "before" and s.index == 0
+            past = (ag.phase == "live" and s.index < ag.index) or ag.phase == "after"
+            path = QPainterPath()
+            path.addRoundedRect(cell, 10, 10)
+            p.fillPath(path, theme.c("accent_soft") if is_cur else theme.c("card"))
+            p.setPen(QPen(theme.c("accent") if (is_cur or is_next) else theme.c("stroke"), 1.4 if is_cur else 1))
+            p.drawPath(path)
+            if is_cur:
+                p.fillRect(QRectF(cell.left() + 10, cell.top(), cell.width() - 20, 3), theme.c("accent"))
+            c = cell.adjusted(10, h * 0.1, -10, -h * 0.1)
+            kind_col = {KIND_BREAK: theme.c("accent"), KIND_EXERCISE: theme.c("role_explain")}.get(s.activity.kind)
+            p.setFont(_font(px * 0.85, display=False, tnum=True))
+            p.setPen(theme.c("faint") if past else theme.c("dim"))
+            p.drawText(QRectF(c.left(), c.top(), c.width(), c.height() * 0.3), Qt.AlignmentFlag.AlignVCenter,
+                       f"{s.start:%H:%M} · {s.activity.min} мин")
+            p.setFont(_font(px * 1.15, QFont.Weight.Bold if is_cur else QFont.Weight.DemiBold, display=False))
+            p.setPen(theme.c("faint") if past else (kind_col or theme.c("text")))
+            name_r = QRectF(c.left(), c.top() + c.height() * 0.32, c.width(), c.height() * 0.68)
+            p.drawText(name_r, Qt.AlignmentFlag.AlignTop | Qt.TextFlag.TextWordWrap,
+                       self._fit_two_lines(p, s.activity.name, name_r))
+            x += cw + gap
+
+    @staticmethod
+    def _fit_two_lines(p: QPainter, text: str, r: QRectF) -> str:
+        """Название в две строки, а если и так не влезает — с многоточием."""
+        fm = QFontMetricsF(p.font())
+        if fm.boundingRect(r, int(Qt.TextFlag.TextWordWrap), text).height() <= r.height() + 1:
+            return text
+        while len(text) > 1:
+            text = text[:-1]
+            t = text.rstrip() + "…"
+            if fm.boundingRect(r, int(Qt.TextFlag.TextWordWrap), t).height() <= r.height() + 1:
+                return t
+        return text
 
 
 class TimerWindow(FramelessWindow):
@@ -342,9 +450,13 @@ class TimerWindow(FramelessWindow):
         self.btn_ex.clicked.connect(self._exercise_clicked)
         self.btn_brk = ThemedButton("Перерыв", "coffee", "dim")
         self.btn_brk.clicked.connect(self._break_clicked)
+        self.btn_tab = ThemedButton("Открыть вкладку", "external", "accent")
+        self.btn_tab.setToolTip("Вкладка эфира не открыта (или её закрыли) — открыть её в браузере. "
+                                "Её и захватывайте в демонстрации")
+        self.btn_tab.clicked.connect(self.ctl.open_tab)
         self.tab_lbl = QLabel()
         self.tab_lbl.setObjectName("efirTab")
-        for b in (self.btn_bg, self.btn_ex, self.btn_brk):
+        for b in (self.btn_bg, self.btn_ex, self.btn_brk, self.btn_tab):
             b.setFixedHeight(30)
             b.setCursor(Qt.CursorShape.PointingHandCursor)
             sl.addWidget(b)
@@ -418,7 +530,8 @@ QToolButton#pinBtn:checked {{ background: {t.css('accent_soft')}; }}
     def _layout_for_size(self) -> None:
         w, h = self.width(), self.height()
         self.strip.setVisible(w >= STRIP_MIN_W and h >= STRIP_MIN_H)
-        self.tab_lbl.setVisible(w >= 470)
+        self.tab_lbl.setVisible(w >= 560)
+        self.btn_tab.setText(" Открыть вкладку" if w >= 420 else " Вкладка")
         self.titlebar.title.setVisible(w >= 230)
         self.ic.setVisible(w >= 190)
         self.dot.setVisible(w >= 200)
@@ -488,6 +601,7 @@ QToolButton#pinBtn:checked {{ background: {t.css('accent_soft')}; }}
         self.dot.set_token(token)
         self.dot.setToolTip(text + f"\n{ctl.url}")
         self.tab_lbl.setText(text)
+        self.btn_tab.setVisible(ctl.clients <= 0)       # закрыли вкладку случайно — открыть прямо отсюда
         has_ex = bool(w and w.exercises)
         self.btn_ex.setVisible(has_ex)
         mode = ctl.mode

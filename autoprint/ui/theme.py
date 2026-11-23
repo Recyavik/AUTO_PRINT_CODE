@@ -243,6 +243,9 @@ QToolButton#logoBtn:hover {{ background: {t['stroke']}; }}
 QToolButton#logoBtn::menu-indicator {{ image: none; width: 0; }}
 QToolButton#titleTool {{ background: transparent; border: none; border-radius: 5px; padding: 4px; }}
 QToolButton#titleTool:hover {{ background: {t['stroke']}; }}
+QToolButton#efirBtn {{ background: transparent; border: none; border-radius: 5px; padding: 4px 9px 4px 7px;
+                       font-weight: 600; font-size: 12px; }}
+QToolButton#efirBtn:hover {{ background: {t['stroke']}; }}
 
 /* ---------- панели ---------- */
 #navPanel {{ background: {t['panel']}; border-right: 1px solid {t['stroke']}; }}

@@ -625,5 +625,73 @@ class EfirEditorTest(unittest.TestCase):
         self.assertIn("'/events' + (CH ?", html)
 
 
+
+# ================================================================ Task 6: таймер, кнопка «Эфир», экран
+
+class TimerTest(unittest.TestCase):
+    def test_agenda_window(self):
+        from autoprint.ui.efir_timer import agenda_window
+        self.assertEqual(agenda_window(13, 0), (0, 3))
+        self.assertEqual(agenda_window(13, 6), (4, 9))
+        self.assertEqual(agenda_window(13, 12), (10, 13))
+        self.assertEqual(agenda_window(3, 1), (0, 3))
+        self.assertEqual(agenda_window(0, 0), (0, 0))
+
+    def test_board_mode(self):
+        from autoprint.ui.efir_timer import board_mode
+        self.assertEqual(board_mode(900, 160), "strip")
+        self.assertEqual(board_mode(700, 400), "side")
+        self.assertEqual(board_mode(300, 500), "below")
+        self.assertEqual(board_mode(200, 80), "hero")
+        self.assertEqual(board_mode(420, 200), "hero")
+
+    def test_efir_token(self):
+        from autoprint.ui.main_window import efir_token
+        self.assertEqual(efir_token("", "idle"), "dim")
+        self.assertEqual(efir_token("before", "idle"), "accent")
+        self.assertEqual(efir_token("live", "idle"), "live")
+        self.assertEqual(efir_token("live", "break"), "accent")
+        self.assertEqual(efir_token("after", "idle"), "dim")
+
+    def test_screen_no_hint(self):
+        from autoprint.efir.server import PAGE_DIR
+        html = (PAGE_DIR / "screen.html").read_text(encoding="utf-8")
+        self.assertNotIn("Щёлкните по странице", html)
+        self.assertNotIn('id="hint"', html)
+
+
+class TimerWindowTest(unittest.TestCase):
+    def setUp(self):
+        from autoprint.efir.model import sample_webinar
+        self.ctl = efir_ctl("timer")
+        self.w = sample_webinar()
+        self.ctl.store.add([self.w])
+        self.ctl.launch(self.w.id, "")
+        self.tw = self.ctl.timer_window
+
+    def tearDown(self):
+        if self.ctl.timer_window is not None:
+            self.ctl.timer_window.close_silently()
+        self.ctl.server.stop()
+
+    def test_open_tab_button(self):
+        self.tw.resize(520, 300)
+        pump(30)
+        self.ctl.clients = 0
+        self.ctl.tab_changed.emit()
+        self.assertTrue(self.tw.btn_tab.isVisibleTo(self.tw))
+        self.ctl.clients = 1
+        self.ctl.tab_changed.emit()
+        self.assertFalse(self.tw.btn_tab.isVisibleTo(self.tw))
+
+    def test_board_paints_all_sizes(self):
+        for size in ((900, 190), (700, 420), (320, 560), (220, 110), (1600, 900)):
+            self.tw.resize(*size)
+            pump(20)
+            img = self.tw.grab()
+            self.assertFalse(img.isNull(), size)
+        self.assertIn(self.tw.board.mode, ("strip", "side", "below", "hero"))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
