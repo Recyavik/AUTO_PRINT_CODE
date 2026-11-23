@@ -436,6 +436,17 @@ function blockRow(b) {
     box.appendChild(lang);
     c.appendChild(box);
   } else if (b.role === "image") {
+    const cap = row.querySelector(".lbl");             // картинку тоже можно «печатать» — вставкой в Jupyter
+    if (cap && !b.missing) {
+      if (S.armed === b.id) {
+        cap.appendChild(el("span", "armed", "▶ Вставится следующей" + (S.hotkey ? " · " + S.hotkey : "")));
+      } else {
+        const arm = el("button", "armbtn", "Вставлять эту");
+        arm.title = "Хоткей печати вставит картинку (Ctrl+V) туда, где курсор — в Jupyter в markdown-ячейку";
+        arm.onclick = () => cmd({ cmd: "arm", block: b.id });
+        cap.appendChild(arm);
+      }
+    }
     if (b.missing) {
       c.appendChild(el("div", "missing", "Нет файла картинки" + (b.name ? ": " + b.name : "") + (b.caption ? " — " + b.caption : "")));
     } else {

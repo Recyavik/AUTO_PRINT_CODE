@@ -911,7 +911,15 @@ class ImageBlockWidget(BlockWidget):
         self.body.addWidget(self.preview)
         self.body.addLayout(row)
         self.body.setContentsMargins(6, 0, 0, 0)
+        self.arm_btn.show()                 # картинку тоже «печатают» — вставкой (Ctrl+V), см. set_armed
         self._show()
+        self.set_armed(False)
+
+    def set_armed(self, on: bool) -> None:
+        super().set_armed(on)
+        self.arm_btn.setText("Вставится по хоткею" if on else "Вставлять эту")
+        self.arm_btn.setToolTip("Хоткей печати вставит картинку: копия в буфер обмена и Ctrl+V в окно с курсором "
+                                "(в Jupyter — в markdown-ячейку в режиме правки)")
 
     def _show(self) -> None:
         src = (self.block.text or "").strip()

@@ -1058,6 +1058,34 @@ class IpynbTest(unittest.TestCase):
 
 
 
+
+class ImageArmTest(unittest.TestCase):
+    """Ревью №2: картинку можно сделать активной — кнопкой в редакторе и на странице суфлёра."""
+
+    def test_image_block_arm_button(self):
+        from autoprint.storage import BLOCK_IMAGE, BLOCK_MARKDOWN, Block, Template
+        from autoprint.ui.template_view import TemplateView
+        img = make_image("арм.png", 80, 60)
+        t = Template(title="x", blocks=[Block(BLOCK_MARKDOWN, "текст", role="say"),
+                                        Block(BLOCK_IMAGE, str(img), title="Слайд")])
+        v = TemplateView(t)
+        v.resize(900, 600)
+        v.show()
+        pump(50)
+        w = v.widgets[1]
+        self.assertTrue(w.arm_btn.isVisibleTo(w))
+        self.assertIn("Вставлять", w.arm_btn.text())
+        w.arm_btn.click()
+        self.assertEqual(t.active_block, t.blocks[1].id)
+        self.assertIn("Ctrl+V", w.arm_btn.text() + w.arm_btn.toolTip())
+        v.close()
+
+    def test_lesson_page_image_arm(self):
+        from autoprint.efir.server import PAGE_DIR
+        html = (PAGE_DIR / "lesson.html").read_text(encoding="utf-8")
+        self.assertIn("Вставлять эту", html)
+
+
 # ================================================================ Task 11: картинка в Jupyter вставкой
 
 class PasteTest(unittest.TestCase):
