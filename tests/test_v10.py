@@ -334,14 +334,14 @@ class OwnWindowTest(unittest.TestCase):
 
     def test_page_window_pid_registered(self):
         from autoprint import winapi
-        from autoprint.ui.lesson_control import PrompterWindow
+        from autoprint.ui.lesson_control import PageWindow
 
         class Proc:
             pid = 7777
 
             def poll(self):
                 return None
-        w = PrompterWindow(TMP / "edge", popen=lambda *a, **k: Proc(), edge=lambda: "msedge.exe",
+        w = PageWindow(TMP / "edge", popen=lambda *a, **k: Proc(), edge=lambda: "msedge.exe",
                            find_window=lambda pid: 0, raise_window=lambda h: None)
         self.assertTrue(w.open("http://127.0.0.1:1/lesson"))
         self.assertIn(7777, winapi.own_pids)
@@ -1041,6 +1041,67 @@ class ScenarioTest(unittest.TestCase):
         t = import_ipynb(str(path))
         self.assertEqual(sum(b.type == BLOCK_STAGE for b in t.blocks), 6)
         self.assertEqual(t.title, "Занятие 7")
+
+
+# ================================================================ Task 19: нейросеть, версия, чистка
+
+class AiTest(unittest.TestCase):
+    def test_prompt_roles(self):
+        from autoprint import lesson_ai as L
+        opt = L.Options(style=L.STYLE_SCENARIO)
+        text = L.build_prompt("Материал урока", opt)
+        self.assertIn('"term"', text)
+        self.assertIn('"output"', text)
+        self.assertIn("печатается только код", text)
+        self.assertIn("обязательно и дословно", text)
+        self.assertIn("своими словами", text)
+        self.assertNotIn("Условие", text)
+
+    def test_parse_new_roles(self):
+        from autoprint import lesson_ai as L
+        r = L.parse_lesson('{"format": "%s", "version": 2, "title": "Т", "blocks": ['
+                           '{"type": "stage", "title": "А", "min": 5},'
+                           '{"type": "term", "text": "Функция\\nблок кода"},'
+                           '{"type": "code", "lang": "python", "code": "print(1)"},'
+                           '{"type": "output", "text": "1"},'
+                           '{"type": "вывод", "text": "1"}, {"type": "термин", "text": "X\\nY"}]}' % L.FORMAT, "Т")
+        roles = [b.role for b in r.template.blocks if b.type == BLOCK_MARKDOWN]
+        self.assertEqual(roles, ["term", "output", "output", "term"])
+
+
+class VersionTest(unittest.TestCase):
+    def test_version(self):
+        import autoprint
+        self.assertEqual(autoprint.__version__, "0.10.0")
+
+    def test_dead_code_gone(self):
+        root = Path(storage.__file__).resolve().parent
+        files = {f.name: f.read_text(encoding="utf-8") for f in root.rglob("*.py") if f.name != "textprint.py"}
+        hits = [(dead, name) for dead in ("store_image_file", "auto_advance", "show_prompter", "prompter_mode",
+                                          "PRINT_MARKDOWN", "anchor_for(", "next_in_s", "lesson_clients",
+                                          "steps_sample_template", "tour_template")
+                for name, src in files.items() if dead in src]
+        self.assertEqual(hits, [])         # textprint.py остаётся для эталонов веб-версии
+
+    def test_readme_current(self):
+        """README описывает 0.10: картинки на месте, нет пульта, окна суфлёра и удалённых примеров."""
+        import re
+        root = Path(storage.__file__).resolve().parent.parent
+        text = (root / "README.md").read_text(encoding="utf-8")
+        missing = [p for p in re.findall(r"docs/images/[\w.-]+\.png", text) if not (root / p).exists()]
+        self.assertEqual(missing, [])
+        stale = [w for w in ("пульт", "Суфлёр в отдельном окне", "Без комментариев", "Пример занятия",
+                             "make_screenshots", "тёмная тема.md", "tests/test_ui.py") if w in text]
+        self.assertEqual(stale, [])
+
+    def test_ui_texts_current(self):
+        """Справка и окно импорта не ссылаются на ленту блоков, янтарную рамку и «Суфлёр урока» в шапке занятия."""
+        root = Path(storage.__file__).resolve().parent / "ui"
+        src = (root / "settings_window.py").read_text(encoding="utf-8") + (root / "import_dialog.py").read_text(
+            encoding="utf-8")
+        stale = [w for w in ("янтарная рамка", "Занятие — лента", "на суфлёре", "в шапке занятия",
+                             "Добавить занятие") if w in src]
+        self.assertEqual(stale, [])
 
 
 # ================================================================ Task 7: правки урока со страницы

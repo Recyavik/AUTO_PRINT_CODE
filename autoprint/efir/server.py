@@ -419,8 +419,8 @@ class BroadcastServer:
         with self._cond:
             self._counts[channel] = max(0, self._counts[channel] + d)
             n = self._counts[channel]
-        if self.on_report and channel != "preview":
-            self.on_report({"type": "clients" if channel == "screen" else "lesson_clients", "count": n})
+        if self.on_report and channel == "screen":      # сколько открыто вкладок экрана эфира — таймеру и окну
+            self.on_report({"type": "clients", "count": n})
 
     # ------------------------------------------------------------ файлы
     def media_url(self, path: str | os.PathLike) -> str:

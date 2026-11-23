@@ -238,14 +238,14 @@ class FakeProc:
 
 class PrompterWinTest(unittest.TestCase):
     def make(self, edge="C:/Edge/msedge.exe", window=True):
-        from autoprint.ui.lesson_control import PrompterWindow
+        from autoprint.ui.lesson_control import PageWindow
         self.launched, self.raised = [], []
 
         def popen(args, **_kw):
             proc = FakeProc(args)
             self.launched.append(proc)
             return proc
-        return PrompterWindow(TMP / "edge-suflor", popen=popen, edge=lambda: edge,
+        return PageWindow(TMP / "edge-suflor", popen=popen, edge=lambda: edge,
                               find_window=lambda pid: 77 if window else 0,
                               raise_window=lambda hwnd: self.raised.append(hwnd))
 

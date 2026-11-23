@@ -1,12 +1,12 @@
-"""«Импорт занятия»: из файла, вставкой или с помощью нейросети.
+"""«Импорт урока»: из файла, вставкой или с помощью нейросети.
 
 - «Из файла» — .ipynb, .md, .py, .json (перетащить или выбрать);
 - «Вставить» — код, Markdown с ```-блоками, тетрадка Jupyter или ответ нейросети (JSON): что это — видно сразу;
-- «С помощью нейросети» — код или задание с решением → нейросеть раскладывает его в занятие: с комментариями
+- «С помощью нейросети» — код или задание с решением → нейросеть раскладывает его в урок: с комментариями
   для преподавателя, по шагам или по частям. Подключённая нейросеть (⚙ → Нейросеть) отвечает сама; без неё —
   «Скопировать промпт» в свой чат (ChatGPT, Claude…) и вставить ответ обратно.
 
-Результат — список занятий в self.result и стиль разбора в self.result_style (чтобы окно программы включило
+Результат — список уроков в self.result и стиль разбора в self.result_style (чтобы окно программы включило
 подходящий режим печати).
 """
 from __future__ import annotations
@@ -35,14 +35,14 @@ log = logging.getLogger("autoprint.ai")
 
 STYLE_HINTS = {
     L.STYLE_COMMENTS: "Код целиком, в нём комментарии — что сказать перед каждым куском. Печать «По строкам»: "
-                      "комментарий — на суфлёре, Enter — следующая строка.",
+                      "комментарий — над кодом на экране урока («Скажи: …»), Enter — следующая строка.",
     L.STYLE_STEPS: "Код с разметкой шагов: что за чем писать, с возвратом наверх (import) и вставкой в середину. "
-                   "Печать «По шагам»: прочитали шаг на суфлёре — Ctrl+F9.",
+                   "Печать «По шагам»: прочитали «Скажи: …» на экране урока — Ctrl+F9.",
     L.STYLE_PARTS: "Несколько блоков кода, между ними пояснения для учеников. Печать «Целиком»: блок за блоком "
                    "(Ctrl+F12 — следующий).",
-    L.STYLE_SCENARIO: "Суфлёр урока из методички, плана или презентации: этапы с минутами, что сказать, спросить, "
-                      "сделать и показать. Слайды из PDF прикрепляются к этапам картинками. Открывается кнопкой "
-                      "«Суфлёр урока» в шапке занятия.",
+    L.STYLE_SCENARIO: "Урок из методички, плана или презентации: этапы с минутами, что сказать, какой термин "
+                      "дать, что спросить, сделать и показать. Слайды из PDF прикрепляются к этапам картинками. "
+                      "Урок сразу открывается на экране урока.",
 }
 MATERIAL_FILTER = ("Методички, презентации и код (*.pdf *.docx *.pptx *.txt *.md *.py *.ipynb *.html *.js *.css "
                    "*.java *.kt *.cs *.cpp *.sql);;Все файлы (*.*)")
@@ -64,7 +64,7 @@ class ImportDialog(QDialog):
     def __init__(self, parent=None, settings: Settings | None = None, tab: str = TAB_FILE,
                  open_ai_settings=None) -> None:
         super().__init__(parent)
-        self.setWindowTitle("Импорт занятия")
+        self.setWindowTitle("Импорт урока")
         self.setModal(False)   # из окна можно открыть ⚙ → Нейросеть и вернуться
         self.settings = settings or Settings.load()
         self.open_ai_settings = open_ai_settings      # «Подключить нейросеть…» — открыть ⚙ → Нейросеть
@@ -80,8 +80,8 @@ class ImportDialog(QDialog):
         root = QVBoxLayout(self)
         root.setContentsMargins(28, 22, 28, 18)
         root.setSpacing(0)
-        root.addWidget(page_header("Импорт занятия", "Из файла, вставкой из буфера обмена или с помощью нейросети: "
-                                   "она разложит код в занятие с подсказками для преподавателя."))
+        root.addWidget(page_header("Импорт урока", "Из файла, вставкой из буфера обмена или с помощью нейросети: "
+                                   "она разложит код в урок с подсказками для преподавателя."))
         root.addSpacing(14)
         self.tabs = Segmented([(TAB_FILE, "Из файла"), (TAB_PASTE, "Вставить"), (TAB_AI, "С помощью нейросети")])
         self.tabs.changed.connect(self._show_tab)
@@ -107,7 +107,7 @@ class ImportDialog(QDialog):
         self.status = label("", "importStatus", wrap=True)
         self.status.setTextFormat(Qt.TextFormat.PlainText)
         nav.addWidget(self.status, 3)
-        self.add_btn = accent_button("Добавить занятие", "plus")
+        self.add_btn = accent_button("Добавить урок", "plus")
         self.add_btn.clicked.connect(self._add)
         nav.addWidget(self.add_btn)
         root.addLayout(nav)
@@ -140,7 +140,7 @@ class ImportDialog(QDialog):
         t = label("Перетащите сюда файлы", "dropTitle")
         t.setAlignment(Qt.AlignmentFlag.AlignCenter)
         dl.addWidget(t)
-        s = label(".ipynb (Jupyter) · .md (Markdown) · .py · .json (занятие или ответ нейросети)", "dropSub")
+        s = label(".ipynb (Jupyter) · .md (Markdown) · .py · .json (урок или ответ нейросети)", "dropSub")
         s.setAlignment(Qt.AlignmentFlag.AlignCenter)
         dl.addWidget(s)
         pick = button("Выбрать файлы…", "import")
@@ -405,7 +405,7 @@ QScrollArea#importScroll, QScrollArea#importScroll > QWidget > QWidget {{ backgr
 
     # ------------------------------------------------------------ из файла
     def _pick_files(self) -> None:
-        paths, _ = QFileDialog.getOpenFileNames(self, "Импорт занятий", "", FILE_FILTER)
+        paths, _ = QFileDialog.getOpenFileNames(self, "Импорт уроков", "", FILE_FILTER)
         self._take_files(paths)
 
     def _take_files(self, paths: list[str]) -> None:
@@ -632,7 +632,7 @@ QScrollArea#importScroll, QScrollArea#importScroll > QWidget > QWidget {{ backgr
         if who:
             log.info("Импорт нейросетью: %s · замечаний: %d", parsed.summary, len(notes))
         self.answer_info.setText(head + ("\n" + "\n".join(notes) if notes else ""))
-        self.status.setText("Готово — можно добавить занятие." if not notes else "Готово, но проверьте замечания.")
+        self.status.setText("Готово — можно добавить урок." if not notes else "Готово, но проверьте замечания.")
         self.add_btn.setEnabled(True)
 
     # ------------------------------------------------------------ итог

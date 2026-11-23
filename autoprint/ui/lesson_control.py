@@ -1,4 +1,4 @@
-"""Суфлёр урока: страница в браузере (http://127.0.0.1:8791/lesson) и её связь с программой.
+"""Экран урока: страница в браузере (http://127.0.0.1:8791/lesson) и её связь с программой.
 
 Контроллер собирает состояние страницы (урок по этапам, идёт ли он, какой код печатается следующим) и отдаёт
 его серверу «Эфира» на канал lesson; команды со страницы (начать урок, начать с этапа, печатать этот блок,
@@ -35,10 +35,10 @@ def _edge_path() -> str | None:
     return None
 
 
-class PrompterWindow:
-    """Окно суфлёра — Edge без вкладок и адресной строки, со своим профилем (не смешивается с браузером
+class PageWindow:
+    """Окно экрана урока — Edge без вкладок и адресной строки, со своим профилем (не смешивается с браузером
     человека, его не перепутать с вкладкой, которую захватывают в демонстрации). Окно одно: повторное
-    «Суфлёр урока» поднимает его; программа завершается — окно закрывается вместе с ней."""
+    «Открыть урок» поднимает его; программа завершается — окно закрывается вместе с ней."""
 
     def __init__(self, profile_dir: Path, popen=subprocess.Popen, edge=_edge_path, find_window=None,
                  raise_window=None) -> None:
@@ -80,23 +80,23 @@ class PrompterWindow:
             try:
                 self.proc.terminate()
             except OSError as e:
-                log.warning("Окно суфлёра не закрылось: %s", e)
+                log.warning("Окно экрана урока не закрылось: %s", e)
         self.proc = None
 
 
-_window: PrompterWindow | None = None
+_window: PageWindow | None = None
 
 
-def prompter_window() -> PrompterWindow:
+def page_window() -> PageWindow:
     global _window
     if _window is None:
         from ..storage import DATA_DIR
-        _window = PrompterWindow(DATA_DIR / "edge-suflor")
+        _window = PageWindow(DATA_DIR / "edge-suflor")
     return _window
 
 
 def launch_app_window(url: str) -> bool:
-    return prompter_window().open(url)
+    return page_window().open(url)
 
 
 def close_app_window() -> None:
@@ -334,7 +334,7 @@ class LessonController(QObject):
             elif cmd == "open":
                 self.main.open_lesson(str(d.get("lesson") or ""), ask=not d.get("force"))
         except (TypeError, ValueError) as e:
-            log.warning("Команда суфлёра %r не выполнена: %s", d, e)
+            log.warning("Команда экрана урока %r не выполнена: %s", d, e)
         self.schedule_publish()
 
     def _new_lesson(self, force: bool) -> None:
