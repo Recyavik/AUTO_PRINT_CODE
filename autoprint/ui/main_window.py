@@ -702,7 +702,7 @@ class MainWindow(FramelessWindow):
         d.show()
 
     def _take_import(self, d) -> None:
-        from ..lesson_ai import STYLE_COMMENTS, STYLE_PARTS, STYLE_STEPS
+        from ..lesson_ai import STYLE_COMMENTS, STYLE_PARTS, STYLE_SCENARIO, STYLE_STEPS
         last = None
         for t in d.result:
             self.store.insert(t)
@@ -722,6 +722,8 @@ class MainWindow(FramelessWindow):
             names = {MODE_STEPS: "«По шагам»", MODE_LINES: "«По строкам»", MODE_BLOCK: "«Целиком»"}
             msg += f" Включены {names[mode]} и «Без комментариев»" + \
                    (": комментарии — на суфлёре." if mode != MODE_BLOCK else ": блок за блоком — Ctrl+F12.")
+        if d.result_style == STYLE_SCENARIO:
+            msg += " Урок по этапам — откройте «Суфлёр урока» в шапке занятия."
         self.toast.show_message(msg, ms=9000)
 
     def export_current(self, fmt: str) -> None:

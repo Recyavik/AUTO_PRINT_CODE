@@ -19,9 +19,9 @@ from pathlib import Path
 from PySide6.QtCore import QObject, Qt, QTimer, Signal
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import (QComboBox, QDialog, QFileDialog, QFrame, QHBoxLayout, QLabel, QPlainTextEdit,
-                               QPushButton, QScrollArea, QSizePolicy, QStackedWidget, QVBoxLayout, QWidget)
+                               QPushButton, QScrollArea, QSizePolicy, QSpinBox, QStackedWidget, QVBoxLayout, QWidget)
 
-from .. import ai, lesson_ai as L
+from .. import ai, lesson_ai as L, materials
 from ..highlighter import LANGUAGES
 from ..importers import FILE_EXTS, FILE_FILTER, load_file, parse_pasted
 from ..storage import Settings, Template
@@ -40,7 +40,16 @@ STYLE_HINTS = {
                    "Печать «По шагам»: прочитали шаг на суфлёре — Ctrl+F9.",
     L.STYLE_PARTS: "Несколько блоков кода, между ними пояснения для учеников. Печать «Целиком»: блок за блоком "
                    "(Ctrl+F12 — следующий).",
+    L.STYLE_SCENARIO: "Суфлёр урока из методички, плана или презентации: этапы с минутами, что сказать, спросить, "
+                      "сделать и показать. Слайды из PDF прикрепляются к этапам картинками. Открывается кнопкой "
+                      "«Суфлёр урока» в шапке занятия.",
 }
+MATERIAL_FILTER = ("Методички, презентации и код (*.pdf *.docx *.pptx *.txt *.md *.py *.ipynb *.html *.js *.css "
+                   "*.java *.kt *.cs *.cpp *.sql);;Все файлы (*.*)")
+CODE_PLACEHOLDER = ("Вставьте код — или задание вместе с решением. Нейросеть добавит комментарии для преподавателя "
+                    "и разложит код по шагам или частям.")
+SCENARIO_PLACEHOLDER = ("Вставьте методичку, план урока или текст презентации — или «Из файла…»: PDF, Word (.docx), "
+                        "PowerPoint (.pptx). Нейросеть разложит урок по этапам: что сказать, спросить, показать.")
 
 
 class _Job(QObject):
@@ -64,6 +73,8 @@ class ImportDialog(QDialog):
         self._paste_parsed: Template | None = None
         self._ai_parsed: L.Parsed | None = None
         self._cancel: threading.Event | None = None
+        self._material_pdf: str | None = None     # PDF материала: из него — картинки слайдов ("slide": N)
+        self._slides: dict[tuple[str, int], str | None] = {}
         self.setAcceptDrops(True)
 
         root = QVBoxLayout(self)
@@ -179,8 +190,7 @@ class ImportDialog(QDialog):
         from_file.clicked.connect(self._material_from_file)
         head.addWidget(from_file)
         lay.addLayout(head)
-        self.material = self._editor("Вставьте код — или задание вместе с решением. Нейросеть добавит комментарии "
-                                     "для преподавателя и разложит код по шагам или частям.")
+        self.material = self._editor(CODE_PLACEHOLDER)
         self.material.setMinimumHeight(150)
         self.material.textChanged.connect(self._update_ai_buttons)
         lay.addWidget(self.material)
@@ -197,15 +207,34 @@ class ImportDialog(QDialog):
         hl.setContentsMargins(48, 0, 16, 12)
         hl.addWidget(self.style_hint)
         c.add(hint_row)
+        # сценарий урока: длительность и перерыв
+        self.minutes_spin = QSpinBox()
+        self.minutes_spin.setRange(10, 600)
+        self.minutes_spin.setSingleStep(5)
+        self.minutes_spin.setSuffix(" мин")
+        self.minutes_spin.setValue(s.lesson_minutes)
+        self.minutes_spin.setToolTip("Длительность урока: сумма минут всех этапов")
+        self.break_spin = QSpinBox()
+        self.break_spin.setRange(0, 60)
+        self.break_spin.setSuffix(" мин")
+        self.break_spin.setSpecialValueText("без перерыва")
+        self.break_spin.setValue(s.lesson_break)
+        self.break_spin.setToolTip("Перерыв отдельным этапом в середине урока. «Без перерыва» — только если он "
+                                   "есть в материале")
+        self.scenario_row = Row("clock", "Урок", "Длительность и перерыв", [self.minutes_spin, self.break_spin])
+        c.add(self.scenario_row)
         self.sw_task = Switch(checked=s.lesson_task)
-        c.add(Row("file-text", "Краткое условие задачи", "Блок «Условие» в начале; нет условия — нейросеть "
-                  "сформулирует его по коду", [self.sw_task]))
+        self.row_task = Row("file-text", "Краткое условие задачи", "Блок «Условие» в начале; нет условия — "
+                            "нейросеть сформулирует его по коду", [self.sw_task])
+        c.add(self.row_task)
         self.sw_explain = Switch(checked=s.lesson_explain)
-        c.add(Row("info", "Пояснения для учеников", "Текстовые блоки: что будем делать (в разборе «По частям» — "
-                  "всегда)", [self.sw_explain]))
+        self.row_explain = Row("info", "Пояснения для учеников", "Текстовые блоки: что будем делать (в разборе "
+                               "«По частям» — всегда)", [self.sw_explain])
+        c.add(self.row_explain)
         self.sw_keep = Switch(checked=s.lesson_keep_code)
-        c.add(Row("code", "Не менять код — только комментарии и разметка",
-                  "Выключите, если код можно поправить для объяснения", [self.sw_keep]))
+        self.row_keep = Row("code", "Не менять код — только комментарии и разметка",
+                            "Выключите, если код можно поправить для объяснения", [self.sw_keep])
+        c.add(self.row_keep)
         self.detail_seg = Segmented([(L.DETAIL_SHORT, "Коротко"), (L.DETAIL_FULL, "Подробно")])
         self.detail_seg.set_value(s.lesson_detail if s.lesson_detail in (L.DETAIL_SHORT, L.DETAIL_FULL)
                                   else L.DETAIL_SHORT)
@@ -319,18 +348,28 @@ QScrollArea#importScroll, QScrollArea#importScroll > QWidget > QWidget {{ backgr
     def _style_changed(self, key) -> None:
         self.style_hint.setText(STYLE_HINTS.get(key, ""))
         self.sw_explain.setEnabled(key != L.STYLE_PARTS)
+        scenario = key == L.STYLE_SCENARIO
+        self.scenario_row.setHidden(not scenario)
+        for row in (self.row_task, self.row_explain, self.row_keep):   # это про разбор кода
+            row.setHidden(scenario)
+        self.material.setPlaceholderText(SCENARIO_PLACEHOLDER if scenario else CODE_PLACEHOLDER)
+        if hasattr(self, "ask_btn"):
+            self._update_ai_buttons()
 
     def _options(self) -> L.Options:
-        return L.Options(style=self.style_seg.value() or L.STYLE_STEPS, task=self.sw_task.isChecked(),
+        style = self.style_seg.value() or L.STYLE_STEPS
+        return L.Options(style=style, task=self.sw_task.isChecked(),
                          explain=self.sw_explain.isChecked(), keep_code=self.sw_keep.isChecked(),
                          detail=self.detail_seg.value() or L.DETAIL_SHORT,
-                         marks=L.is_big(self.material.toPlainText()))
+                         marks=style != L.STYLE_SCENARIO and L.is_big(self.material.toPlainText()),
+                         minutes=self.minutes_spin.value(), break_min=self.break_spin.value())
 
     def _remember_options(self) -> None:
         o = self._options()
         s = self.settings
         s.lesson_style, s.lesson_task, s.lesson_explain = o.style, o.task, o.explain
         s.lesson_keep_code, s.lesson_detail = o.keep_code, o.detail
+        s.lesson_minutes, s.lesson_break = o.minutes, o.break_min
 
     def _update_ai_buttons(self) -> None:
         has = bool(self.material.toPlainText().strip())
@@ -346,7 +385,9 @@ QScrollArea#importScroll, QScrollArea#importScroll > QWidget > QWidget {{ backgr
         material = self.material.toPlainText()
         big = (f"<br>Код большой ({len(L.source_lines(material))} строк): нейросеть не будет переписывать его, "
                "а только разметит строки — шаги и что сказать. Так быстрее, и код останется точно вашим."
-               if has and L.is_big(material) else "")
+               if has and self._options().marks else "")
+        if has and self._material_pdf and self.style_seg.value() == L.STYLE_SCENARIO:
+            big += "<br>Материал — PDF: слайды, на которые сошлётся нейросеть, вставятся картинками."
         if ok:
             self.ai_info.setText(f"Ответит: <b>{c.provider.name}</b>{(' · ' + c.model) if c.model else ''}. "
                                  "<a href='ai'>Сменить…</a>" + big)
@@ -432,12 +473,33 @@ QScrollArea#importScroll, QScrollArea#importScroll > QWidget > QWidget {{ backgr
 
     # ------------------------------------------------------------ нейросеть
     def _material_from_file(self) -> None:
-        path, _ = QFileDialog.getOpenFileName(self, "Код или задание", "", "Текст и код (*.*)")
+        path, _ = QFileDialog.getOpenFileName(self, "Материал: методичка, презентация, код", "", MATERIAL_FILTER)
         if path:
-            try:
-                self.material.setPlainText(Path(path).read_text(encoding="utf-8-sig"))
-            except (OSError, UnicodeDecodeError) as e:
-                self.toast.show_message(f"Не прочитать файл: {e}", warn=True)
+            self.load_material(path)
+
+    def load_material(self, path: str) -> None:
+        """Материал из файла: PDF, DOCX, PPTX — текстом (страницы и слайды помечены), остальное — как есть."""
+        try:
+            m = materials.extract(path)
+        except (OSError, ValueError, KeyError) as e:      # KeyError — повреждённый .docx/.pptx без нужных частей
+            self.toast.show_message(f"Не прочитать файл: {e}", warn=True)
+            return
+        self._material_pdf = m.pdf
+        self._slides.clear()
+        self.material.setPlainText(m.text)
+        if m.pages and self.style_seg.value() != L.STYLE_SCENARIO and Path(path).suffix.lower() in (".pdf", ".pptx"):
+            self.toast.show_message("Похоже на методичку или презентацию — для неё подойдёт «Сценарий урока».", ms=6000)
+
+    def _slide(self, n: int) -> str | None:
+        """Картинка слайда N материала (PDF) → файл в данных программы."""
+        if not self._material_pdf:
+            return None
+        key = (self._material_pdf, n)
+        if key not in self._slides:
+            from .blocks import media_dir
+            out = materials.render_page(self._material_pdf, n, media_dir())
+            self._slides[key] = str(out) if out else None
+        return self._slides[key]
 
     def _copy_prompt(self) -> None:
         self._remember_options()
@@ -470,7 +532,7 @@ QScrollArea#importScroll, QScrollArea#importScroll > QWidget > QWidget {{ backgr
 
         def work() -> None:
             try:
-                text, who = ai.ask(self.settings, L.instruction(opt), L.material_message(material, opt.marks),
+                text, who = ai.ask(self.settings, L.instruction(opt), L.material_for(material, opt),
                                    cancel,
                                    on_status=job.status.emit, on_progress=job.progress.emit)
                 if not cancel.is_set():
@@ -551,8 +613,9 @@ QScrollArea#importScroll, QScrollArea#importScroll > QWidget > QWidget {{ backgr
             if self._cancel is None and not self.answer_info.text().startswith(("Нейросеть не ответила", "Отменено")):
                 self.answer_info.setText("")
             return
+        style = self._options().style
         try:
-            parsed = L.parse_lesson(text, material=self.material.toPlainText(), style=self._options().style)
+            parsed = L.parse_lesson(text, material=self.material.toPlainText(), style=style, slide=self._slide)
         except L.LessonError as e:
             self.status.setText("Ответ не разобрать.")
             self.answer_info.setText(str(e))
@@ -560,7 +623,7 @@ QScrollArea#importScroll, QScrollArea#importScroll > QWidget > QWidget {{ backgr
             return
         self._ai_parsed = parsed
         notes = list(parsed.warnings)
-        if self.sw_keep.isChecked():
+        if self.sw_keep.isChecked() and style != L.STYLE_SCENARIO:   # материал сценария — методичка, а не код
             diff = L.code_changes(self.material.toPlainText(), parsed)
             if diff:
                 notes.insert(0, "Внимание: нейросеть изменила код (без учёта комментариев):\n  "

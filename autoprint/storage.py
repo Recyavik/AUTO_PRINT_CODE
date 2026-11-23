@@ -228,6 +228,8 @@ class Settings:
     lesson_explain: bool = True
     lesson_keep_code: bool = True
     lesson_detail: str = "short"
+    lesson_minutes: int = 90           # «Сценарий урока»: длительность урока
+    lesson_break: int = 0              # «Сценарий урока»: перерыв, мин (0 — только если он есть в материале)
 
     open_tabs: list = field(default_factory=list)
     current_tab: str = ""

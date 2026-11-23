@@ -788,5 +788,54 @@ class EditorTest(unittest.TestCase):
         self.assertFalse(any("slide.png" in s or "теория" == s for s in said))
 
 
+class ImportTest(unittest.TestCase):
+    def dialog(self):
+        from autoprint.storage import Settings
+        from autoprint.ui.import_dialog import TAB_AI, ImportDialog
+        d = ImportDialog(None, Settings(), tab=TAB_AI)
+        self.addCleanup(d.close)
+        return d
+
+    def test_scenario_options(self):
+        from autoprint import lesson_ai as L
+        d = self.dialog()
+        d.style_seg.set_value(L.STYLE_SCENARIO)
+        d._style_changed(L.STYLE_SCENARIO)
+        d.minutes_spin.setValue(80)
+        d.break_spin.setValue(10)
+        d.material.setPlainText("x\n" * 400)               # большой текст — но это методичка, не разметка кода
+        o = d._options()
+        self.assertEqual((o.style, o.minutes, o.break_min, o.marks), (L.STYLE_SCENARIO, 80, 10, False))
+        self.assertTrue(d.row_keep.isHidden() and d.row_task.isHidden())
+        self.assertFalse(d.scenario_row.isHidden())
+        d.style_seg.set_value(L.STYLE_STEPS)
+        d._style_changed(L.STYLE_STEPS)
+        self.assertFalse(d.row_keep.isHidden())
+        self.assertTrue(d.scenario_row.isHidden())
+
+    def test_material_from_pdf_and_slides(self):
+        from autoprint import lesson_ai as L
+        from autoprint.storage import DATA_DIR
+        d = self.dialog()
+        d.style_seg.set_value(L.STYLE_SCENARIO)
+        d._style_changed(L.STYLE_SCENARIO)
+        pdf = make_pdf(TMP / "lesson3.pdf", ["Цель урока", "Правила", "Пример YouTube"])
+        d.load_material(str(pdf))
+        self.assertIn("=== Страница 3 ===", d.material.toPlainText())
+        d.answer_edit.setPlainText(SCENARIO_ANSWER)
+        d._parse_answer()
+        self.assertIsNotNone(d._ai_parsed)
+        t = d._ai_parsed.template
+        img = next(b for b in t.blocks if b.type == BLOCK_IMAGE)
+        self.assertTrue(Path(img.text).is_file())
+        self.assertEqual(Path(img.text).parent, DATA_DIR / "media")
+        self.assertTrue(d.add_btn.isEnabled())
+
+    def test_material_docx(self):
+        d = self.dialog()
+        d.load_material(str(make_docx(TMP / "plan.docx", ["План урока", "Летучка — 5 минут"])))
+        self.assertIn("Летучка — 5 минут", d.material.toPlainText())
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
