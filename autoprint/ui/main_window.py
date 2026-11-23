@@ -289,11 +289,13 @@ class MainWindow(FramelessWindow):
         m.addAction(icons.icon("plus"), "Новое занятие\tCtrl+N", self.new_template)
         m.addAction(icons.icon("import"), "Импорт…\tCtrl+O", lambda: self.import_files())
         m.addAction(icons.icon("sparkles"), "Разобрать код нейросетью…", lambda: self.import_files("ai"))
+        m.addAction(icons.icon("export"), "Урок в Markdown (.md, с картинками рядом)…", lambda: self.export_current("md"))
         m.addAction(icons.icon("export"), "Экспорт занятия в .ipynb…", lambda: self.export_current("ipynb"))
         m.addAction(icons.icon("export"), "Тетрадка для учеников (.ipynb, без подсказок)…",
                     lambda: self.export_current("students"))
         m.addAction(icons.icon("export"), "Экспорт занятия в .json…", lambda: self.export_current("json"))
         m.addSeparator()
+        m.addAction(icons.icon("file-code"), "Добавить пример урока (суфлёр, этапы, картинки)", self._add_lesson_sample)
         m.addAction(icons.icon("file-code"), "Добавить пример занятия (все возможности)", self._add_tour_sample)
         m.addAction(icons.icon("file-code"), "Добавить пример пошагового урока", self._add_steps_sample)
         m.addAction(icons.icon("presentation"), "Суфлёр урока (окно браузера)", self.lesson.open_page)
@@ -621,6 +623,7 @@ class MainWindow(FramelessWindow):
         m.addAction(icons.icon("pencil"), "Переименовать", lambda: lib.editItem(it))
         m.addAction(icons.icon("copy"), "Дублировать", lambda: self._duplicate(t))
         m.addSeparator()
+        m.addAction(icons.icon("export"), "Урок в Markdown (.md)…", lambda: self.export_template(t, "md"))
         m.addAction(icons.icon("export"), "Экспорт в .ipynb…", lambda: self.export_template(t, "ipynb"))
         m.addAction(icons.icon("export"), "Тетрадка для учеников…", lambda: self.export_template(t, "students"))
         m.addAction(icons.icon("export"), "Экспорт в .json…", lambda: self.export_template(t, "json"))
@@ -820,15 +823,20 @@ class MainWindow(FramelessWindow):
             self.export_template(v.template, fmt)
 
     def export_template(self, t: Template, fmt: str) -> None:
-        """fmt: ipynb | students (тетрадка для учеников — без подсказок преподавателю) | json."""
+        """fmt: md (урок в Markdown, картинки — папкой рядом) | ipynb | students (тетрадка для учеников —
+        без подсказок преподавателю) | json."""
         safe = "".join(c for c in t.title if c not in '\\/:*?"<>|').strip() or "template"
-        flt = "Jupyter (*.ipynb)" if fmt in ("ipynb", "students") else "JSON (*.json)"
+        flt = {"md": "Markdown (*.md)", "ipynb": "Jupyter (*.ipynb)", "students": "Jupyter (*.ipynb)"}.get(
+            fmt, "JSON (*.json)")
         name = f"{safe} — для учеников.ipynb" if fmt == "students" else f"{safe}.{fmt}"
         path, _ = QFileDialog.getSaveFileName(self, "Экспорт", name, flt)
         if not path:
             return
         try:
-            if fmt in ("ipynb", "students"):
+            if fmt == "md":
+                from ..lesson_md import export_md
+                export_md(t, Path(path))
+            elif fmt in ("ipynb", "students"):
                 export_ipynb(t, path, students=fmt == "students")
             else:
                 TemplateStore.export_template(t, path)
@@ -916,6 +924,14 @@ class MainWindow(FramelessWindow):
             self._save_store()
             self._save_settings()
         return tour_id
+
+    def _add_lesson_sample(self) -> None:
+        from ..samples_lesson import lesson_sample
+        t = lesson_sample()
+        self.store.templates.insert(0, t)
+        self._touch()
+        self._fill_library(t.id)
+        self.open_template(t.id)
 
     def _add_tour_sample(self) -> None:
         from ..samples import tour_template

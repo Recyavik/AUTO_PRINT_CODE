@@ -7,8 +7,6 @@
 """
 from __future__ import annotations
 
-import hashlib
-import shutil
 from pathlib import Path
 
 from . import storage
@@ -20,17 +18,11 @@ IMAGES_DIR = Path(__file__).resolve().parent / "samples"
 
 
 def _image(name: str) -> str:
-    """Картинка примера → копия в data/media (имя — по содержимому) → ссылка относительно папки данных."""
-    src = IMAGES_DIR / name
+    """Картинка примера → копия в data/media → ссылка относительно папки данных."""
     try:
-        data = src.read_bytes()
+        return storage.import_media(IMAGES_DIR / name)
     except OSError:
         return f"media/{name}"            # картинки нет в сборке — блок покажет «нет файла», урок не ломается
-    out = storage.DATA_DIR / "media" / f"img-{hashlib.sha1(data).hexdigest()[:16]}{src.suffix.lower()}"
-    if not out.exists():
-        out.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(src, out)
-    return storage.media_ref(out)
 
 
 def _md(role: str, text: str, title: str = "") -> Block:

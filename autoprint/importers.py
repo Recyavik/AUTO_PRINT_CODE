@@ -42,7 +42,11 @@ def _build(title: str, cells: list[tuple], lang: str) -> Template:
                                 part=str(m.get("part") or "")))
             continue
         if kind == "markdown" and m.get("type") == BLOCK_IMAGE and m.get("src"):
-            blocks.append(Block(BLOCK_IMAGE, str(m["src"]), title=str(m.get("title") or "")))
+            src = str(m["src"])
+            from .storage import media_path
+            if media_path(src) is None and m.get("_attachment"):
+                src = _attachment_media(m["_attachment"]) or src
+            blocks.append(Block(BLOCK_IMAGE, src, title=str(m.get("title") or "")))
             continue
         blocks.append(Block(BLOCK_MARKDOWN if kind == "markdown" else BLOCK_CODE, text, lang=lang,
                             role=m.get("role", "text"), title=m.get("title", ""), steps=steps))
@@ -54,6 +58,25 @@ def _guess_lang(nb: dict) -> str:
     name = (meta.get("language_info", {}).get("name")
             or meta.get("kernelspec", {}).get("language") or "python")
     return str(name).lower()
+
+
+def _attachment_media(item) -> str:
+    """Вложение ячейки Jupyter (имя, {mime: base64}) → копия в data/media. "" — не вышло."""
+    import base64
+    import tempfile
+    from .storage import import_media
+    try:
+        name, data = item
+        mime, b64 = next((k, v) for k, v in data.items() if str(k).startswith("image/"))
+        raw = base64.b64decode("".join(b64) if isinstance(b64, list) else b64)
+        ext = {"image/png": ".png", "image/jpeg": ".jpg", "image/gif": ".gif", "image/webp": ".webp",
+               "image/svg+xml": ".svg"}.get(mime, Path(str(name)).suffix or ".png")
+        with tempfile.TemporaryDirectory() as d:
+            f = Path(d) / f"attachment{ext}"
+            f.write_bytes(raw)
+            return import_media(f)
+    except (StopIteration, ValueError, TypeError, OSError):
+        return ""
 
 
 def import_ipynb(path: str) -> Template:
@@ -68,7 +91,11 @@ def notebook(nb: dict, title: str) -> Template:
     for c in nb["cells"]:
         kind = c.get("cell_type")
         if kind in ("markdown", "code"):
-            cells.append((kind, _cell_text(c), c.get("metadata", {}).get("autoprintcode", {})))
+            meta = dict(c.get("metadata", {}).get("autoprintcode", {}))
+            att = c.get("attachments")
+            if isinstance(att, dict) and att:
+                meta["_attachment"] = next(iter(att.items()))
+            cells.append((kind, _cell_text(c), meta))
         elif kind == "raw":
             cells.append(("markdown", "```\n" + _cell_text(c) + "\n```"))
     return _build(title, cells, lang)
@@ -148,6 +175,10 @@ def load_file(path: str) -> Template:
     if ext == ".ipynb":
         return import_ipynb(path)
     if ext == ".md":
+        from . import lesson_md
+        text = Path(path).read_text(encoding="utf-8-sig")
+        if lesson_md.looks_like_lesson(text):          # урок: этапы, подсказки, картинки рядом с файлом
+            return lesson_md.parse(text, Path(path).parent, Path(path).stem)
         return import_markdown(path)
     if ext in (".py", ".pyw"):
         return import_python(path)
@@ -197,6 +228,9 @@ def parse_pasted(text: str, lang: str = "") -> tuple[Template, str]:
             return notebook(data, "Тетрадка Jupyter"), "тетрадка Jupyter"
         if isinstance(data.get("blocks"), list):
             return parse_lesson(src).template, "занятие от нейросети"
+    from . import lesson_md
+    if lesson_md.looks_like_lesson(src):
+        return lesson_md.parse(src, None, "Вставленный урок"), "урок в Markdown"
     if _FENCE.search(src):
         t = markdown_text(src, "Вставленное занятие")
         return t, "Markdown с блоками кода"
@@ -232,9 +266,16 @@ def export_ipynb(t: Template, path: str, students: bool = False) -> None:
                 continue
             from .storage import media_path
             local = media_path(b.text)
-            uri = local.as_uri() if local is not None else b.text
-            cells.append({"cell_type": "markdown", "source": src(f"![{b.title}]({uri})"),
-                          "metadata": {"autoprintcode": {"type": BLOCK_IMAGE, "src": b.text, "title": b.title}}})
+            cell = {"cell_type": "markdown", "source": src(f"![{b.title}]({b.text})"),
+                    "metadata": {"autoprintcode": {"type": BLOCK_IMAGE, "src": b.text, "title": b.title}}}
+            mime = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif",
+                    ".webp": "image/webp", ".svg": "image/svg+xml"}.get(local.suffix.lower()) if local else None
+            if local is not None and mime:
+                import base64
+                name = local.name
+                cell["source"] = src(f"![{b.title}](attachment:{name})")
+                cell["attachments"] = {name: {mime: base64.b64encode(local.read_bytes()).decode("ascii")}}
+            cells.append(cell)
         elif b.type == BLOCK_MARKDOWN:
             if students and b.role in TEACHER_ROLES:
                 continue

@@ -134,6 +134,20 @@ MEDIA_FOLDER = "media"
 _SCHEME = re.compile(r"[a-z][a-z0-9+.-]+:(?![\\/])", re.I)     # http:, javascript:… (но не диск «C:\»)
 
 
+def import_media(src) -> str:
+    """Копия картинки в data/media (имя — по содержимому: тот же файл — та же копия) → ссылка относительно
+    папки данных. Так кладут картинки и пример урока, и импорт урока из .md."""
+    import hashlib
+    import shutil
+    src = Path(src)
+    data = src.read_bytes()
+    out = DATA_DIR / "media" / f"img-{hashlib.sha1(data).hexdigest()[:16]}{src.suffix.lower() or '.png'}"
+    if not out.exists():
+        out.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(src, out)
+    return media_ref(out)
+
+
 def media_ref(path) -> str:
     """Как записать картинку в блок: файл в папке данных — относительно неё («media/…»), чтобы урок пережил
     переезд данных (установка в Program Files, другой компьютер); иначе — путь как есть."""

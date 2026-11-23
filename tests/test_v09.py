@@ -850,5 +850,145 @@ class SampleTest(unittest.TestCase):
         self.assertTrue(imgs and all(b["url"] and not b["missing"] for b in imgs))
 
 
+
+# ================================================================ Task 10: урок в Markdown, картинки в .ipynb
+
+def shape(t):
+    """Что должно пережить .md: типы, роли, заголовки, минуты, виды, разделы, текст, код и язык, подписи картинок."""
+    out = []
+    for b in t.blocks:
+        if b.type == "stage":
+            out.append(("stage", b.title, b.minutes, b.stage_kind, b.part, b.text.strip()))
+        elif b.type == "image":
+            out.append(("image", b.title))
+        elif b.type == "code":
+            out.append(("code", b.lang, b.title, b.text, list(b.steps)))
+        else:
+            out.append(("md", b.role, b.title, b.text.strip()))
+    return out
+
+
+class MdTest(unittest.TestCase):
+    def test_roundtrip_sample(self):
+        from autoprint import lesson_md
+        from autoprint.samples_lesson import lesson_sample
+        t = lesson_sample()
+        t.blocks[2].steps = []
+        path = TMP / "md-rt" / "Тёмная тема.md"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        lesson_md.export_md(t, path)
+        text = path.read_text(encoding="utf-8")
+        self.assertTrue(lesson_md.looks_like_lesson(text))
+        self.assertIn("## Приветствие · 3 мин", text)
+        self.assertIn("> [!say]", text)
+        back = lesson_md.parse(text, path.parent, "x")
+        self.assertEqual(back.title, t.title)
+        self.assertEqual(shape(back), shape(t))
+
+    def test_images_copied_back(self):
+        from autoprint import lesson_md
+        from autoprint.samples_lesson import lesson_sample
+        from autoprint.storage import media_path
+        t = lesson_sample()
+        path = TMP / "md-img" / "Урок с картинками.md"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        lesson_md.export_md(t, path)
+        folder = path.parent / "Урок с картинками_files"
+        self.assertEqual(len(list(folder.glob("*.png"))), 3)
+        back = lesson_md.parse(path.read_text(encoding="utf-8"), path.parent, "x")
+        imgs = [b for b in back.blocks if b.type == "image"]
+        self.assertEqual(len(imgs), 3)
+        for b in imgs:
+            self.assertTrue(b.text.startswith("media/"), b.text)
+            self.assertIsNotNone(media_path(b.text))
+
+    def test_load_file_uses_lesson_format(self):
+        from autoprint import importers, lesson_md
+        from autoprint.samples_lesson import lesson_sample
+        path = TMP / "md-load" / "урок.md"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        lesson_md.export_md(lesson_sample(), path)
+        t = importers.load_file(str(path))
+        self.assertEqual(sum(b.type == "stage" for b in t.blocks), 8)
+
+    def test_plain_md_unchanged(self):
+        from autoprint import importers, lesson_md
+        text = "# Заметки\n\nПросто текст.\n\n```python\nprint(1)\n```\n"
+        self.assertFalse(lesson_md.looks_like_lesson(text))
+        path = TMP / "plain.md"
+        path.write_text(text, encoding="utf-8")
+        t = importers.load_file(str(path))
+        self.assertEqual([b.type for b in t.blocks], ["markdown", "code"])
+
+    def test_unknown_role_text(self):
+        from autoprint import lesson_md
+        t = lesson_md.parse("## Этап · 5 мин\n\n> [!NOTE] Заметка\n> текст\n", None, "x")
+        self.assertEqual(shape(t)[1], ("md", "text", "Заметка", "текст"))
+
+    def test_russian_role_names(self):
+        from autoprint import lesson_md
+        t = lesson_md.parse("## Этап · 5 мин · перерыв\n\n> [!Говоришь]\n> Привет\n\n> [!для быстрых]\n> ещё\n",
+                            None, "x")
+        self.assertEqual(shape(t), [("stage", "Этап", 5, "break", "", ""), ("md", "say", "", "Привет"),
+                                    ("md", "extra", "", "ещё")])
+
+    def test_crlf_and_spaces(self):
+        from autoprint import lesson_md
+        folder = TMP / "md-crlf" / "мои картинки"
+        folder.mkdir(parents=True, exist_ok=True)
+        img = make_image("слайд 1.png", 40, 30)
+        (folder / "слайд 1.png").write_bytes(img.read_bytes())
+        text = "---\r\ntitle: Урок\r\n---\r\n\r\n## А · 2 мин\r\n*пометка*\r\n\r\n![Слайд](<мои картинки/слайд 1.png>)\r\n"
+        t = lesson_md.parse(text, folder.parent, "x")
+        self.assertEqual(t.title, "Урок")
+        self.assertEqual(shape(t), [("stage", "А", 2, "", "", "пометка"), ("image", "Слайд")])
+        self.assertTrue(t.blocks[1].text.startswith("media/"))
+
+    def test_missing_image(self):
+        from autoprint import lesson_md
+        t = lesson_md.parse("## А · 2 мин\n\n![нет](пропало/x.png)\n", TMP, "x")
+        self.assertEqual(t.blocks[1].type, "image")
+        self.assertEqual(t.blocks[1].text, "пропало/x.png")      # блок есть — суфлёр покажет «нет файла»
+
+    def test_fence_inside_callout_and_long_fence(self):
+        from autoprint import lesson_md
+        from autoprint.storage import BLOCK_CODE, BLOCK_MARKDOWN, Block, Template
+        t = Template(title="Т", blocks=[Block(BLOCK_MARKDOWN, "Смотри:\n```py\nx = 1\n```", role="tell"),
+                                         Block(BLOCK_CODE, 'print("```")', lang="python")])
+        back = lesson_md.parse(lesson_md.to_md(t, ""), None, "x")
+        self.assertEqual(shape(back), shape(t))
+
+
+class MdExampleTest(unittest.TestCase):
+    def test_example_file_in_sync(self):
+        """examples/Пример урока — тёмная тема.md — тот же урок, что встроенный пример (не отстаёт от кода)."""
+        from autoprint import lesson_md
+        from autoprint.samples_lesson import lesson_sample
+        f = Path(__file__).resolve().parent.parent / "examples" / "Пример урока — тёмная тема.md"
+        t = lesson_md.parse(f.read_text(encoding="utf-8"), f.parent, "x")
+        self.assertEqual(shape(t), shape(lesson_sample()))
+        self.assertTrue(all(b.text.startswith("media/") for b in t.blocks if b.type == "image"))
+
+
+class IpynbTest(unittest.TestCase):
+    def test_image_attachment(self):
+        import json
+        from autoprint.importers import export_ipynb, import_ipynb
+        from autoprint.samples_lesson import lesson_sample
+        t = lesson_sample()
+        out = TMP / "урок.ipynb"
+        export_ipynb(t, str(out), students=True)
+        nb = json.loads(out.read_text(encoding="utf-8"))
+        cells = [c for c in nb["cells"] if c.get("attachments")]
+        self.assertEqual(len(cells), 3)
+        src = "".join(cells[0]["source"])
+        name = next(iter(cells[0]["attachments"]))
+        self.assertIn(f"(attachment:{name})", src)
+        self.assertIn("image/png", cells[0]["attachments"][name])
+        self.assertNotIn("file:///", out.read_text(encoding="utf-8"))   # никаких путей с именем пользователя
+        back = import_ipynb(str(out))
+        self.assertEqual(sum(b.type == "image" for b in back.blocks), 3)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
