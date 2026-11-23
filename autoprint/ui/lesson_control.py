@@ -157,7 +157,9 @@ class LessonController(QObject):
             t, live_anchor_ms=anchor, armed=t.active_block if t is not None else "",
             media_url=self.efir.server.media_url, presets=[(w.id, w.title) for w in self.efir.store.visible()],
             preset=preset.id if preset is not None else "", dark=theme.dark, efir_mode=self.efir.mode,
-            tab=self.efir.tab_status()[0], hotkey=self.main.settings.hotkey_toggle)
+            tab=self.efir.tab_status()[0], hotkey=self.main.settings.hotkey_toggle,
+            printer=self.main.printer.snapshot(), lessons=scenario.lessons_state(self.main.store.templates),
+            exercises=bool(preset is not None and preset.exercises))
         # во время зарядки экран эфира шлёт ход видео раз в секунду: странице суфлёра от этого ничего не
         # меняется — не перерисовывать её (иначе пересоздаются кнопки и теряются щелчки)
         key = json.dumps(state, ensure_ascii=False, sort_keys=True)

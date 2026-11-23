@@ -294,13 +294,76 @@ def _block_state(b: Block, media_url) -> dict | None:
     return {"id": b.id, "role": role, "html": md_html(b.text), **head}
 
 
-def lesson_state(t: Template | None, *, live_anchor_ms: int | None, armed: str, media_url, presets,
-                 preset: str, dark: bool, efir_mode: str, tab: str, hotkey: str) -> dict:
-    """Всё, что нужно странице суфлёра: урок по этапам (HTML блоков уже готов и безопасен), идёт ли урок
-    (якорь времени — мс; минуты этапов страница отсчитывает сама), какой блок печатается следующим.
+def block_version(b: Block) -> int:
+    """Версия блока для страницы: меняется при любом изменении блока — страница перерисовывает только такие."""
+    import json
+    import zlib
+    from dataclasses import asdict
+    return zlib.crc32(json.dumps(asdict(b), sort_keys=True, ensure_ascii=False).encode("utf-8"))
+
+
+def item_state(b: Block, media_url) -> dict:
+    """Блок для экрана урока — со всем, что нужно и показать, и править на месте (пустые блоки тоже).
+    HTML готов и безопасен; простые поля — текстом."""
+    from pathlib import Path
+    from .storage import BLOCK_CODE, BLOCK_IMAGE, ROLES, media_path
+    d = {"id": b.id, "type": b.type, "v": block_version(b), "text": b.text, "title": b.title}
+    if b.type == BLOCK_CODE:
+        label, icon = lang_info(b.lang)
+        d.update(lang=b.lang, label=label, icon=icon, html=code_html(b.text, b.lang), steps=list(b.steps),
+                 sel=list(b.sel), profile=b.profile)
+    elif b.type == BLOCK_IMAGE:
+        src = (b.text or "").strip()
+        url, missing = "", True
+        local = media_path(src)
+        if re.match(r"https?://", src, re.I):
+            url, missing = src, False
+        elif local is not None:
+            url, missing = media_url(str(local)), False
+        d.update(url=url, missing=missing, name=Path(src).name if src and not url.startswith("http") else "")
+    elif b.type == BLOCK_STAGE:
+        d.update(minutes=max(0, int(b.minutes or 0)), kind=b.stage_kind, part=b.part, note=b.text.strip())
+    else:
+        role = b.role if b.role in ROLES else "text"
+        d["role"] = role
+        if role == "ask":
+            question, answers = ask_parts(b.text)
+            d.update(html=md_html(question), answers=[_inline(a) for a in answers])
+        elif role == "term":
+            head, _, rest = (b.text or "").strip().partition("\n")
+            d.update(term=head.strip(), html=md_html(rest.strip()))
+        else:
+            d["html"] = md_html(b.text)
+    return d
+
+
+def roles_state() -> list[dict]:
+    """Роли заметок для страницы: порядок меню, название, как с ней обращаться («Обозначения»)."""
+    from .storage import ROLE_HINTS, ROLE_MORE, ROLE_ORDER, ROLES
+    return [{"key": k, "name": ROLES[k][1], "hint": ROLE_HINTS.get(k, ""), "more": k in ROLE_MORE}
+            for k in ROLE_ORDER + ROLE_MORE]
+
+
+def lessons_state(templates) -> list[dict]:
+    """Список уроков для переключателя на странице."""
+    from .storage import is_printable
+    return [{"id": t.id, "title": t.title, "total": total_minutes(t),
+             "stages": sum(1 for b in t.blocks if b.type == BLOCK_STAGE),
+             "codes": sum(1 for b in t.blocks if is_printable(b)), "updated": t.updated} for t in templates]
+
+
+def lesson_state(t: Template | None, *, live_anchor_ms: int | None, media_url, presets, preset: str, dark: bool,
+                 efir_mode: str, tab: str, hotkey: str, armed: str = "", printer: dict | None = None,
+                 lessons: list | None = None, exercises: bool = False) -> dict:
+    """Всё, что нужно экрану урока: урок (все блоки с версиями и готовым HTML; этапы с минутами), идёт ли урок
+    (якорь времени — мс; минуты этапов страница отсчитывает сама), печать (что следующим, ход), список уроков.
     Простые поля (названия, подписи) — обычным текстом: страница вставляет их как текст, не как HTML."""
+    printer = dict(printer or {})
+    if printer.get("block"):
+        armed = printer["block"]
     base = {"live": {"anchor": live_anchor_ms} if live_anchor_ms else None, "armed": armed, "dark": dark,
-            "efir": {"mode": efir_mode, "tab": tab}, "hotkey": hotkey}
+            "efir": {"mode": efir_mode, "tab": tab}, "hotkey": hotkey, "print": printer,
+            "lessons": lessons or [], "roles": roles_state(), "exercises": exercises}
     if t is None:
         return {"lesson": None, **base}
     intro, st = stages(t)
@@ -308,8 +371,12 @@ def lesson_state(t: Template | None, *, live_anchor_ms: int | None, armed: str, 
     def blocks(items):
         return [x for x in (_block_state(b, media_url) for b in items) if x]
 
+    import zlib
+    items = [item_state(b, media_url) for b in t.blocks]
     lesson = {
         "id": t.id, "title": t.title, "total": total_minutes(t), "start": t.start, "has_stages": bool(st),
+        "rev": zlib.crc32(",".join(str(i["v"]) for i in items).encode("ascii")),
+        "items": items,
         "intro": blocks(intro),
         "stages": [{"i": s.index, "id": s.block.id, "title": s.block.title or "Этап", "minutes": s.end_min - s.start_min,
                     "kind": s.block.stage_kind, "part": s.block.part, "note": s.block.text.strip(),

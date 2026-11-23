@@ -486,5 +486,74 @@ class ExportTest(unittest.TestCase):
         self.assertEqual(lesson_md._role("вывод"), "output")
 
 
+# ================================================================ Task 6: состояние экрана урока
+
+def page_state(t, **kw):
+    from autoprint import scenario
+    args = dict(live_anchor_ms=None, armed="", media_url=lambda p: "/media/x/" + Path(p).name, presets=[],
+                preset="", dark=True, efir_mode="idle", tab="", hotkey="Ctrl+F9")
+    args.update(kw)
+    return scenario.lesson_state(t, **args)
+
+
+class StateTest(unittest.TestCase):
+    def test_items_flat(self):
+        t = Template("Урок", [note("привет", id="n1"), stage("Этап", 5, id="s1"), code("x = 1", id="c1"),
+                              Block(BLOCK_IMAGE, "нет/такого.png", id="i1", title="Слайд")])
+        st = page_state(t)
+        items = st["lesson"]["items"]
+        self.assertEqual([(i["id"], i["type"]) for i in items],
+                         [("n1", "markdown"), ("s1", "stage"), ("c1", "code"), ("i1", "image")])
+        c = items[2]
+        self.assertEqual((c["text"], c["lang"], c["label"]), ("x = 1", "python", "Python"))
+        self.assertIn("t-", c["html"])
+        self.assertTrue(items[3]["missing"])
+        self.assertEqual(items[1]["minutes"], 5)
+        v_note, v_code, rev = items[0]["v"], items[2]["v"], st["lesson"]["rev"]
+        t.blocks[2].text = "x = 2"
+        st2 = page_state(t)
+        self.assertNotEqual(st2["lesson"]["items"][2]["v"], v_code)
+        self.assertEqual(st2["lesson"]["items"][0]["v"], v_note)
+        self.assertNotEqual(st2["lesson"]["rev"], rev)
+
+    def test_empty_blocks_present(self):
+        t = Template("Урок", [note(""), code("")])
+        self.assertEqual(len(page_state(t)["lesson"]["items"]), 2)     # пустые тоже: их правят на месте
+
+    def test_term(self):
+        t = Template("Урок", [note("Функция\nименованный блок кода", role="term")])
+        it = page_state(t)["lesson"]["items"][0]
+        self.assertEqual(it["term"], "Функция")
+        self.assertIn("именованный", it["html"])
+        self.assertNotIn("Функция", it["html"])
+
+    def test_roles_and_lessons(self):
+        from autoprint.storage import ROLE_MORE, ROLE_ORDER
+        t = Template("Урок", [stage("A", 5), code("x")], id="L1")
+        st = page_state(t, lessons=[{"id": "L1", "title": "Урок"}])
+        self.assertEqual([r["key"] for r in st["roles"]], ROLE_ORDER + ROLE_MORE)
+        self.assertEqual(st["roles"][0]["name"], "Говоришь")
+        self.assertIn("дословно", st["roles"][0]["hint"])
+        self.assertEqual(st["lessons"], [{"id": "L1", "title": "Урок"}])
+
+    def test_print_in_state(self):
+        a = code("a = 1", id="ca")
+        L = Template("Урок", [note(id="n1"), a], id="L")
+        win = make_window([L], port=18964)
+        try:
+            win.printer.set_focus("L")
+            win.printer.arm("ca")
+            win.lesson.publish()
+            st = win.efir.server.snapshot("lesson")
+            self.assertEqual(st["print"]["block"], "ca")
+            self.assertEqual(st["armed"], "ca")
+            self.assertEqual([x["id"] for x in st["lessons"]], ["L"])
+            self.assertEqual(st["lessons"][0]["codes"], 1)
+        finally:
+            win._quitting = True
+            win.close()
+            pump()
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
