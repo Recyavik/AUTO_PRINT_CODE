@@ -559,6 +559,27 @@ class StartTest(unittest.TestCase):
         self.assertEqual(got, ["", "18:00", "19:15"])
 
 
+class StartPickerKeysTest(unittest.TestCase):
+    def test_type_time_from_keyboard(self):
+        """Ревью (решение по «Declined»): время в окне выбора начала набирается с клавиатуры — «1915» → 19:15."""
+        from datetime import datetime
+        from PySide6.QtTest import QTest
+        from autoprint.ui.efir_start import StartPicker
+        p = StartPicker(last="", now=datetime(2026, 1, 1, 17, 12))
+        p.show()
+        pump(40)
+        got = []
+        p.chosen.connect(got.append)
+        p.activateWindow()
+        p.time_edit.setFocus()
+        pump(30)
+        QTest.keyClicks(p.time_edit, "1915")
+        pump(30)
+        p.at_btn.click()
+        self.assertEqual(got, ["19:15"])
+        p.close()
+
+
 class LessonStartTest(unittest.TestCase):
     """Урок в суфлёре: «Начать сейчас» или «в ЧЧ:ММ»; начало идущего урока можно поправить."""
 
