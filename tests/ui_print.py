@@ -131,7 +131,8 @@ def run_steps(win: MainWindow, name: str, profile: str, cmd: list[str], settle: 
     from autoprint.typer import IDLE
     s = win.settings
     s.profile, s.strip_comments = profile, True
-    t = next(t for t in win.store.templates if t.title.startswith("Пример: пошаговый"))
+    from fixtures import steps_template
+    t = win.store.insert(steps_template())
     win.printer.set_focus(t.id)
     block = t.code_blocks()[0]
     win.printer.arm(block.id)

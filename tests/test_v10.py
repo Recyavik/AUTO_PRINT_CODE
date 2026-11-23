@@ -867,6 +867,80 @@ class FixTest(unittest.TestCase):
         ctl.server.stop()
 
 
+# ================================================================ Task 16, 17: образцовый урок, примеры в базе
+
+class SampleLessonTest(unittest.TestCase):
+    def test_example(self):
+        import contextlib
+        import io
+        import re
+        from autoprint import scenario
+        from autoprint.samples_lesson import LESSON_SAMPLE_ID, LESSON_TITLE, lesson_sample
+        from autoprint.storage import ROLE_ORDER, media_path
+        self.assertEqual(LESSON_SAMPLE_ID, "lesson_v2")
+        t = lesson_sample()
+        self.assertEqual(t.title, LESSON_TITLE)
+        self.assertEqual(scenario.total_minutes(t), 90)
+        stages = [b for b in t.blocks if b.type == BLOCK_STAGE]
+        self.assertEqual(len(stages), 12)
+        self.assertEqual(sorted(b.stage_kind for b in stages if b.stage_kind), ["break", "exercise"])
+        self.assertEqual({b.part for b in stages}, {"Первая половина", "Вторая половина"})
+        roles = {b.role for b in t.blocks if b.type == BLOCK_MARKDOWN}
+        self.assertTrue(set(ROLE_ORDER) <= roles, set(ROLE_ORDER) - roles)
+        codes = [i for i, b in enumerate(t.blocks) if b.type == BLOCK_CODE]
+        self.assertGreaterEqual(len(codes), 5)
+        imgs = [b for b in t.blocks if b.type == BLOCK_IMAGE]
+        self.assertEqual(len(imgs), 3)
+        self.assertTrue(all(media_path(b.text) for b in imgs), [b.text for b in imgs])
+        ns: dict = {}
+        for i in codes:
+            out_block = t.blocks[i + 1]
+            self.assertEqual((out_block.type, out_block.role), (BLOCK_MARKDOWN, "output"), t.blocks[i].title)
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                exec(t.blocks[i].text, ns)                          # весь код урока — рабочий, по порядку
+            want = re.sub(r"^```\w*\n|\n?```$", "", out_block.text.strip()).strip()
+            self.assertEqual(buf.getvalue().strip(), want, t.blocks[i].title)
+
+    def test_example_file_in_examples(self):
+        """examples/ — тот же урок, что встроен в программу (его можно открыть в любом редакторе)."""
+        root = Path(storage.__file__).resolve().parent.parent
+        src = (root / "autoprint" / "samples" / "lesson-example.md").read_text(encoding="utf-8")
+        ex = root / "examples" / "Пример урока — функции и пароль.md"
+        self.assertEqual(ex.read_text(encoding="utf-8"), src)
+        self.assertTrue((root / "examples" / "lesson-example_files" / "func-scheme.png").exists())
+
+
+class SamplesMigrationTest(unittest.TestCase):
+    def test_exact_sample_copies_removed(self):
+        from autoprint import migrations
+        from autoprint.samples_lesson import LESSON_TITLE
+        storage.TEMPLATES_FILE.unlink(missing_ok=True)
+        storage.TEMPLATES_FILE.with_suffix(".json.bak").unlink(missing_ok=True)
+        store = TemplateStore()
+        old = Template("Пример: пошаговый урок", [Block(BLOCK_MARKDOWN, "Так записывают урок…", role="explain"),
+                                                  code("x = 1", steps=[1])], id="old")
+        edited = Template(old.title, [Block(BLOCK_MARKDOWN, "Так записывают урок… (моя правка)", role="explain"),
+                                      code("x = 1", steps=[1])], id="edited")
+        store.templates = [old, edited, Template("Мой урок", [note("моё")], id="mine")]
+        keep = migrations.SAMPLE_FINGERPRINTS
+        migrations.SAMPLE_FINGERPRINTS = frozenset({migrations.fingerprint(old)})   # точная копия — по отпечатку
+        try:
+            s = Settings()
+            s.migrations = ["tray_v1", "window_v10", "roles_v10"]
+            migrations.apply(s, store)
+            self.assertEqual([t.id for t in store.templates], ["edited", "mine"])      # изменённую копию не трогаем
+            self.assertIn("samples_v10", s.migrations)
+            self.assertFalse(migrations.apply(s, store))
+        finally:
+            migrations.SAMPLE_FINGERPRINTS = keep
+
+    def test_real_fingerprints(self):
+        from autoprint import migrations
+        self.assertEqual(len(migrations.SAMPLE_FINGERPRINTS), 3)
+        self.assertIn("01a2940b7512461244c0ce21258cb21b72690369", migrations.SAMPLE_FINGERPRINTS)
+
+
 # ================================================================ Task 7: правки урока со страницы
 
 class EditTest(unittest.TestCase):

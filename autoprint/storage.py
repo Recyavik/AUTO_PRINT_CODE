@@ -421,47 +421,9 @@ def is_printable(b: Block) -> bool:
 
 
 def sample_template() -> Template:
-    """Образец для новой базы — экскурсия по всем возможностям (autoprint/samples.py)."""
-    from .samples import tour_template
-    return tour_template()
-
-
-# Пример печати по шагам: шаг 3 возвращается наверх (import), шаг 4 — вставка в середину.
-# Комментарии — текст для суфлёра: с «Без комментариев» они не печатаются, а читаются вслух.
-STEPS_SAMPLE_ID = "steps_v1"
-STEPS_SAMPLE_INTRO = """## Пошаговый урок: оценки учеников
-
-Так записывают урок, где код растёт частями и иногда приходится вернуться наверх.
-
-1. На пульте: режим **«По шагам»** и **«Без комментариев»**.
-2. Откройте пустой файл в VS Code (или новую ячейку Jupyter) и поставьте туда курсор.
-3. Над лентой — **суфлёр**: что сказать перед шагом (это комментарии шага — они не печатаются).
-   Сказали — нажали **Ctrl+F9**: программа напечатает шаг сама.
-4. Шаг 3 вернётся наверх и допишет `import`, шаг 4 вставит строку в середину.
-
-Шаг строки — цветной номер слева от номера строки: правый щелчок по строке, **Alt+1…9**
-или кнопка «Шаги» в шапке блока (там же — разметка по комментариям одним щелчком)."""
-STEPS_SAMPLE_CODE = '''import statistics
-
-# Оценки учеников
-grades = [5, 4, 3, 5, 4]
-grades.append(5)  # пришла ещё одна оценка — вернулись наверх и дописали
-print("Оценки:", grades)
-
-# Средний балл
-average = sum(grades) / len(grades)
-print("Средний:", round(average, 2))
-
-# Медиана — возьмём готовую функцию из модуля statistics
-median = statistics.median(grades)
-print("Медиана:", median)'''
-STEPS_SAMPLE_STEPS = [3, 3, 1, 1, 4, 1, 2, 2, 2, 2, 3, 3, 3, 3]
-
-
-def steps_sample_template() -> Template:
-    return Template(title="Пример: пошаговый урок",
-                    blocks=[Block(BLOCK_MARKDOWN, STEPS_SAMPLE_INTRO, role="explain"),
-                            Block(BLOCK_CODE, STEPS_SAMPLE_CODE, steps=list(STEPS_SAMPLE_STEPS))])
+    """Урок для новой базы — образцовый урок (autoprint/samples/lesson-example.md)."""
+    from .samples_lesson import lesson_sample
+    return lesson_sample()
 
 
 def _block_from(d: dict) -> Block:

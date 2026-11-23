@@ -5,6 +5,8 @@ templates.before-0.10.json и efir/webinars.before-0.10.json рядом с ор�
 """
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 import shutil
 from pathlib import Path
@@ -23,6 +25,27 @@ def backup_before_v10(data_dir: Path) -> None:
                 shutil.copy2(src, dst)
             except OSError as e:
                 log.warning("Копия %s не сделана: %s", src.name, e)
+
+
+# Отпечатки встроенных примеров до 0.10 — в том виде, как программа их добавляла: «Пример занятия: все
+# возможности», «Пример: пошаговый урок», «Пример урока: тёмная тема на сайте» (сняты с генераторов 0.9).
+SAMPLE_FINGERPRINTS = frozenset({
+    "96711bccabdc6ae32046bbae53b344de58a18aef",
+    "85647670538e20a5f4f8703b559d1f6ea4872dc8",
+    "01a2940b7512461244c0ce21258cb21b72690369",
+})
+
+
+def fingerprint(t) -> str:
+    """Отпечаток урока по содержанию блоков (без id, указателя, выделения, масштаба)."""
+    rows = [(b.type, b.role, b.text, b.lang, b.title, int(b.minutes or 0), b.stage_kind, b.part) for b in t.blocks]
+    return hashlib.sha1(json.dumps(rows, ensure_ascii=False).encode("utf-8")).hexdigest()
+
+
+def _samples_v10(store) -> None:
+    """0.10: встроенные примеры заменены одним образцовым уроком — их точные копии из базы убираются.
+    Копии, которые человек менял, остаются (их он удалит сам, если не нужны)."""
+    store.templates = [t for t in store.templates if fingerprint(t) not in SAMPLE_FINGERPRINTS]
 
 
 def _roles_v10(store) -> None:
@@ -56,5 +79,11 @@ def apply(settings, store=None) -> bool:
         _roles_v10(store)
         store.save()
         done.append("roles_v10")
+        changed = True
+    if "samples_v10" not in done:
+        backup_before_v10(storage.DATA_DIR)
+        _samples_v10(store)
+        store.save()
+        done.append("samples_v10")
         changed = True
     return changed

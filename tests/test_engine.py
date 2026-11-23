@@ -44,7 +44,7 @@ from autoprint.comments import comment_spans  # noqa: E402
 from autoprint.storage import (BLOCK_CODE, PROFILE_IDE, PROFILE_PLAIN, Block, Settings, Template,  # noqa: E402
                                TemplateStore)
 from autoprint.typer import FINISHED, IDLE, LINE_WAIT, RUNNING, TypingEngine, build_units  # noqa: E402
-from autoprint.storage import STEPS_SAMPLE_CODE as S_CODE, STEPS_SAMPLE_STEPS as S_STEPS  # noqa: E402
+from fixtures import STEPS as S_STEPS, STEPS_CODE as S_CODE, steps_template  # noqa: E402
 
 failed: list[str] = []
 
@@ -294,7 +294,7 @@ def press_enter(win) -> bool:
 def steps_lesson(profile: str, strip: bool) -> None:
     ED.reset(ide=profile == PROFILE_IDE)
     win, s, store = make_window(profile)
-    t = next(t for t in store.templates if t.title.startswith("Пример: пошаговый"))
+    t = store.insert(steps_template())
     focus(win, t)
     win.printer.set_option("strip", strip)
     win.printer.set_option("mode", "steps")
@@ -699,20 +699,23 @@ def mouse_click_pauses() -> None:
     check("клик на паузе не мешает продолжить", resumed == RUNNING and hits == ["mouse"], f"{resumed} {hits}")
 
 
-def tour_sample() -> None:
-    """«Пример занятия: все возможности»: в новой базе — один и открыт первым; у обновившихся (база есть,
-    а пример ещё не показывали) — добавляется наверх и открывается."""
-    from autoprint.samples import TOUR_TITLE
+def lesson_sample_added() -> None:
+    """Образцовый урок: в новой базе — один и в фокусе; у обновившихся (база есть, а урок ещё не показывали) —
+    добавляется наверх и попадает в фокус."""
+    from autoprint.samples_lesson import LESSON_TITLE
     ED.reset()
     win, s, store = make_window(PROFILE_PLAIN)
     titles = [t.title for t in store.templates]
-    check("новая база: экскурсия одна и в фокусе", titles.count(TOUR_TITLE) == 1 and
-          win.printer.focus().title == TOUR_TITLE, repr(titles))
+    check("новая база: образцовый урок один и в фокусе", titles.count(LESSON_TITLE) == 1 and
+          win.printer.focus().title == LESSON_TITLE, repr(titles))
     win.close()
     pump()
-    win, s, store = make_window(PROFILE_PLAIN)   # тот же templates.json, но в настройках пример ещё не видели
-    check("после обновления: экскурсия добавлена наверх и в фокусе", store.templates[0].title == TOUR_TITLE and
-          win.printer.focus() is store.templates[0] and "tour_v1" in s.samples_seen)
+    store = TemplateStore()
+    store.templates = [Template("Мой урок", [Block(BLOCK_CODE, "x = 1")])]
+    store.save()
+    win, s, store = make_window(PROFILE_PLAIN)   # своя база, а в настройках урок ещё не показывали
+    check("после обновления: образцовый урок добавлен наверх и в фокусе", store.templates[0].title == LESSON_TITLE
+          and win.printer.focus() is store.templates[0] and "lesson_v2" in s.samples_seen)
     win.close()
     pump()
 
@@ -743,7 +746,7 @@ def tray_click_keeps_pause() -> None:
 
 def main() -> int:
     theme.setup(app, "dark")
-    tour_sample()   # первым: проверяет новую базу
+    lesson_sample_added()   # первым: проверяет новую базу
     smooth_newlines()
     mouse_click_pauses()
     tray_click_keeps_pause()

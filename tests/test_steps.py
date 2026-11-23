@@ -240,31 +240,13 @@ def main() -> int:
 
     # разметка шагов переживает экспорт в .ipynb и импорт обратно
     from autoprint.importers import export_ipynb, import_ipynb
-    from autoprint.storage import steps_sample_template
+    from fixtures import steps_template
     nb = Path(os.environ["AUTOPRINT_DATA"]) / "урок.ipynb"
-    src_t = steps_sample_template()
+    src_t = steps_template()
     export_ipynb(src_t, str(nb))
     back = import_ipynb(str(nb))
     check("шаги: экспорт в .ipynb и импорт обратно", [b.steps for b in back.blocks] == [b.steps for b in src_t.blocks],
           repr([b.steps for b in back.blocks]))
-
-    # examples/Пример занятия.json — тот же образец, что встроен в программу (файл не отстал от кода)
-    from autoprint.samples import tour_template
-    from autoprint.storage import TemplateStore
-
-    def content(t):
-        return [(b.type, b.role, b.lang, b.title, b.text, b.steps) for b in t.blocks]
-    built, file_t = tour_template(), TemplateStore.read_template_file(str(ROOT / "examples" / "Пример занятия.json"))
-    same = (file_t.title, content(file_t)) == (built.title, content(built))
-    check("examples/Пример занятия.json совпадает со встроенным образцом", same,
-          "" if same else "пересоздайте: python -c \"from autoprint.samples import tour_template; from "
-          "autoprint.storage import TemplateStore; TemplateStore.export_template(tour_template(), "
-          "'examples/Пример занятия.json')\"")
-    # в экскурсии каждый режим печати есть на чём попробовать
-    codes = built.code_blocks()
-    check("экскурсия: есть блок с разметкой шагов и блок на другом языке",
-          any(len(set(b.steps)) > 1 for b in codes) and any(b.lang != "python" for b in codes)
-          and built.find_block(built.active_block) is codes[0])
 
     print("ГОТОВО" if not failed else f"ОШИБКИ: {failed}")
     return 0 if not failed else 1

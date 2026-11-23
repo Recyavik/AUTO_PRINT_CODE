@@ -772,7 +772,7 @@ class SampleTest(unittest.TestCase):
         self.assertEqual(scenario.total_minutes(t), 90)
         roles = {b.role for b in t.blocks if b.type == "markdown"}
         self.assertTrue({"say", "tell", "ask", "do", "important", "show", "trap", "extra"} <= roles, roles)
-        self.assertEqual({b.lang for b in t.blocks if b.type == BLOCK_CODE} >= {"css", "javascript", "html"}, True)
+        self.assertEqual({b.lang for b in t.blocks if b.type == BLOCK_CODE}, {"python"})     # 0.10: урок по Python
         images = [b for b in t.blocks if b.type == BLOCK_IMAGE]
         self.assertGreaterEqual(len(images), 3)
         for b in images:
@@ -828,12 +828,12 @@ class MdTest(unittest.TestCase):
         from autoprint.samples_lesson import lesson_sample
         t = lesson_sample()
         t.blocks[2].steps = []
-        path = TMP / "md-rt" / "Тёмная тема.md"
+        path = TMP / "md-rt" / "Функции.md"
         path.parent.mkdir(parents=True, exist_ok=True)
         lesson_md.export_md(t, path)
         text = path.read_text(encoding="utf-8")
         self.assertTrue(lesson_md.looks_like_lesson(text))
-        self.assertIn("## Приветствие · 3 мин", text)
+        self.assertIn("## Приветствие и цель · 4 мин", text)
         self.assertIn("> [!say]", text)
         back = lesson_md.parse(text, path.parent, "x")
         self.assertEqual(back.title, t.title)
@@ -863,7 +863,7 @@ class MdTest(unittest.TestCase):
         path.parent.mkdir(parents=True, exist_ok=True)
         lesson_md.export_md(lesson_sample(), path)
         t = importers.load_file(str(path))
-        self.assertEqual(sum(b.type == "stage" for b in t.blocks), 8)
+        self.assertEqual(sum(b.type == "stage" for b in t.blocks), 12)
 
     def test_plain_md_unchanged(self):
         from autoprint import importers, lesson_md
@@ -942,10 +942,10 @@ class MdReviewTest(unittest.TestCase):
 
 class MdExampleTest(unittest.TestCase):
     def test_example_file_in_sync(self):
-        """examples/Пример урока — тёмная тема.md — тот же урок, что встроенный пример (не отстаёт от кода)."""
+        """examples/ — тот же урок, что встроенный образцовый (не отстаёт от кода)."""
         from autoprint import lesson_md
         from autoprint.samples_lesson import lesson_sample
-        f = Path(__file__).resolve().parent.parent / "examples" / "Пример урока — тёмная тема.md"
+        f = Path(__file__).resolve().parent.parent / "examples" / "Пример урока — функции и пароль.md"
         t = lesson_md.parse(f.read_text(encoding="utf-8"), f.parent, "x")
         self.assertEqual(shape(t), shape(lesson_sample()))
         self.assertTrue(all(b.text.startswith("media/") for b in t.blocks if b.type == "image"))

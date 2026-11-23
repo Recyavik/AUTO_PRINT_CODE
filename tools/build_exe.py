@@ -72,7 +72,7 @@ REQUIRED = [
     "_internal/PySide6/plugins/platforms/qwindows.dll", "_internal/PySide6/plugins/imageformats/qsvg.dll",
     "_internal/PySide6/plugins/iconengines/qsvgicon.dll", "_internal/autoprint/sounds/SOURCES.md", "_internal/autoprint/efir/page/screen.html",
     "_internal/autoprint/efir/page/lesson.html", "_internal/autoprint/efir/page/favicon.svg",
-    "_internal/autoprint/samples/dark-site-dark.png",
+    "_internal/autoprint/samples/lesson-example.md", "_internal/autoprint/samples/lesson-example_files/func-scheme.png",
     "_internal/autoprint/efir/page/lang/python.svg",
     "_internal/autoprint/efir/page/lesson/app.js",
     "_internal/PySide6/Qt6Pdf.dll",
@@ -195,8 +195,10 @@ def collect_datas() -> list[tuple[str, str]]:
     datas.append((str(sounds / "SOURCES.md"), "autoprint/sounds"))
     page = ROOT / "autoprint" / "efir" / "page"          # страница экрана эфира (вкладка браузера)
     datas += [(str(f), "autoprint/efir/page") for f in sorted(page.glob("*.html")) + [page / "favicon.svg"]]
-    samples = ROOT / "autoprint" / "samples"              # картинки встроенного примера урока
-    datas += [(str(f), "autoprint/samples") for f in sorted(samples.glob("*.png"))]
+    samples = ROOT / "autoprint" / "samples"              # образцовый урок (.md) и его картинки
+    datas.append((str(samples / "lesson-example.md"), "autoprint/samples"))
+    datas += [(str(f), "autoprint/samples/lesson-example_files")
+              for f in sorted((samples / "lesson-example_files").glob("*.png"))]
     lang = page / "lang"                                  # значки языков для кода на странице суфлёра урока
     datas += [(str(f), "autoprint/efir/page/lang") for f in sorted(lang.glob("*.svg"))]
     datas.append((str(lang / "LICENSE-devicon.txt"), "autoprint/efir/page/lang"))

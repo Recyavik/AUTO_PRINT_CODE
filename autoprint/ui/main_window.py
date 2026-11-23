@@ -15,7 +15,7 @@ from .. import APP_NAME, __version__, system, taskbar, updater
 from ..guard import InputGuard
 from ..hotkeys import HotkeyManager, parse_hotkey
 from ..importers import export_ipynb
-from ..storage import Settings, Template, TemplateStore, steps_sample_template
+from ..storage import Settings, Template, TemplateStore
 from ..typer import COUNTDOWN, FINISHED, IDLE, LINE_WAIT, PAUSED, RUNNING
 from . import icons, logo
 from .efir_control import EfirController
@@ -674,37 +674,21 @@ class MainWindow(FramelessWindow):
             self._notify(f"Не удалось сохранить уроки: {e}", warn=True)
 
     def _ensure_samples(self) -> str:
-        """Встроенные примеры — по одному разу (и новым пользователям, и после обновления). Возвращает id
-        примера, если его добавили только что, иначе пустую строку."""
-        from ..samples import TOUR_SAMPLE_ID, tour_template
-        from ..storage import STEPS_SAMPLE_ID
-        seen, changed, tour_id = self.settings.samples_seen, False, ""
-        if STEPS_SAMPLE_ID not in seen:
-            self.store.insert(steps_sample_template())
-            seen.append(STEPS_SAMPLE_ID)
-            changed = True
-        if TOUR_SAMPLE_ID not in seen:
-            if not self.store.created_fresh:   # в новой базе экскурсия уже есть — она первая
-                t = tour_template()
-                self.store.templates.insert(0, t)
-                tour_id = t.id
-            seen.append(TOUR_SAMPLE_ID)
-            changed = True
+        """Образцовый урок — один раз (и новым пользователям, и после обновления). Возвращает его id, если его
+        добавили только что (у обновившихся — его и показать), иначе пустую строку."""
         from ..samples_lesson import LESSON_SAMPLE_ID, LESSON_TITLE, lesson_sample
-        if LESSON_SAMPLE_ID not in seen and any(x.title == LESSON_TITLE for x in self.store.templates):
-            seen.append(LESSON_SAMPLE_ID)       # пример уже в базе (настройки не успели сохраниться) — второй не нужен
-            changed = True
-        if LESSON_SAMPLE_ID not in seen:
+        seen = self.settings.samples_seen
+        if LESSON_SAMPLE_ID in seen:
+            return ""
+        seen.append(LESSON_SAMPLE_ID)
+        added = ""
+        if not self.store.created_fresh and not any(x.title == LESSON_TITLE for x in self.store.templates):
             t = lesson_sample()
-            self.store.templates.insert(1 if self.store.created_fresh else 0, t)
-            if not self.store.created_fresh and not tour_id:
-                tour_id = t.id
-            seen.append(LESSON_SAMPLE_ID)
-            changed = True
-        if changed:
-            self._save_store()
-            self._save_settings()
-        return tour_id
+            self.store.templates.insert(0, t)
+            added = t.id
+        self._save_store()
+        self._save_settings()
+        return added
 
     def _restore_session(self) -> None:
         s = self.settings
