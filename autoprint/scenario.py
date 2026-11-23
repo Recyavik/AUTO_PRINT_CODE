@@ -337,6 +337,12 @@ def item_state(b: Block, media_url) -> dict:
     return d
 
 
+def lesson_rev(t: Template) -> int:
+    """Версия урока целиком — по версиям блоков и названию."""
+    import zlib
+    return zlib.crc32((t.title + "|" + ",".join(str(block_version(b)) for b in t.blocks)).encode("utf-8"))
+
+
 def roles_state() -> list[dict]:
     """Роли заметок для страницы: порядок меню, название, как с ней обращаться («Обозначения»)."""
     from .storage import ROLE_HINTS, ROLE_MORE, ROLE_ORDER, ROLES
@@ -371,11 +377,10 @@ def lesson_state(t: Template | None, *, live_anchor_ms: int | None, media_url, p
     def blocks(items):
         return [x for x in (_block_state(b, media_url) for b in items) if x]
 
-    import zlib
     items = [item_state(b, media_url) for b in t.blocks]
     lesson = {
         "id": t.id, "title": t.title, "total": total_minutes(t), "start": t.start, "has_stages": bool(st),
-        "rev": zlib.crc32(",".join(str(i["v"]) for i in items).encode("ascii")),
+        "rev": lesson_rev(t),
         "items": items,
         "intro": blocks(intro),
         "stages": [{"i": s.index, "id": s.block.id, "title": s.block.title or "Этап", "minutes": s.end_min - s.start_min,

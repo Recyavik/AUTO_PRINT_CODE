@@ -9,8 +9,11 @@
 - POST /pick          — выбран фон в галерее.
 - GET  /lesson        — страница суфлёра урока (свой канал состояния: /events?ch=lesson);
 - GET  /static/lang/<язык>.svg — значки языков программирования для кода на странице суфлёра;
-- POST /lesson/cmd    — команды со страницы суфлёра (начать урок, начать с этапа, печатать этот блок…):
-                        только с заголовком X-Suflor и со своей страницы (Origin), иначе 403.
+- POST /lesson/cmd    — команды со страницы суфлёра (начать урок, начать с этапа, печатать этот блок…);
+- POST /lesson/edit   — правки урока с экрана урока (autoprint/lesson_edit.py), ответ — новый HTML блоков;
+- POST /lesson/upload — картинка в урок (тело — сам файл; png, jpg, gif, webp — по содержимому);
+- GET  /static/lesson/<файл>.js, /static/vendor/<файл>.js — скрипты экрана урока (CodeMirror — в vendor).
+  Все POST /lesson/… — только с заголовком X-Suflor и со своей страницы (Origin), иначе 403.
 Слушает только 127.0.0.1. Порт постоянный (8791, если занят — следующие): открытая вкладка переживает
 перезапуск программы — EventSource сам переподключается к тому же адресу.
 """
@@ -53,6 +56,25 @@ mimetypes.add_type("image/svg+xml", ".svg")
 # screen — экран эфира для учеников, lesson — страница суфлёра урока, preview — предпросмотр из редактора шаблона
 CHANNELS = ("screen", "lesson", "preview")
 _LANG_ICON = re.compile(r"/static/lang/([a-z0-9+#-]+\.svg)")
+_STATIC = re.compile(r"/static/(lesson|vendor)/([a-z0-9-]+\.(js|css|txt))")
+_STATIC_TYPES = {"js": "text/javascript; charset=utf-8", "css": "text/css; charset=utf-8",
+                 "txt": "text/plain; charset=utf-8"}
+BODY_LIMIT = 2 * 1024 * 1024          # команды и правки урока
+UPLOAD_LIMIT = 25 * 1024 * 1024       # картинка в урок
+DRAIN_LIMIT = 64 * 1024 * 1024        # больше — даже не читаем, рвём соединение
+
+
+def image_ext(data: bytes) -> str | None:
+    """Расширение картинки по первым байтам; None — это не png / jpg / gif / webp."""
+    if data.startswith(b"\x89PNG\r\n\x1a\n"):
+        return ".png"
+    if data.startswith(b"\xff\xd8\xff"):
+        return ".jpg"
+    if data[:6] in (b"GIF87a", b"GIF89a"):
+        return ".gif"
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return ".webp"
+    return None
 
 
 class _Server(ThreadingHTTPServer):
@@ -126,6 +148,12 @@ class _Handler(BaseHTTPRequestHandler):
                 return self._json(owner.snapshot(self._channel(query)))
             if path == "/events":
                 return self._events(self._channel(query))
+            m = _STATIC.fullmatch(path)
+            if m:
+                f = PAGE_DIR / m.group(1) / m.group(2)
+                if f.is_file():
+                    return self._send(200, f.read_bytes(), _STATIC_TYPES[m.group(3)])
+                return self._send(404, b"not found", "text/plain")
             m = _LANG_ICON.fullmatch(path)
             if m:
                 f = PAGE_DIR / "lang" / m.group(1)
@@ -222,22 +250,54 @@ class _Handler(BaseHTTPRequestHandler):
                 left -= len(buf)
 
     # ------------------------------------------------------------ POST
+    def _read_body(self, limit: int) -> bytes | None:
+        """Тело запроса; None — больше limit (тело дочитано и выброшено, ответ — 413)."""
+        n = int(self.headers.get("Content-Length") or 0)
+        if n > limit:
+            if n <= DRAIN_LIMIT:
+                left = n
+                while left > 0:
+                    chunk = self.rfile.read(min(CHUNK, left))
+                    if not chunk:
+                        break
+                    left -= len(chunk)
+            else:
+                self.close_connection = True
+            return None
+        return self.rfile.read(n) if n > 0 else b""
+
     def do_POST(self) -> None:
         if not self._host_ok():
             return self._send(403, b"forbidden", "text/plain")
+        path, _, query = self.path.partition("?")
+        owner = self.server.owner
+        if path.startswith("/lesson/") and (self.headers.get("X-Suflor") != "1" or not self._origin_ok()):
+            self.close_connection = True
+            return self._json({"ok": False}, 403)
         try:
-            n = int(self.headers.get("Content-Length") or 0)
-            raw = self.rfile.read(min(n, 64 * 1024)) if n > 0 else b""
-            data = json.loads(raw.decode("utf-8") or "{}")
+            raw = self._read_body(UPLOAD_LIMIT if path == "/lesson/upload" else BODY_LIMIT)
         except (ValueError, OSError):
+            return self._json({"ok": False}, 400)
+        if raw is None:
+            return self._json({"ok": False, "error": "Слишком большой запрос"}, 413)
+        if path == "/lesson/upload":
+            q = parse_qs(query)
+            ext = image_ext(raw)
+            if ext is None:
+                return self._json({"ok": False, "error": "Это не картинка (png, jpg, gif, webp)"}, 415)
+            code, res = owner._on_upload({"lesson": (q.get("lesson") or [""])[0], "after": (q.get("after") or [""])[0],
+                                          "id": (q.get("id") or [""])[0], "ext": ext, "data": raw})
+            return self._json(res, code)
+        try:
+            data = json.loads(raw.decode("utf-8") or "{}")
+        except (ValueError, UnicodeDecodeError):
             return self._json({"ok": False}, 400)
         if not isinstance(data, dict):
             return self._json({"ok": False}, 400)
-        path = self.path.split("?", 1)[0]
-        owner = self.server.owner
+        if path == "/lesson/edit":
+            code, res = owner._on_edit(data)
+            return self._json(res, code)
         if path == "/lesson/cmd":
-            if self.headers.get("X-Suflor") != "1" or not self._origin_ok():
-                return self._json({"ok": False}, 403)
             owner._on_command(data)
             return self._json({"ok": True})
         if path == "/report":
@@ -261,6 +321,9 @@ class BroadcastServer:
         self.on_report = on_report
         self.on_pick = on_pick
         self.on_command = on_command
+        # правка и загрузка: вызываются в потоке сервера и возвращают (код ответа, JSON)
+        self.on_edit: Callable[[dict], tuple[int, dict]] | None = None
+        self.on_upload: Callable[[dict], tuple[int, dict]] | None = None
         self.stopping = False
         self._httpd: _Server | None = None
         self._thread: threading.Thread | None = None
@@ -389,6 +452,24 @@ class BroadcastServer:
                 self.on_command(data)
             except Exception:
                 log.exception("on_command")
+
+    def _on_edit(self, data: dict) -> tuple[int, dict]:
+        if not self.on_edit:
+            return 503, {"ok": False, "retry": True}
+        try:
+            return self.on_edit(data)
+        except Exception:
+            log.exception("on_edit")
+            return 500, {"ok": False}
+
+    def _on_upload(self, data: dict) -> tuple[int, dict]:
+        if not self.on_upload:
+            return 503, {"ok": False, "retry": True}
+        try:
+            return self.on_upload(data)
+        except Exception:
+            log.exception("on_upload")
+            return 500, {"ok": False}
 
     def _on_pick(self, data: dict) -> None:
         if self.on_pick:

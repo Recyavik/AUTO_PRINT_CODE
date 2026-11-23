@@ -555,5 +555,217 @@ class StateTest(unittest.TestCase):
             pump()
 
 
+# ================================================================ Task 7: правки урока со страницы
+
+class EditTest(unittest.TestCase):
+    """lesson_edit.apply — действия страницы над уроком, без Qt."""
+
+    def lesson(self):
+        return Template("Урок", [note("до этапа", id="n0"), stage("A", 5, id="sA"), note("в A", id="nA"),
+                                 code("a = 1", id="cA"), stage("B", 10, id="sB"), note("в B", id="nB")])
+
+    def ids(self, t):
+        return [b.id for b in t.blocks]
+
+    def test_set_text_and_fields(self):
+        from autoprint import lesson_edit
+        t = self.lesson()
+        got = lesson_edit.apply(t, [{"op": "set", "block": "nA", "fields": {"text": "новый", "role": "ask",
+                                                                            "title": "Вопрос"}},
+                                    {"op": "set", "block": "sB", "fields": {"minutes": 12, "stage_kind": "break"}},
+                                    {"op": "set", "block": "cA", "fields": {"steps": [1, 2], "sel": [0, 3],
+                                                                            "lang": "javascript"}}])
+        self.assertEqual(set(got), {"nA", "sB", "cA"})
+        b = t.find_block("nA")
+        self.assertEqual((b.text, b.role, b.title), ("новый", "ask", "Вопрос"))
+        self.assertEqual((t.find_block("sB").minutes, t.find_block("sB").stage_kind), (12, "break"))
+        c = t.find_block("cA")
+        self.assertEqual((c.steps, c.sel, c.lang), ([1, 2], [0, 3], "javascript"))
+
+    def test_bad_op_changes_nothing(self):
+        from autoprint import lesson_edit
+        t = self.lesson()
+        before = [(b.id, b.text, b.role) for b in t.blocks]
+        for ops in ([{"op": "set", "block": "nA", "fields": {"text": "x"}},
+                     {"op": "set", "block": "nA", "fields": {"role": "zzz"}}],
+                    [{"op": "set", "block": "nA", "fields": {"minutes": 5}}],          # у заметки нет минут
+                    [{"op": "set", "block": "sA", "fields": {"minutes": 9999}}],
+                    [{"op": "insert", "after": "", "block": {"id": "bad id!", "type": "markdown"}}],
+                    [{"op": "insert", "after": "", "block": {"id": "aaaaaaaaaaaa", "type": "video"}}],
+                    [{"op": "zzz"}],
+                    [{"op": "set_lesson", "title": "   "}]):
+            with self.assertRaises(ValueError):
+                lesson_edit.apply(t, ops)
+            self.assertEqual([(b.id, b.text, b.role) for b in t.blocks], before)
+
+    def test_insert_idempotent(self):
+        from autoprint import lesson_edit
+        t = self.lesson()
+        op = {"op": "insert", "after": "nA", "block": {"id": "aaaaaaaaaaaa", "type": "markdown", "role": "say",
+                                                        "text": "новая"}}
+        lesson_edit.apply(t, [op])
+        lesson_edit.apply(t, [op])                       # повтор после обрыва связи — второй блок не появляется
+        self.assertEqual(self.ids(t).count("aaaaaaaaaaaa"), 1)
+        self.assertEqual(self.ids(t).index("aaaaaaaaaaaa"), self.ids(t).index("nA") + 1)
+        lesson_edit.apply(t, [{"op": "insert", "after": "", "block": {"id": "bbbbbbbbbbbb", "type": "stage",
+                                                                      "title": "Начало", "minutes": 3}}])
+        self.assertEqual(t.blocks[0].id, "bbbbbbbbbbbb")
+        self.assertEqual(t.blocks[0].minutes, 3)
+
+    def test_delete_stage_keeps_blocks(self):
+        from autoprint import lesson_edit
+        t = self.lesson()
+        lesson_edit.apply(t, [{"op": "delete", "block": "sB"}])
+        self.assertEqual(self.ids(t), ["n0", "sA", "nA", "cA", "nB"])
+        lesson_edit.apply(t, [{"op": "delete", "block": "sB"}])     # повтор — ничего
+        self.assertEqual(len(t.blocks), 5)
+
+    def test_move(self):
+        from autoprint import lesson_edit
+        t = self.lesson()
+        lesson_edit.apply(t, [{"op": "move", "block": "nA", "after": "cA"}])
+        self.assertEqual(self.ids(t), ["n0", "sA", "cA", "nA", "sB", "nB"])
+        lesson_edit.apply(t, [{"op": "move", "block": "nB", "after": ""}])
+        self.assertEqual(self.ids(t)[0], "nB")
+
+    def test_move_stage(self):
+        from autoprint import lesson_edit
+        t = self.lesson()
+        lesson_edit.apply(t, [{"op": "move_stage", "stage": "sA", "after_stage": "sB"}])
+        self.assertEqual(self.ids(t), ["n0", "sB", "nB", "sA", "nA", "cA"])
+        lesson_edit.apply(t, [{"op": "move_stage", "stage": "sA", "after_stage": ""}])
+        self.assertEqual(self.ids(t), ["n0", "sA", "nA", "cA", "sB", "nB"])
+
+    def test_restore(self):
+        from autoprint import lesson_edit
+        from dataclasses import asdict
+        t = self.lesson()
+        snap = asdict(t.find_block("cA"))
+        lesson_edit.apply(t, [{"op": "delete", "block": "cA"}])
+        lesson_edit.apply(t, [{"op": "restore", "block": snap, "after": "nA"}])
+        self.assertEqual(self.ids(t), ["n0", "sA", "nA", "cA", "sB", "nB"])
+        self.assertEqual(t.find_block("cA").text, "a = 1")
+
+    def test_set_lesson_title(self):
+        from autoprint import lesson_edit
+        t = self.lesson()
+        lesson_edit.apply(t, [{"op": "set_lesson", "title": "Новое название"}])
+        self.assertEqual(t.title, "Новое название")
+
+
+def post(port: int, path: str, body: bytes, headers: dict | None = None) -> tuple[int, dict]:
+    import http.client
+    c = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+    h = {"Content-Type": "application/json", "X-Suflor": "1"}
+    h.update(headers or {})
+    h = {k: v for k, v in h.items() if v is not None}
+    c.request("POST", path, body=body, headers=h)
+    r = c.getresponse()
+    raw = r.read()
+    c.close()
+    try:
+        return r.status, json.loads(raw.decode("utf-8") or "{}")
+    except ValueError:
+        return r.status, {}
+
+
+def get(port: int, path: str) -> tuple[int, str, bytes]:
+    import http.client
+    c = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+    c.request("GET", path)
+    r = c.getresponse()
+    data = r.read()
+    c.close()
+    return r.status, r.getheader("Content-Type") or "", data
+
+
+def call_in_thread(fn):
+    """Запрос к серверу — из другого потока, а этот (интерфейс) крутит цикл событий: правку применяет он."""
+    import threading
+    out = {}
+    th = threading.Thread(target=lambda: out.setdefault("r", fn()), daemon=True)
+    th.start()
+    end = time.time() + 10
+    while th.is_alive() and time.time() < end:
+        app.processEvents()
+        time.sleep(0.005)
+    return out.get("r")
+
+
+class EditServerTest(unittest.TestCase):
+    PORT = 18965
+
+    @classmethod
+    def setUpClass(cls):
+        cls.t = Template("Урок", [stage("A", 5, id="sA"), note("привет", id="nA"), code("a = 1", id="cA")], id="L")
+        cls.win = make_window([cls.t], port=cls.PORT)
+        cls.win.printer.set_focus("L")
+        cls.win.efir.ensure_server()
+        cls.port = cls.win.efir.server.port
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.win.efir.shutdown()
+        cls.win._quitting = True
+        cls.win.close()
+        pump()
+
+    def edit(self, ops, headers=None, raw: bytes | None = None):
+        body = raw if raw is not None else json.dumps({"lesson": "L", "ops": ops}).encode("utf-8")
+        return call_in_thread(lambda: post(self.port, "/lesson/edit", body, headers))
+
+    def test_edit_roundtrip(self):
+        code_, res = self.edit([{"op": "set", "block": "nA", "fields": {"text": "**жирный** текст"}}])
+        self.assertEqual(code_, 200, res)
+        self.assertTrue(res["ok"])
+        self.assertIn("<b>жирный</b>", res["items"]["nA"]["html"])
+        self.assertEqual(self.t.find_block("nA").text, "**жирный** текст")
+        self.assertIn("rev", res)
+
+    def test_edit_delete_returns_null(self):
+        self.edit([{"op": "insert", "after": "nA", "block": {"id": "cccccccccccc", "type": "markdown"}}])
+        code_, res = self.edit([{"op": "delete", "block": "cccccccccccc"}])
+        self.assertEqual(code_, 200)
+        self.assertIsNone(res["items"]["cccccccccccc"])
+
+    def test_edit_guards(self):
+        self.assertEqual(self.edit([], headers={"X-Suflor": None})[0], 403)
+        self.assertEqual(self.edit([], headers={"Origin": "http://evil.example"})[0], 403)
+        big = b'{"lesson": "L", "ops": [], "pad": "' + b"x" * (3 * 1024 * 1024) + b'"}'
+        self.assertEqual(self.edit(None, raw=big)[0], 413)
+        code_, res = self.edit([{"op": "set", "block": "nA", "fields": {"role": "zzz"}}])
+        self.assertEqual(code_, 400)
+        self.assertFalse(res["ok"])
+
+    def test_upload(self):
+        from PySide6.QtCore import QBuffer, QIODevice
+        from PySide6.QtGui import QColor, QImage
+        im = QImage(2, 2, QImage.Format.Format_RGB32)
+        im.fill(QColor("#ff0000"))
+        buf = QBuffer()
+        buf.open(QIODevice.OpenModeFlag.WriteOnly)
+        im.save(buf, "PNG")
+        png = bytes(buf.data())
+        code_, res = call_in_thread(lambda: post(self.port, "/lesson/upload?lesson=L&after=nA&id=dddddddddddd", png,
+                                                 {"Content-Type": "image/png"}))
+        self.assertEqual(code_, 200, res)
+        ids = [b.id for b in self.t.blocks]
+        self.assertEqual(ids[ids.index("nA") + 1], "dddddddddddd")
+        b = self.t.find_block("dddddddddddd")
+        self.assertEqual(b.type, BLOCK_IMAGE)
+        self.assertTrue(storage.media_path(b.text).is_file())
+        self.assertFalse(res["item"]["missing"])
+        code_, _ = call_in_thread(lambda: post(self.port, "/lesson/upload?lesson=L&after=nA", b"hello",
+                                               {"Content-Type": "image/png"}))
+        self.assertEqual(code_, 415)
+
+    def test_static(self):
+        st, ctype, body = get(self.port, "/static/lesson/app.js")
+        self.assertEqual(st, 200)
+        self.assertIn("javascript", ctype)
+        self.assertEqual(get(self.port, "/static/lesson/../server.py")[0], 404)
+        self.assertEqual(get(self.port, "/static/lesson/nope.js")[0], 404)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

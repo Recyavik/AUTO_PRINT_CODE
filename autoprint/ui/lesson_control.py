@@ -7,6 +7,7 @@
 """
 from __future__ import annotations
 
+import concurrent.futures
 import json
 import logging
 import os
@@ -105,13 +106,17 @@ def close_app_window() -> None:
 
 class LessonController(QObject):
     _cmd = Signal(dict)          # из потока сервера → в поток интерфейса
+    _call = Signal(object)       # (функция, Future) — выполнить в потоке интерфейса и вернуть результат
 
     def __init__(self, main) -> None:
         super().__init__(main)
         self.main = main
         self.efir = main.efir
         self.efir.server.on_command = self._cmd.emit
+        self.efir.server.on_edit = self._edit_from_server
+        self.efir.server.on_upload = self._upload_from_server
         self._cmd.connect(self.command)
+        self._call.connect(self._do_call)
         self._timer = QTimer(self, singleShot=True, interval=300, timeout=self.publish)
         self._last = ""          # что ушло на страницу в последний раз: то же самое второй раз не шлём
         for sig in (self.efir.live_changed, self.efir.screen_changed, self.efir.tab_changed,
@@ -175,6 +180,82 @@ class LessonController(QObject):
         want = [(a.name, a.min, a.kind) for a in scenario.webinar_for(t).schedule]
         if want and now != want:
             self.efir.launch_lesson(t, show=False)
+
+    # ------------------------------------------------------------ правки урока со страницы
+    def _do_call(self, pair) -> None:
+        fn, fut = pair
+        if not fut.set_running_or_notify_cancel():
+            return
+        try:
+            fut.set_result(fn())
+        except BaseException as e:      # ошибку — в поток сервера, он ответит странице
+            fut.set_exception(e)
+
+    def _in_ui(self, fn, timeout: float = 3.0):
+        """Из потока сервера: выполнить fn в потоке интерфейса (урок меняет только он) и дождаться результата."""
+        fut: concurrent.futures.Future = concurrent.futures.Future()
+        self._call.emit((fn, fut))
+        return fut.result(timeout)
+
+    def _edit_from_server(self, data: dict) -> tuple[int, dict]:
+        try:
+            return 200, self._in_ui(lambda: self.apply_edit(data))
+        except concurrent.futures.TimeoutError:
+            return 503, {"ok": False, "retry": True}
+        except ValueError as e:
+            return 400, {"ok": False, "error": str(e)}
+
+    def _upload_from_server(self, data: dict) -> tuple[int, dict]:
+        try:
+            return 200, self._in_ui(lambda: self.add_image(data), timeout=10.0)
+        except concurrent.futures.TimeoutError:
+            return 503, {"ok": False, "retry": True}
+        except ValueError as e:
+            return 400, {"ok": False, "error": str(e)}
+
+    def _lesson_for_edit(self, lid: str) -> Template:
+        t = self.main.store.get(str(lid or ""))
+        if t is None:
+            raise ValueError("Урок не найден — его удалили?")
+        return t
+
+    def _after_edit(self, t: Template, ids: list[str]) -> dict:
+        self.main.printer.on_store_changed()
+        self.main.touch(t)
+        self.schedule_publish()
+        media = self.efir.server.media_url
+        items = {}
+        for bid in ids:
+            b = t.find_block(bid)
+            items[bid] = scenario.item_state(b, media) if b is not None else None
+        return {"ok": True, "rev": scenario.lesson_rev(t), "items": items, "title": t.title}
+
+    def apply_edit(self, data: dict) -> dict:
+        """Правка со страницы (поток интерфейса): действия над уроком → новые версии и HTML затронутых блоков."""
+        from .. import lesson_edit
+        t = self._lesson_for_edit(data.get("lesson"))
+        ids = lesson_edit.apply(t, data.get("ops"))
+        return self._after_edit(t, ids)
+
+    def add_image(self, data: dict) -> dict:
+        """Картинка со страницы (Ctrl+V, перетаскивание): копия в data/media и блок-картинка после after."""
+        import tempfile
+        from .. import lesson_edit
+        from ..storage import import_media, new_id
+        t = self._lesson_for_edit(data.get("lesson"))
+        bid = str(data.get("id") or "")
+        if bid and t.find_block(bid):
+            return self._after_edit(t, [bid])            # повтор после обрыва связи
+        with tempfile.TemporaryDirectory() as tmp:
+            src = Path(tmp) / f"paste{data['ext']}"
+            src.write_bytes(data["data"])
+            ref = import_media(src)
+        bid = bid or new_id()
+        lesson_edit.apply(t, [{"op": "insert", "after": str(data.get("after") or ""),
+                               "block": {"id": bid, "type": "image", "text": ref}}])
+        res = self._after_edit(t, [bid])
+        res["item"] = res["items"][bid]
+        return res
 
     # ------------------------------------------------------------ страница
     def shutdown(self) -> None:

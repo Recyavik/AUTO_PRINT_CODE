@@ -74,6 +74,7 @@ REQUIRED = [
     "_internal/autoprint/efir/page/lesson.html", "_internal/autoprint/efir/page/favicon.svg",
     "_internal/autoprint/samples/dark-site-dark.png",
     "_internal/autoprint/efir/page/lang/python.svg",
+    "_internal/autoprint/efir/page/lesson/app.js",
     "_internal/PySide6/Qt6Pdf.dll",
 ]
 
@@ -199,6 +200,9 @@ def collect_datas() -> list[tuple[str, str]]:
     lang = page / "lang"                                  # значки языков для кода на странице суфлёра урока
     datas += [(str(f), "autoprint/efir/page/lang") for f in sorted(lang.glob("*.svg"))]
     datas.append((str(lang / "LICENSE-devicon.txt"), "autoprint/efir/page/lang"))
+    for sub in ("lesson", "vendor"):                      # скрипты экрана урока и CodeMirror
+        d = page / sub
+        datas += [(str(f), f"autoprint/efir/page/{sub}") for f in sorted(d.glob("*")) if f.suffix in (".js", ".css", ".txt")]
     return datas
 
 
