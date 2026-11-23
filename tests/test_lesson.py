@@ -332,5 +332,85 @@ class ScenarioAiTest(unittest.TestCase):
         self.assertEqual(r.template.blocks[1].role, "text")
 
 
+PORT = 18891
+
+
+class LessonServerTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        from autoprint.efir.server import BroadcastServer
+        cls.cmds = []
+        cls.srv = BroadcastServer(PORT, on_command=cls.cmds.append)
+        assert cls.srv.start()
+        cls.base = cls.srv.url
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.srv.stop()
+
+    def get(self, path, headers=None):
+        import urllib.request
+        req = urllib.request.Request(self.base + path.lstrip("/"), headers=headers or {})
+        return urllib.request.urlopen(req, timeout=5)
+
+    def post(self, path, data, headers=None):
+        import urllib.request
+        req = urllib.request.Request(self.base + path.lstrip("/"), data=json.dumps(data).encode(),
+                                     headers={"Content-Type": "application/json", **(headers or {})}, method="POST")
+        return urllib.request.urlopen(req, timeout=5)
+
+    def test_lesson_channel(self):
+        self.srv.publish({"mode": "idle", "caption": "экран"})
+        self.srv.publish({"lesson": {"title": "Тёмная тема"}}, channel="lesson")
+        self.assertNotIn("lesson", self.srv.snapshot())
+        self.assertEqual(self.srv.snapshot("lesson")["lesson"]["title"], "Тёмная тема")
+        r = self.get("/events?ch=lesson")
+        first = r.readline().decode("utf-8")
+        self.assertEqual(json.loads(first[6:])["lesson"]["title"], "Тёмная тема")
+        r.readline()
+        self.srv.publish({"mode": "break"})                                   # экран — не канал урока
+        self.srv.publish({"lesson": {"title": "Второй"}}, channel="lesson")
+        second = r.readline().decode("utf-8")
+        self.assertEqual(json.loads(second[6:])["lesson"]["title"], "Второй")
+        r.close()
+        s = self.get("/events")
+        self.assertEqual(json.loads(s.readline().decode("utf-8")[6:])["mode"], "break")
+        s.close()
+
+    def test_lesson_page(self):
+        html = self.get("/lesson").read().decode("utf-8")
+        self.assertIn("Суфлёр", html)
+
+    def test_static_lang(self):
+        import urllib.error
+        r = self.get("/static/lang/python.svg")
+        self.assertEqual((r.status, r.headers["Content-Type"]), (200, "image/svg+xml"))
+        self.assertIn(b"<svg", r.read())
+        for bad in ("/static/lang/../server.py", "/static/lang/%2e%2e%2fserver.py", "/static/lang/nope.svg",
+                    "/static/screen.html"):
+            with self.assertRaises(urllib.error.HTTPError, msg=bad) as cm:
+                self.get(bad)
+            self.assertEqual(cm.exception.code, 404, bad)
+
+    def test_cmd_requires_header(self):
+        import urllib.error
+        self.cmds.clear()
+        with self.assertRaises(urllib.error.HTTPError) as cm:
+            self.post("/lesson/cmd", {"cmd": "start"})
+        self.assertEqual(cm.exception.code, 403)
+        self.assertEqual(self.cmds, [])
+        r = self.post("/lesson/cmd", {"cmd": "start_at", "index": 2}, {"X-Suflor": "1"})
+        self.assertTrue(json.loads(r.read())["ok"])
+        self.assertEqual(self.cmds[-1], {"cmd": "start_at", "index": 2})
+
+    def test_cmd_foreign_origin(self):
+        import urllib.error
+        with self.assertRaises(urllib.error.HTTPError) as cm:
+            self.post("/lesson/cmd", {"cmd": "stop"}, {"X-Suflor": "1", "Origin": "http://evil.example"})
+        self.assertEqual(cm.exception.code, 403)
+        r = self.post("/lesson/cmd", {"cmd": "stop"}, {"X-Suflor": "1", "Origin": self.base.rstrip("/")})
+        self.assertEqual(r.status, 200)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

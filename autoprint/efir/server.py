@@ -7,6 +7,10 @@
 - GET  /media/<id>/<имя> — видео, картинки, шрифты (с Range — для перемотки видео);
 - POST /report        — страница сообщает: подключилась, звук разрешён, ход видео, видео кончилось;
 - POST /pick          — выбран фон в галерее.
+- GET  /lesson        — страница суфлёра урока (свой канал состояния: /events?ch=lesson);
+- GET  /static/lang/<язык>.svg — значки языков программирования для кода на странице суфлёра;
+- POST /lesson/cmd    — команды со страницы суфлёра (начать урок, начать с этапа, печатать этот блок…):
+                        только с заголовком X-Suflor и со своей страницы (Origin), иначе 403.
 Слушает только 127.0.0.1. Порт постоянный (8791, если занят — следующие): открытая вкладка переживает
 перезапуск программы — EventSource сам переподключается к тому же адресу.
 """
@@ -24,6 +28,7 @@ import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Callable
+from urllib.parse import parse_qs
 
 
 log = logging.getLogger(__name__)
@@ -43,6 +48,10 @@ mimetypes.add_type("font/ttf", ".ttf")
 mimetypes.add_type("font/woff2", ".woff2")
 mimetypes.add_type("font/woff", ".woff")
 mimetypes.add_type("image/webp", ".webp")
+mimetypes.add_type("image/svg+xml", ".svg")
+
+CHANNELS = ("screen", "lesson")      # screen — экран эфира для учеников, lesson — страница суфлёра урока
+_LANG_ICON = re.compile(r"/static/lang/([a-z0-9+#-]+\.svg)")
 
 
 class _Server(ThreadingHTTPServer):
@@ -74,6 +83,14 @@ class _Handler(BaseHTTPRequestHandler):
         host = (self.headers.get("Host") or "").split(":")[0].lower()
         return host in ("127.0.0.1", "localhost", "")
 
+    def _origin_ok(self) -> bool:
+        """Команды суфлёра — только со своей страницы: чужой сайт в браузере их не пришлёт."""
+        origin = (self.headers.get("Origin") or "").rstrip("/")
+        if not origin:
+            return True
+        port = self.server.owner.port
+        return origin in (f"http://127.0.0.1:{port}", f"http://localhost:{port}")
+
     def _send(self, code: int, body: bytes, ctype: str, extra: dict | None = None) -> None:
         self.send_response(code)
         self.send_header("Content-Type", ctype)
@@ -95,16 +112,25 @@ class _Handler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         if not self._host_ok():
             return self._send(403, b"forbidden", "text/plain")
-        path = self.path.split("?", 1)[0]
+        path, _, query = self.path.partition("?")
         owner = self.server.owner
         try:
             if path in ("/", "/gallery", "/index.html"):
                 body = (PAGE_DIR / "screen.html").read_bytes()
                 return self._send(200, body, "text/html; charset=utf-8")
+            if path == "/lesson":
+                body = (PAGE_DIR / "lesson.html").read_bytes()
+                return self._send(200, body, "text/html; charset=utf-8")
             if path == "/state":
-                return self._json(owner.snapshot())
+                return self._json(owner.snapshot(self._channel(query)))
             if path == "/events":
-                return self._events()
+                return self._events(self._channel(query))
+            m = _LANG_ICON.fullmatch(path)
+            if m:
+                f = PAGE_DIR / "lang" / m.group(1)
+                if f.is_file():
+                    return self._send(200, f.read_bytes(), "image/svg+xml", {"Cache-Control": "max-age=86400"})
+                return self._send(404, b"not found", "text/plain")
             if path == "/favicon.ico":
                 return self._send(204, b"", "image/x-icon")
             m = re.fullmatch(r"/media/([0-9a-f]{16})/[^/]*", path)
@@ -117,7 +143,12 @@ class _Handler(BaseHTTPRequestHandler):
         except (ConnectionError, OSError):
             pass      # вкладку закрыли или браузер отменил запрос (видео дергает Range постоянно)
 
-    def _events(self) -> None:
+    @staticmethod
+    def _channel(query: str) -> str:
+        ch = (parse_qs(query).get("ch") or ["screen"])[0]
+        return ch if ch in CHANNELS else "screen"
+
+    def _events(self, channel: str = "screen") -> None:
         owner = self.server.owner
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream; charset=utf-8")
@@ -125,11 +156,11 @@ class _Handler(BaseHTTPRequestHandler):
         self.send_header("Connection", "keep-alive")
         self.send_header("X-Accel-Buffering", "no")
         self.end_headers()
-        owner._client(+1)
+        owner._client(+1, channel)
         try:
             rev = -1
             while not owner.stopping:
-                state, new_rev = owner.wait_change(rev, HEARTBEAT_S)
+                state, new_rev = owner.wait_change(rev, HEARTBEAT_S, channel)
                 if owner.stopping:
                     break
                 if new_rev != rev:
@@ -142,7 +173,7 @@ class _Handler(BaseHTTPRequestHandler):
         except (ConnectionError, OSError):
             pass
         finally:
-            owner._client(-1)
+            owner._client(-1, channel)
             self.close_connection = True
 
     def _file(self, f: Path) -> None:
@@ -201,6 +232,11 @@ class _Handler(BaseHTTPRequestHandler):
             return self._json({"ok": False}, 400)
         path = self.path.split("?", 1)[0]
         owner = self.server.owner
+        if path == "/lesson/cmd":
+            if self.headers.get("X-Suflor") != "1" or not self._origin_ok():
+                return self._json({"ok": False}, 403)
+            owner._on_command(data)
+            return self._json({"ok": True})
         if path == "/report":
             owner._on_report(data)
             return self._json({"ok": True})
@@ -215,20 +251,22 @@ class BroadcastServer:
     on_report / on_pick вызываются из потоков сервера — подписчик сам переносит их в поток интерфейса."""
 
     def __init__(self, port: int = DEFAULT_PORT, on_report: Callable[[dict], None] | None = None,
-                 on_pick: Callable[[dict], None] | None = None) -> None:
+                 on_pick: Callable[[dict], None] | None = None,
+                 on_command: Callable[[dict], None] | None = None) -> None:
         self.want_port = port
         self.port = 0
         self.on_report = on_report
         self.on_pick = on_pick
+        self.on_command = on_command
         self.stopping = False
         self._httpd: _Server | None = None
         self._thread: threading.Thread | None = None
         self._cond = threading.Condition()
-        self._state: dict = {"mode": "idle"}
-        self._rev = 0
+        self._states: dict[str, dict] = {"screen": {"mode": "idle"}, "lesson": {}}
+        self._revs: dict[str, int] = {ch: 0 for ch in CHANNELS}
         self._media: dict[str, Path] = {}
         self._media_ids: dict[str, str] = {}
-        self._clients = 0
+        self._counts: dict[str, int] = {ch: 0 for ch in CHANNELS}
         self.last_report = 0.0
 
     # ------------------------------------------------------------ запуск
@@ -275,36 +313,47 @@ class BroadcastServer:
         self.port = 0
 
     # ------------------------------------------------------------ состояние
-    def publish(self, state: dict) -> None:
+    def publish(self, state: dict, channel: str = "screen") -> None:
         with self._cond:
-            self._state = dict(state)
-            self._rev += 1
+            self._states[channel] = dict(state)
+            self._revs[channel] += 1
             self._cond.notify_all()
 
-    def snapshot(self) -> dict:
+    def snapshot(self, channel: str = "screen") -> dict:
         with self._cond:
-            s = dict(self._state)
+            s = dict(self._states[channel])
         s["server_now"] = int(time.time() * 1000)
         return s
 
-    def wait_change(self, rev: int, timeout: float) -> tuple[dict, int]:
+    def wait_change(self, rev: int, timeout: float, channel: str = "screen") -> tuple[dict, int]:
+        deadline = time.monotonic() + timeout
         with self._cond:
-            if rev == self._rev and not self.stopping:
-                self._cond.wait(timeout)
-            s = dict(self._state)
-            r = self._rev
+            # ждём своего канала: изменения другого будят всех, но отдавать по ним нечего
+            while rev == self._revs[channel] and not self.stopping:
+                left = deadline - time.monotonic()
+                if left <= 0:
+                    break
+                self._cond.wait(left)
+            s = dict(self._states[channel])
+            r = self._revs[channel]
         s["server_now"] = int(time.time() * 1000)
         return s, r
 
     @property
     def clients(self) -> int:
-        return self._clients
+        """Открытых вкладок экрана эфира (страницы суфлёра не считаются)."""
+        return self._counts["screen"]
 
-    def _client(self, d: int) -> None:
+    @property
+    def lesson_clients(self) -> int:
+        return self._counts["lesson"]
+
+    def _client(self, d: int, channel: str = "screen") -> None:
         with self._cond:
-            self._clients = max(0, self._clients + d)
+            self._counts[channel] = max(0, self._counts[channel] + d)
+            n = self._counts[channel]
         if self.on_report:
-            self.on_report({"type": "clients", "count": self._clients})
+            self.on_report({"type": "clients" if channel == "screen" else "lesson_clients", "count": n})
 
     # ------------------------------------------------------------ файлы
     def media_url(self, path: str | os.PathLike) -> str:
@@ -330,6 +379,13 @@ class BroadcastServer:
                 self.on_report(data)
             except Exception:     # ошибка подписчика не должна ронять поток сервера
                 log.exception("on_report")
+
+    def _on_command(self, data: dict) -> None:
+        if self.on_command:
+            try:
+                self.on_command(data)
+            except Exception:
+                log.exception("on_command")
 
     def _on_pick(self, data: dict) -> None:
         if self.on_pick:
