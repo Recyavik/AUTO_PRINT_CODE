@@ -168,5 +168,88 @@ class HtmlTest(unittest.TestCase):
                 self.assertNotIn("<script", svg.lower())
 
 
+W = 'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"'
+A = 'xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"'
+
+
+def make_docx(path: Path, paragraphs: list[str], colored: str = "") -> Path:
+    import zipfile
+    body = "".join(f"<w:p><w:r><w:t>{p}</w:t></w:r></w:p>" for p in paragraphs)
+    if colored:
+        body += ('<w:p><w:r><w:t xml:space="preserve">Скажи: </w:t></w:r><w:r><w:rPr><w:color w:val="7030A0"/>'
+                 f'</w:rPr><w:t>{colored}</w:t></w:r></w:p>')
+    with zipfile.ZipFile(path, "w") as z:
+        z.writestr("word/document.xml", f'<?xml version="1.0"?><w:document {W}><w:body>{body}</w:body></w:document>')
+    return path
+
+
+def make_pptx(path: Path, slides: list[str]) -> Path:
+    import zipfile
+    with zipfile.ZipFile(path, "w") as z:
+        for i, text in enumerate(slides, 1):
+            z.writestr(f"ppt/slides/slide{i}.xml",
+                       f'<?xml version="1.0"?><p:sld xmlns:p="x" {A}><a:p><a:r><a:t>{text}</a:t></a:r></a:p></p:sld>')
+    return path
+
+
+def make_pdf(path: Path, pages: list[str]) -> Path:
+    from PySide6.QtGui import QFont, QPainter, QPdfWriter
+    w = QPdfWriter(str(path))
+    p = QPainter(w)
+    p.setFont(QFont("Arial", 24))
+    for i, text in enumerate(pages):
+        if i:
+            w.newPage()
+        p.drawText(400, 1200, text)
+    p.end()
+    return path
+
+
+class MaterialsTest(unittest.TestCase):
+    def test_docx(self):
+        from autoprint import materials
+        m = materials.extract(str(make_docx(TMP / "m.docx", ["Первый абзац", "Второй абзац"])))
+        self.assertIn("Первый абзац\nВторой абзац", m.text)
+        self.assertIsNone(m.pdf)
+
+    def test_docx_colored_marked(self):
+        from autoprint import materials
+        m = materials.extract(str(make_docx(TMP / "c.docx", ["Обычный"], colored="Это читаем дословно")))
+        self.assertIn("Скажи: ⟦Это читаем дословно⟧", m.text)
+        self.assertIn("⟦", m.text.split("\n")[0])        # пояснение про ⟦…⟧ — в начале материала
+
+    def test_pptx(self):
+        from autoprint import materials
+        slides = [f"Текст слайда {i}" for i in range(1, 12)]
+        m = materials.extract(str(make_pptx(TMP / "s.pptx", slides)))
+        self.assertIn("=== Слайд 2 ===\nТекст слайда 2", m.text)
+        self.assertLess(m.text.index("Слайд 2 ==="), m.text.index("Слайд 10 ==="))   # 10 после 2, не после 1
+
+    def test_pdf_text_and_render(self):
+        from autoprint import materials
+        pdf = make_pdf(TMP / "p.pdf", ["Привет мир", "Страница два"])
+        m = materials.extract(str(pdf))
+        self.assertEqual((m.pdf, m.pages), (str(pdf), 2))
+        self.assertIn("=== Страница 1 ===", m.text)
+        self.assertIn("Привет мир", m.text)
+        self.assertIn("Страница два", m.text)
+        png = materials.render_page(str(pdf), 2, TMP / "media", width=320)
+        self.assertTrue(png and png.is_file() and png.suffix == ".png")
+        self.assertIsNone(materials.render_page(str(pdf), 7, TMP / "media"))
+
+    def test_txt_cp1251(self):
+        from autoprint import materials
+        f = TMP / "t.txt"
+        f.write_bytes("Тема урока: циклы".encode("cp1251"))
+        self.assertEqual(materials.extract(str(f)).text.strip(), "Тема урока: циклы")
+
+    def test_old_doc_explains(self):
+        from autoprint import materials
+        f = TMP / "old.doc"
+        f.write_bytes(b"\xd0\xcf\x11\xe0")
+        with self.assertRaisesRegex(ValueError, "docx"):
+            materials.extract(str(f))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
