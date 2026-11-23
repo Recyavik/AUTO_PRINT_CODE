@@ -39,7 +39,7 @@ EXCLUDES = [
 ]
 # Нужны обязательно: QtMultimedia (QSoundEffect), QtSvg (значки), QtNetwork (QLocalServer —
 # второй запуск активирует уже открытое окно)
-HIDDEN = ["PySide6.QtMultimedia", "PySide6.QtSvg", "PySide6.QtNetwork"]
+HIDDEN = ["PySide6.QtMultimedia", "PySide6.QtSvg", "PySide6.QtNetwork", "PySide6.QtPdf"]   # QtPdf — материал урока из PDF
 
 # Лишние двоичные файлы Qt (имена в сборке, без учёта регистра), всего ~60 МБ:
 # - FFmpeg и его плагин (~20 МБ): QSoundEffect играет WAV через windowsmediaplugin — проверено;
@@ -47,7 +47,8 @@ HIDDEN = ["PySide6.QtMultimedia", "PySide6.QtSvg", "PySide6.QtNetwork"]
 # - экранная клавиатура (platforminputcontexts) — только она тянет Qt Quick/QML/OpenGL (~16 МБ);
 # - OpenSSL для Qt (*-x64.dll и qopensslbackend): QtNetwork нужен лишь для QLocalServer, а HTTPS
 #   у обновлений идёт через ssl самого Python (libssl-3.dll — остаётся);
-# - платформы qdirect2d/qminimal, networkinformation, тач-плагин TUIO, imageformats/qpdf + Qt6Pdf;
+# - платформы qdirect2d/qminimal, networkinformation, тач-плагин TUIO, imageformats/qpdf (Qt6Pdf остаётся:
+#   суфлёр урока читает методички в PDF);
 # - переводы Qt, кроме русских (их можно подключить QTranslator'ом), и справка Qt Help.
 DROP_PATTERNS = [
     r"(^|/)opengl32sw\.dll$",
@@ -61,7 +62,6 @@ DROP_PATTERNS = [
     r"/plugins/networkinformation/",
     r"/plugins/generic/qtuiotouchplugin\.dll$",
     r"/plugins/imageformats/qpdf\.dll$",
-    r"(^|/)qt6pdf\.dll$",
     r"/translations/(?!.*_ru\.qm$)[^/]+\.qm$",
     r"/translations/qt_help_[^/]+\.qm$",
 ]
@@ -71,6 +71,8 @@ REQUIRED = [
     "_internal/PySide6/Qt6Svg.dll", "_internal/PySide6/plugins/multimedia/windowsmediaplugin.dll",
     "_internal/PySide6/plugins/platforms/qwindows.dll", "_internal/PySide6/plugins/imageformats/qsvg.dll",
     "_internal/PySide6/plugins/iconengines/qsvgicon.dll", "_internal/autoprint/sounds/SOURCES.md", "_internal/autoprint/efir/page/screen.html",
+    "_internal/autoprint/efir/page/lesson.html", "_internal/autoprint/efir/page/lang/python.svg",
+    "_internal/PySide6/Qt6Pdf.dll",
 ]
 
 SPEC = '''# -*- mode: python ; coding: utf-8 -*-
@@ -190,6 +192,9 @@ def collect_datas() -> list[tuple[str, str]]:
     datas.append((str(sounds / "SOURCES.md"), "autoprint/sounds"))
     page = ROOT / "autoprint" / "efir" / "page"          # страница экрана эфира (вкладка браузера)
     datas += [(str(f), "autoprint/efir/page") for f in sorted(page.glob("*.html"))]
+    lang = page / "lang"                                  # значки языков для кода на странице суфлёра урока
+    datas += [(str(f), "autoprint/efir/page/lang") for f in sorted(lang.glob("*.svg"))]
+    datas.append((str(lang / "LICENSE-devicon.txt"), "autoprint/efir/page/lang"))
     return datas
 
 
