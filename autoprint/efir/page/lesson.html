@@ -550,8 +550,11 @@ function renderMain() {
     st.appendChild(bar2);
     const body = el("div", "body");
     if (s.kind === "break" || s.kind === "exercise") {
-      const row2 = el("div", "row r-" + (s.kind === "break" ? "task" : "image"));
-      row2.appendChild(icon(s.kind, s.kind === "break" ? "Перерыв" : "Зарядка"));
+      const row2 = el("div", "row r-" + (s.kind === "break" ? "task" : "explain"));
+      const lbl = el("div", "lbl");                      // «ПЕРЕРЫВ — экран эфира» и кнопка — как у плашек
+      lbl.appendChild(icon(s.kind, s.kind === "break" ? "Перерыв" : "Зарядка"));
+      lbl.appendChild(el("span", "", (s.kind === "break" ? "Перерыв" : "Зарядка") + " · экран эфира"));
+      row2.appendChild(lbl);
       const c = el("div", "c");
       const b = el("button", "efirbtn", s.kind === "break" ? "Показать перерыв ученикам · " + s.minutes + " мин" : "Включить зарядку ученикам");
       b.onclick = (e) => { e.stopPropagation(); cmd(s.kind === "break" ? { cmd: "break", minutes: s.minutes } : { cmd: "exercise", index: 0 }); };

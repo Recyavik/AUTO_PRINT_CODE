@@ -803,5 +803,52 @@ class EditorBlocksTest(unittest.TestCase):
         h2.close()
 
 
+
+# ================================================================ Task 9: пример урока с картинками
+
+class SampleTest(unittest.TestCase):
+    def test_has_everything(self):
+        from autoprint import scenario
+        from autoprint.samples_lesson import lesson_sample
+        from autoprint.storage import BLOCK_CODE, BLOCK_IMAGE, BLOCK_STAGE, media_path
+        t = lesson_sample()
+        stages = [b for b in t.blocks if b.type == BLOCK_STAGE]
+        self.assertGreaterEqual(len(stages), 6)
+        self.assertEqual({b.stage_kind for b in stages} >= {"", "break", "exercise"}, True)
+        self.assertEqual(scenario.total_minutes(t), 90)
+        roles = {b.role for b in t.blocks if b.type == "markdown"}
+        self.assertTrue({"say", "tell", "ask", "do", "important", "show", "trap", "extra"} <= roles, roles)
+        self.assertEqual({b.lang for b in t.blocks if b.type == BLOCK_CODE} >= {"css", "javascript", "html"}, True)
+        images = [b for b in t.blocks if b.type == BLOCK_IMAGE]
+        self.assertGreaterEqual(len(images), 3)
+        for b in images:
+            self.assertTrue(b.text.startswith("media/"), b.text)
+            self.assertIsNotNone(media_path(b.text), b.text)
+            self.assertTrue(b.title)
+        self.assertTrue(len({b.part for b in stages if b.part}) >= 2)
+
+    def test_added_once(self):
+        win, store = make_main(PORT + 5)
+        try:
+            from autoprint.samples_lesson import LESSON_SAMPLE_ID, LESSON_TITLE
+            n = sum(t.title == LESSON_TITLE for t in store.templates)
+            self.assertEqual(n, 1)
+            self.assertIn(LESSON_SAMPLE_ID, win.settings.samples_seen)
+            win._ensure_samples()
+            self.assertEqual(sum(t.title == LESSON_TITLE for t in store.templates), 1)
+        finally:
+            win.efir.shutdown()
+            drop_main(win)
+
+    def test_sample_page_state(self):
+        from autoprint import scenario
+        from autoprint.samples_lesson import lesson_sample
+        t = lesson_sample()
+        st = scenario.lesson_state(t, live_anchor_ms=None, armed="", media_url=lambda p: "/media/x/" + Path(p).name,
+                                   presets=[], preset="", dark=True, efir_mode="idle", tab="", hotkey="Ctrl+F9")
+        imgs = [b for s in st["lesson"]["stages"] for b in s["blocks"] if b["role"] == "image"]
+        self.assertTrue(imgs and all(b["url"] and not b["missing"] for b in imgs))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

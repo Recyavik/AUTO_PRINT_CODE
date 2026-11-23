@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+import re
 import shutil
 from pathlib import Path
 
@@ -151,6 +152,7 @@ class BlockWidget(QFrame):
         self.title.setMinimumWidth(80)
         self.title.setMaximumWidth(320)
         self.title.textEdited.connect(self._on_title)
+        self.title.setCursorPosition(0)          # длинный заголовок — видно начало, а не хвост
         self.header.addWidget(self.title)
         self._update_placeholder()
 
@@ -274,6 +276,10 @@ class BlockWidget(QFrame):
         """Шрифт содержимого под масштаб, % — переопределяют наследники."""
 
     def _update_placeholder(self) -> None:
+        if self.block.type == BLOCK_MARKDOWN:
+            # роль уже написана на цветной плашке слева — не повторять её в пустом заголовке
+            self.title.setPlaceholderText("Заголовок")
+            return
         self.title.setPlaceholderText(Block(self.block.type, role=self.block.role, title="")
                                       .display_title(self.code_number))
 
@@ -497,7 +503,10 @@ class MarkdownBlockWidget(BlockWidget):
         self.view.document().setDefaultStyleSheet(_markdown_css())
         self._rendering = True
         try:
-            self.view.setMarkdown(self.block.text or "*Пустой блок — дважды щёлкните, чтобы написать*")
+            text = self.block.text
+            if self.block.role == "ask":          # ответы «→ …» — каждый своей строкой, как на суфлёре
+                text = re.sub(r"\n(?=\s*→)", "  \n", text)
+            self.view.setMarkdown(text or "*Пустой блок — дважды щёлкните, чтобы написать*")
         finally:
             self._rendering = False
         QTimer.singleShot(0, self, self._fit)
@@ -870,6 +879,9 @@ class ImageBlockWidget(BlockWidget):
         super().__init__(block)
         self._not_printable()
         self.title.setToolTip("Подпись к картинке")
+        self.title.setPlaceholderText("Подпись к картинке")
+        self.title.setMinimumWidth(320)
+        self.title.setMaximumWidth(640)
         self._pm = QPixmap()
         self.preview = QLabel()
         self.preview.setObjectName("imagePreview")

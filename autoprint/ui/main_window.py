@@ -900,6 +900,18 @@ class MainWindow(FramelessWindow):
                 tour_id = t.id
             seen.append(TOUR_SAMPLE_ID)
             changed = True
+        from ..samples_lesson import LESSON_SAMPLE_ID, LESSON_TITLE, lesson_sample
+        if LESSON_SAMPLE_ID not in seen and any(x.title == LESSON_TITLE for x in self.store.templates):
+            seen.append(LESSON_SAMPLE_ID)       # пример уже в базе (настройки не успели сохраниться) — второй не нужен
+            changed = True
+        if LESSON_SAMPLE_ID not in seen:
+            # 0.9: пример урока для суфлёра — этапы, подсказки, код, картинки. Обновившимся — сразу открыть
+            t = lesson_sample()
+            self.store.templates.insert(0, t)
+            if not self.store.created_fresh and not tour_id:
+                tour_id = t.id
+            seen.append(LESSON_SAMPLE_ID)
+            changed = True
         if changed:
             self._save_store()
             self._save_settings()
