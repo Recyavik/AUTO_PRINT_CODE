@@ -1080,6 +1080,16 @@ class ImageArmTest(unittest.TestCase):
         self.assertIn("Ctrl+V", w.arm_btn.text() + w.arm_btn.toolTip())
         v.close()
 
+    def test_live_start_field_commits_on_enter(self):
+        """Ревью №3: «Начало» идущего урока — не на каждое нажатие (набрали «1» поверх 17:30 — это не 01:30),
+        а по Enter/уходу из поля; шапка не перерисовывается, пока в ней печатают. Поведение в Edge проверено
+        отдельно (CDP: «1» → нет команды, фокус на месте; «1830» Enter → одна команда 18:30)."""
+        from autoprint.efir.server import PAGE_DIR
+        html = (PAGE_DIR / "lesson.html").read_text(encoding="utf-8")
+        self.assertNotIn('tm.onchange = () => { if (tm.value) cmd({ cmd: "set_start"', html)
+        self.assertIn('tm.addEventListener("blur", commit)', html)
+        self.assertIn("if (toolsBusy()) toolsStale = true;", html)
+
     def test_lesson_page_image_arm(self):
         from autoprint.efir.server import PAGE_DIR
         html = (PAGE_DIR / "lesson.html").read_text(encoding="utf-8")

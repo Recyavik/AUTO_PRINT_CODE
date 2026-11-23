@@ -350,10 +350,17 @@ function renderTools() {
       t.appendChild(at);
     } else {
       const startBox = el("label", "chip");
-      startBox.title = "Начало идущего урока — поправьте, и время этапов сдвинется";
+      startBox.title = "Начало идущего урока: наберите время и нажмите Enter — время этапов сдвинется (Esc — отмена)";
       startBox.appendChild(document.createTextNode("Начало"));
       const tm = timeInput(hhmm(S.live.anchor));
-      tm.onchange = () => { if (tm.value) cmd({ cmd: "set_start", start: tm.value }); };
+      // не на каждое нажатие: набрали «1» поверх 17:30 — это ещё не «01:30». Только Enter или уход из поля
+      const was = tm.value;
+      const commit = () => { if (tm.value && tm.value !== was) cmd({ cmd: "set_start", start: tm.value }); };
+      tm.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") { e.preventDefault(); tm.blur(); }
+        else if (e.key === "Escape") { tm.value = was; tm.blur(); }
+      });
+      tm.addEventListener("blur", commit);
       startBox.appendChild(tm);
       t.appendChild(startBox);
       const shift = el("button", "", "Сдвинуть на сейчас");
@@ -709,7 +716,8 @@ function apply(state) {
   offset = (state.server_now || Date.now()) - Date.now();
   S = state;
   const key = JSON.stringify([state.lesson, state.armed, state.live && state.live.anchor, state.efir, state.hotkey]);
-  renderTools();
+  if (toolsBusy()) toolsStale = true;               // в шапке что-то набирают — не перерисовывать под рукой
+  else renderTools();
   if (key !== lastLessonKey) {
     const y = window.scrollY;
     const id = state.lesson ? state.lesson.id : null;
@@ -723,6 +731,15 @@ function apply(state) {
   }
   tick();
 }
+
+let toolsStale = false;
+function toolsBusy() {
+  const a = document.activeElement;
+  return !!a && (a.tagName === "INPUT" || a.tagName === "SELECT") && $("tools").contains(a);
+}
+$("tools").addEventListener("focusout", () => setTimeout(() => {
+  if (toolsStale && !toolsBusy()) { toolsStale = false; renderTools(); }
+}, 0));
 
 function connect() {
   es = new EventSource("/events?ch=lesson");
