@@ -320,6 +320,8 @@ class LessonController(QObject):
                 self.main.export_template(t, str(d["fmt"]))
             elif cmd == "settings":
                 self.main.open_settings(str(d.get("page") or ""))
+            elif cmd == "recognize" and t is not None:
+                self.main.recognize_lesson(t)
             elif cmd == "exercise" and t is not None:
                 self._ensure_screen(t)
                 self.efir.start_exercise(int(d.get("index") or 0))

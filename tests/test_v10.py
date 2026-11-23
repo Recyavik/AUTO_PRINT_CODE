@@ -941,6 +941,108 @@ class SamplesMigrationTest(unittest.TestCase):
         self.assertIn("01a2940b7512461244c0ce21258cb21b72690369", migrations.SAMPLE_FINGERPRINTS)
 
 
+# ================================================================ Task 18: сценарные тетрадки → урок
+
+SCENARIO_CELLS = [
+    ("markdown", "# 🎬 Занятие 7\n\n## Тема: функции\n\n### 🔑 Как читать этот файл\n\n| Значок | Что значит |\n|---|---|\n"
+                 "| 🗣 | говоришь |"),
+    ("code", "def set_input(*lines):\n    pass"),
+    ("markdown", "---\n---\n# 🟦 ПЕРВАЯ ПОЛОВИНА — 45 минут\n---\n# ⏱ 00:00–00:03 · Приветствие и цель\n\n"
+                 "🗣 **Говоришь:**\n\n> Добрый день. Сегодня — функции.\n> Начнём с разминки."),
+    ("markdown", "---\n# ⏱ 00:03–00:08 · Разминка, 5 вопросов\n\n🗣 **Говоришь:**\n\n> Пять вопросов, отвечаем вслух."),
+    ("markdown", "---\n# ⏱ 00:08–00:18 · Разбор 1. Проверка события\n\n🗣 **Говоришь:**\n\n> Первая задача."),
+    ("code", "def ok(x):\n    return x > 0"),
+    ("markdown", "🗣 **Говоришь, показывая на код:**\n\n> Смотрите, как устроена функция."),
+    ("code", "print(ok(5))"),
+    ("markdown", "✅ **Ожидаемый вывод:** `True`\n\n🗣 **Говоришь при разборе:**\n\n> Разберём построчно."),
+    ("markdown", "**Решение — показываешь через 4 минуты:**\n\n👀 **Показываешь строку с return.**\n\n"
+                 "⌨️ **Печатаешь шаг 2:**"),
+    ("markdown", "---\n---\n# 🧘 ⏱ 00:18–00:23 · ЗАРЯДКА ДЛЯ ГЛАЗ, 5 МИНУТ\n\n🗣 **Говоришь:**\n\n> Пауза на пять минут."),
+    ("markdown", "---\n---\n# 🧘 ⏱ 00:23–00:33 · ПЕРЕРЫВ 10 МИНУТ\n\n🗣 **Говоришь:**\n\n> Перерыв десять минут."),
+    ("markdown", "---\n---\n# 🟩 ВТОРАЯ ПОЛОВИНА — 45 минут\n---\n# ✍️ ⏱ 00:33–00:40 · Мини-задание 1\n\n"
+                 "🗣 **Говоришь:**\n\n> Пробуете сами.\n\nℹ️ Функцию переопределяем ниже."),
+]
+
+
+def scenario_template() -> Template:
+    blocks = [Block(BLOCK_MARKDOWN if k == "markdown" else BLOCK_CODE, text, role="text") for k, text in SCENARIO_CELLS]
+    return Template("Занятие 7", blocks)
+
+
+class ScenarioTest(unittest.TestCase):
+    def test_looks_like_scenario(self):
+        from autoprint.scenario_import import looks_like_scenario
+        self.assertTrue(looks_like_scenario(scenario_template().blocks))
+        self.assertFalse(looks_like_scenario([note("# ⏱ 00:00–00:05 · Один этап")]))
+
+    def test_stages(self):
+        from autoprint.scenario_import import recognize
+        r = recognize(scenario_template())
+        st = [b for b in r.blocks if b.type == BLOCK_STAGE]
+        self.assertEqual([(b.title, b.minutes) for b in st],
+                         [("Приветствие и цель", 3), ("Разминка, 5 вопросов", 5), ("Разбор 1. Проверка события", 10),
+                          ("Зарядка для глаз, 5 минут", 5), ("Перерыв 10 минут", 10), ("Мини-задание 1", 7)])
+        self.assertEqual([b.stage_kind for b in st], ["", "", "", "exercise", "break", ""])
+        self.assertEqual([b.part for b in st], ["Первая половина"] * 5 + ["Вторая половина"])
+        self.assertEqual(st[-1].text, "задание")
+
+    def test_roles(self):
+        from autoprint.scenario_import import recognize
+        r = recognize(scenario_template())
+        notes = [(b.role, b.title, b.text) for b in r.blocks if b.type == BLOCK_MARKDOWN]
+        self.assertIn(("say", "", "Добрый день. Сегодня — функции.\nНачнём с разминки."), notes)
+        self.assertIn(("say", "показывая на код", "Смотрите, как устроена функция."), notes)
+        self.assertIn(("output", "", "True"), notes)
+        self.assertIn(("say", "при разборе", "Разберём построчно."), notes)
+        self.assertIn(("do", "", "Решение — показываешь через 4 минуты"), notes)
+        self.assertIn(("text", "", "Функцию переопределяем ниже."), notes)
+        self.assertIn(("show", "", "**Показываешь строку с return.**"), notes)
+        self.assertIn(("do", "", "**Печатаешь шаг 2:**"), notes)
+        codes = [b.text for b in r.blocks if b.type == BLOCK_CODE]
+        self.assertEqual(codes, ["def set_input(*lines):\n    pass", "def ok(x):\n    return x > 0", "print(ok(5))"])
+        first_stage = next(i for i, b in enumerate(r.blocks) if b.type == BLOCK_STAGE)
+        self.assertEqual(r.blocks[first_stage - 1].text, "def set_input(*lines):\n    pass")   # служебное — до урока
+        self.assertTrue(any("Как читать" in b.text for b in r.blocks[:first_stage]))
+
+    def test_copy(self):
+        from autoprint.scenario_import import recognize
+        t = scenario_template()
+        before = [(b.type, b.text) for b in t.blocks]
+        r = recognize(t)
+        self.assertEqual([(b.type, b.text) for b in t.blocks], before)
+        self.assertEqual(r.title, "Занятие 7 (сценарий)")
+        self.assertNotEqual(r.id, t.id)
+
+    def test_recognize_command(self):
+        t = scenario_template()
+        t.id = "SC"
+        win = make_window([t], port=18983)
+        win.lesson.open_page = lambda: None
+        try:
+            win.printer.set_focus("SC")
+            win.lesson.command({"cmd": "recognize"})
+            self.assertEqual(len(win.store.templates), 2)
+            new = win.store.templates[1]
+            self.assertEqual(new.title, "Занятие 7 (сценарий)")
+            self.assertEqual(win.printer.focus_id, new.id)
+            self.assertEqual(win.store.templates[0].blocks[0].type, BLOCK_MARKDOWN)    # исходник не тронут
+        finally:
+            win._quitting = True
+            win.close()
+            pump()
+
+    def test_import_ipynb_recognizes(self):
+        from autoprint.importers import import_ipynb
+        nb = {"cells": [{"cell_type": k, "source": text, "metadata": {}, **({"outputs": [], "execution_count": None}
+                         if k == "code" else {})} for k, text in SCENARIO_CELLS],
+              "metadata": {"language_info": {"name": "python"}}, "nbformat": 4, "nbformat_minor": 5}
+        path = TMP / "Занятие 7.ipynb"
+        path.write_text(json.dumps(nb, ensure_ascii=False), encoding="utf-8")
+        t = import_ipynb(str(path))
+        self.assertEqual(sum(b.type == BLOCK_STAGE for b in t.blocks), 6)
+        self.assertEqual(t.title, "Занятие 7")
+
+
 # ================================================================ Task 7: правки урока со страницы
 
 class EditTest(unittest.TestCase):

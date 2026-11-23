@@ -97,7 +97,13 @@ def notebook(nb: dict, title: str) -> Template:
             cells.append((kind, _cell_text(c), meta))
         elif kind == "raw":
             cells.append(("markdown", "```\n" + _cell_text(c) + "\n```"))
-    return _build(title, cells, lang)
+    t = _build(title, cells, lang)
+    from . import scenario_import
+    if scenario_import.looks_like_scenario(t.blocks):      # сценарий урока (⏱ этапы, 🗣 реплики) — сразу урок
+        r = scenario_import.recognize(t)
+        r.title = title
+        return r
+    return t
 
 
 _FENCE = re.compile(r"^```[ \t]*([\w+#.-]*)[^\n]*\n(.*?)^```[ \t]*$", re.M | re.S)

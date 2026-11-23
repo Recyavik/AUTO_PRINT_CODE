@@ -502,6 +502,7 @@ class MainWindow(FramelessWindow):
         m.addAction(icons.icon("pencil"), "Переименовать", lambda: lib.editItem(it))
         m.addAction(icons.icon("copy"), "Дублировать", lambda: self._duplicate(t))
         self._export_menu(m.addMenu(icons.icon("export"), "Экспорт"), t)
+        m.addAction(icons.icon("layers"), "Распознать сценарий (⏱ этапы, 🗣 реплики)", lambda: self.recognize_lesson(t))
         m.addSeparator()
         m.addAction(icons.icon("trash"), "Удалить…", lambda: self._delete_template(t))
         m.exec(lib.viewport().mapToGlobal(pos))
@@ -543,6 +544,22 @@ class MainWindow(FramelessWindow):
         self.touch(t)
         self._fill_library(t.id)
         self.open_lesson(t.id)
+
+    def recognize_lesson(self, t: Template) -> bool:
+        """Тетрадка-сценарий (⏱ 00:00–00:03 · …, 🗣 Говоришь, ✅ Ожидаемый вывод) → новый урок с этапами и плашками
+        рядом с исходным (он не меняется) — и открыть его."""
+        from ..scenario_import import looks_like_scenario, recognize
+        if not looks_like_scenario(t.blocks):
+            self._notify("Не нашёл в уроке заголовков с ⏱ 00:00–00:05 — распознавать нечего.", tray=True)
+            return False
+        r = recognize(t)
+        self.store.templates.insert(self.store.templates.index(t) + 1, r)
+        self.touch(r)
+        self._fill_library(r.id)
+        stages = sum(1 for b in r.blocks if b.type == "stage")
+        self._notify(f"Готово: «{r.title}» — этапов {stages}. Исходный урок не изменён.", tray=True)
+        self.open_lesson(r.id, ask=False)
+        return True
 
     def _duplicate(self, t: Template) -> None:
         c = self.store.duplicate(t)
