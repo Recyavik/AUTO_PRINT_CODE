@@ -834,10 +834,11 @@ class EditorTest(unittest.TestCase):
         kids = TMP / "kids.ipynb"
         export_ipynb(t, str(kids), students=True)
         text = json.dumps(json.loads(kids.read_text(encoding="utf-8")), ensure_ascii=False)
-        for gone in ("Очень рад видеть", "Какие темы", "Чистого чёрного #000"):
+        for gone in ("Очень рад видеть", "Какие темы", "Чистого чёрного #000", "## Зачем нужна тёмная тема"):
             self.assertNotIn(gone, text)
-        for kept in ("Тёмная тема", ".darkTheme", "## Зачем нужна тёмная тема"):
-            self.assertIn(kept, text)
+        self.assertIn(".darkTheme", text)
+        cells = json.loads(kids.read_text(encoding="utf-8"))["cells"]
+        self.assertTrue(cells and all(c["cell_type"] == "code" for c in cells))    # 0.10: ученикам — только код
 
 
 class ImportTest(unittest.TestCase):

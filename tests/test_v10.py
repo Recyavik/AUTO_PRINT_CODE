@@ -452,5 +452,39 @@ class LessonCtlTest(unittest.TestCase):
         self.assertEqual(self.L.active_block, "c1")
 
 
+# ================================================================ Task 4: экспорт и .md
+
+class ExportTest(unittest.TestCase):
+    def test_students_code_only(self):
+        from autoprint.importers import export_ipynb
+        img = TMP / "pic.png"
+        from PySide6.QtGui import QColor, QImage
+        im = QImage(8, 8, QImage.Format.Format_RGB32)
+        im.fill(QColor("#123456"))
+        im.save(str(img))
+        t = Template("Урок", [stage("Этап", 5), note("скажи это"), Block(BLOCK_IMAGE, str(img), title="Слайд"),
+                              code("x = 1"), note("## Задание", role="task")])
+        out = TMP / "kids.ipynb"
+        export_ipynb(t, str(out), students=True)
+        nb = json.loads(out.read_text(encoding="utf-8"))
+        self.assertEqual([c["cell_type"] for c in nb["cells"]], ["code"])
+        self.assertEqual("".join(nb["cells"][0]["source"]), "x = 1")
+
+    def test_md_term_output_roundtrip(self):
+        from autoprint import lesson_md
+        term = "Функция\nименованный блок кода"
+        t = Template("Урок", [stage("Теория", 8), note(term, role="term"),
+                              code("print(2 + 2)"), note("4", role="output")])
+        text = lesson_md.to_md(t, "x_files")
+        self.assertIn("[!term]", text)
+        self.assertIn("[!output]", text)
+        back = lesson_md.parse(text, None, "Урок")
+        got = [(b.type, b.role if b.type == BLOCK_MARKDOWN else "", b.text) for b in back.blocks if b.type != BLOCK_STAGE]
+        self.assertEqual(got, [(BLOCK_MARKDOWN, "term", term), (BLOCK_CODE, "", "print(2 + 2)"),
+                               (BLOCK_MARKDOWN, "output", "4")])
+        self.assertEqual(lesson_md._role("Термин"), "term")
+        self.assertEqual(lesson_md._role("вывод"), "output")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

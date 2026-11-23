@@ -12,7 +12,6 @@ from pathlib import Path
 from .storage import BLOCK_CODE, BLOCK_IMAGE, BLOCK_MARKDOWN, BLOCK_STAGE, Block, Template
 
 # подсказки преподавателю — в тетрадку для учеников не попадают (суфлёр урока)
-TEACHER_ROLES = {"say", "tell", "ask", "do", "important", "show", "trap"}
 
 
 def _cell_text(cell: dict) -> str:
@@ -244,7 +243,7 @@ def parse_pasted(text: str, lang: str = "") -> tuple[Template, str]:
 def export_ipynb(t: Template, path: str, students: bool = False) -> None:
     """Образец → тетрадка: условие → markdown-ячейка, блок кода → code-ячейка. Этап урока — заголовком,
     картинка — ссылкой на файл (обратно в программу они возвращаются этапом и картинкой).
-    students=True — тетрадка для учеников: без подсказок преподавателю (говоришь, спроси, ловушки…)."""
+    students=True — тетрадка для учеников: только ячейки кода (заметки, этапы и картинки — для преподавателя)."""
     def src(text: str) -> list[str]:
         lines = text.split("\n")
         return [ln + "\n" for ln in lines[:-1]] + [lines[-1]]
@@ -252,6 +251,8 @@ def export_ipynb(t: Template, path: str, students: bool = False) -> None:
     cells = []
     lang = "python"
     for b in t.blocks:
+        if students and b.type != BLOCK_CODE:
+            continue
         if b.type == BLOCK_STAGE:
             head = f"## {b.title or 'Этап'}"
             if not students:
@@ -277,8 +278,6 @@ def export_ipynb(t: Template, path: str, students: bool = False) -> None:
                 cell["attachments"] = {name: {mime: base64.b64encode(local.read_bytes()).decode("ascii")}}
             cells.append(cell)
         elif b.type == BLOCK_MARKDOWN:
-            if students and b.role in TEACHER_ROLES:
-                continue
             cells.append({"cell_type": "markdown", "source": src(b.text),
                           "metadata": {"autoprintcode": {"role": b.role, "title": b.title}}})
         else:

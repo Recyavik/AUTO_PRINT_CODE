@@ -937,7 +937,7 @@ class IpynbTest(unittest.TestCase):
         from autoprint.samples_lesson import lesson_sample
         t = lesson_sample()
         out = TMP / "урок.ipynb"
-        export_ipynb(t, str(out), students=True)
+        export_ipynb(t, str(out))     # полный урок: картинки — вложениями (ученикам в 0.10 — только код)
         nb = json.loads(out.read_text(encoding="utf-8"))
         cells = [c for c in nb["cells"] if c.get("attachments")]
         self.assertEqual(len(cells), 3)
