@@ -8,12 +8,12 @@ import time
 from pathlib import Path
 
 from PySide6.QtCore import QByteArray, QEvent, QSize, Qt, QTimer
-from PySide6.QtGui import QCursor, QKeySequence, QShortcut
+from PySide6.QtGui import QCursor, QGuiApplication, QImage, QKeySequence, QShortcut
 from PySide6.QtWidgets import (QApplication, QFileDialog, QHBoxLayout, QInputDialog, QListWidgetItem, QMenu,
                                QPushButton,
                                QMessageBox, QStackedWidget, QSystemTrayIcon, QToolButton, QVBoxLayout, QWidget)
 
-from .. import APP_NAME, __version__, system, taskbar, updater
+from .. import APP_NAME, __version__, system, taskbar, updater, winapi
 from .. import steps as S
 from ..comments import comment_spans, comment_text, strip_comments
 from ..guard import InputGuard
@@ -1268,6 +1268,39 @@ class MainWindow(FramelessWindow):
         return {"kind": mode, "tid": v.template.id, "bid": block.id, "base": base, "text": text, "omap": omap,
                 "src_len": src_len, "builder": builder, "key": None, "profile": profile}
 
+    # ---- картинка: в буфер обмена и Ctrl+V туда, где курсор
+    def _paste_image_block(self, block: Block, from_button: bool = False) -> bool:
+        """Картинку не набрать с клавиатуры — её вставляют: копия в буфер обмена и Ctrl+V в окно с курсором.
+        В markdown-ячейке Jupyter (и в VS Code) из неё получается вложение ячейки."""
+        from ..storage import media_path
+        local = media_path(block.text)
+        img = QImage(str(local)) if local is not None else QImage()
+        if img.isNull():
+            self._notify("Нет файла картинки — вставьте её в блок заново («Файл…» или «Из буфера»).", warn=True,
+                         tray=not self.isActiveWindow())
+            return False
+        QGuiApplication.clipboard().setImage(img)
+        if from_button:
+            if self.settings.minimize_on_button_start:
+                self.showMinimized()
+            delay = max(1, int(self.settings.button_countdown_s)) * 1000
+        else:
+            delay = max(50, int(self.settings.hotkey_start_delay_ms))
+        self._paste_until = time.time() + 4.0
+        QTimer.singleShot(delay, self._paste_when_ready)
+        return True
+
+    def _paste_when_ready(self) -> None:
+        if winapi.modifiers_down() and time.time() < self._paste_until:
+            QTimer.singleShot(30, self._paste_when_ready)     # ждём, пока отпустят Ctrl/Alt хоткея
+            return
+        if winapi.is_own_window(winapi.foreground_window()):
+            self._notify("Картинка в буфере обмена. Поставьте курсор в ячейку Jupyter (markdown, режим правки) "
+                         "и нажмите Ctrl+V — или хоткей ещё раз, уже из того окна.", warn=True)
+            return
+        winapi.tap(0x56, winapi.VK_CONTROL)                    # Ctrl+V
+        self._notify("Картинка вставлена (Ctrl+V). В Jupyter — в markdown-ячейку в режиме правки.", quiet=True)
+
     def _same_job(self, job: dict | None) -> bool:
         return bool(job and self.job and all(job.get(k) == self.job.get(k)
                                              for k in ("kind", "tid", "bid", "base", "text", "key", "profile")))
@@ -1329,6 +1362,9 @@ class MainWindow(FramelessWindow):
             self.engine.pause()
             return
         a = self._armed()
+        if a and a[1].type == BLOCK_IMAGE and st != PAUSED:
+            self._paste_image_block(a[1], from_button)   # картинка «печатается» вставкой: в Jupyter — вложением
+            return
         if a and self._mode_for(a[1]) == MODE_STEPS and self._step_pointer(a[1].id) is None \
                 and st != PAUSED:
             self._notify(f"Все шаги блока напечатаны. {self.settings.hotkey_restart or 'Кнопка ⟲'} — сначала, "

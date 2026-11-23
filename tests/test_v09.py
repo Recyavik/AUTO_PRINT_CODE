@@ -990,5 +990,64 @@ class IpynbTest(unittest.TestCase):
         self.assertEqual(sum(b.type == "image" for b in back.blocks), 3)
 
 
+
+# ================================================================ Task 11: картинка в Jupyter вставкой
+
+class PasteTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        from autoprint.storage import BLOCK_IMAGE, Block, Template
+        cls.win, cls.store = make_main(PORT + 6)
+        img = make_image("для-вставки.png", 64, 48)
+        cls.t = cls.store.insert(Template(title="Картинки", blocks=[Block(BLOCK_IMAGE, str(img), title="Слайд"),
+                                                                     Block(BLOCK_IMAGE, "нет/такого.png")]))
+        cls.win.open_template(cls.t.id)
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.win.efir.shutdown()
+        drop_main(cls.win)
+
+    def setUp(self):
+        from autoprint import winapi
+        self.taps = []
+        self._saved = (winapi.tap, winapi.foreground_window, winapi.is_own_window, winapi.modifiers_down)
+        winapi.tap = lambda vk, *mods: self.taps.append((vk, mods))
+        winapi.foreground_window = lambda: 4242
+        winapi.is_own_window = lambda hwnd: False
+        winapi.modifiers_down = lambda: False
+        QApplication.clipboard().clear()
+
+    def tearDown(self):
+        from autoprint import winapi
+        winapi.tap, winapi.foreground_window, winapi.is_own_window, winapi.modifiers_down = self._saved
+
+    def arm(self, i: int):
+        self.win.current_view().arm(self.t.blocks[i].id)
+
+    def test_paste_sends_ctrl_v(self):
+        from autoprint import winapi
+        self.arm(0)
+        self.win.cmd_toggle()
+        pump(600)
+        self.assertFalse(QApplication.clipboard().image().isNull())
+        self.assertEqual(self.taps, [(0x56, (winapi.VK_CONTROL,))])
+
+    def test_no_paste_into_self(self):
+        from autoprint import winapi
+        winapi.is_own_window = lambda hwnd: True
+        self.arm(0)
+        self.win.cmd_toggle()
+        pump(600)
+        self.assertEqual(self.taps, [])
+
+    def test_missing_image_no_paste(self):
+        self.arm(1)
+        self.win.cmd_toggle()
+        pump(600)
+        self.assertEqual(self.taps, [])
+        self.assertTrue(QApplication.clipboard().image().isNull())
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
