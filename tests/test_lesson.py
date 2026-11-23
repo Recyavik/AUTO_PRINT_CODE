@@ -112,5 +112,61 @@ class ModelTest(unittest.TestCase):
         self.assertEqual(md("say", "x").display_title(), "Говоришь")
 
 
+class HtmlTest(unittest.TestCase):
+    def test_escape(self):
+        h = scenario.md_html('<script>alert("x")</script> & \'кавычки\'')
+        self.assertNotIn("<script>", h)
+        self.assertIn("&lt;script&gt;", h)
+        self.assertIn("&amp;", h)
+
+    def test_js_link_not_link(self):
+        h = scenario.md_html("[жми](javascript:alert(1)) и [x](data:text/html,1)")
+        self.assertNotIn('href="javascript', h)
+        self.assertNotIn('href="data', h)
+        self.assertIn("жми", h)
+
+    def test_links(self):
+        h = scenario.md_html("Сайт https://www.youtube.com/watch?v=1&t=2 и [Kahoot](https://kahoot.it).")
+        self.assertIn('<a href="https://www.youtube.com/watch?v=1&amp;t=2" target="_blank" rel="noopener">', h)
+        self.assertIn('<a href="https://kahoot.it" target="_blank" rel="noopener">Kahoot</a>', h)
+        self.assertNotIn('kahoot.it).', h.replace('kahoot.it">', ''))   # точка после ссылки — не часть адреса
+
+    def test_lists_bold_code(self):
+        h = scenario.md_html("## Правила\n- **не** чёрный\n- `#121212`\n\n1. первое\n2. второе\n\nАбзац *курсив*")
+        self.assertIn("<h3>Правила</h3>", h)
+        self.assertIn("<ul><li><b>не</b> чёрный</li><li><code>#121212</code></li></ul>", h)
+        self.assertIn("<ol><li>первое</li><li>второе</li></ol>", h)
+        self.assertIn("<p>Абзац <i>курсив</i></p>", h)
+
+    def test_fenced_code_in_markdown(self):
+        h = scenario.md_html("Пример:\n```\na < b\n```")
+        self.assertIn("<pre>a &lt; b</pre>", h)
+
+    def test_ask_parts(self):
+        self.assertEqual(scenario.ask_parts("Какие темы?\nЗачем?\n→ пишут в чат\n-> ждём: глаза"),
+                         ("Какие темы?\nЗачем?", ["пишут в чат", "ждём: глаза"]))
+        self.assertEqual(scenario.ask_parts("Вопрос без ответа"), ("Вопрос без ответа", []))
+
+    def test_code_html_classes(self):
+        h = scenario.code_html("def f():\n    return '<b>'", "python")
+        self.assertIn('class="t-k"', h)
+        self.assertIn("&lt;b&gt;", h)
+        self.assertNotIn("<b>", h)
+        self.assertEqual(scenario.code_html("x", "no-such-lang"), "x")
+
+    def test_lang_info(self):
+        self.assertEqual(scenario.lang_info("python"), ("Python", "python.svg"))
+        self.assertEqual(scenario.lang_info("js"), ("JavaScript", "javascript.svg"))
+        self.assertEqual(scenario.lang_info("css"), ("CSS", "css.svg"))
+        self.assertEqual(scenario.lang_info("brainfuck"), ("brainfuck", ""))
+        page = Path(scenario.__file__).parent / "efir" / "page" / "lang"
+        for lang in ("python", "javascript", "css", "html", "kotlin", "java", "sql", "bash"):
+            label, icon = scenario.lang_info(lang)
+            if icon:
+                svg = (page / icon).read_text(encoding="utf-8")
+                self.assertIn("<svg", svg)
+                self.assertNotIn("<script", svg.lower())
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
