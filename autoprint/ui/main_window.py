@@ -18,8 +18,8 @@ from ..guard import InputGuard
 from ..hotkeys import HotkeyManager, parse_hotkey
 from ..importers import export_ipynb
 from ..sounds import KeySoundPlayer
-from ..storage import (BLOCK_CODE, PROFILE_SHORT, PROFILES, Block, Settings, Template, TemplateStore,
-                       steps_sample_template)
+from ..storage import (BLOCK_CODE, BLOCK_IMAGE, BLOCK_STAGE, PROFILE_SHORT, PROFILES, Block, Settings, Template,
+                       TemplateStore, steps_sample_template)
 from ..textprint import PRINT_COMMENT, PRINT_MARKDOWN, PRINT_MODES, PRINT_PLAIN, printable, selection_text
 from ..typer import COUNTDOWN, FINISHED, IDLE, LINE_WAIT, PAUSED, RUNNING, TypingEngine, build_units
 from .. import highlighter
@@ -258,6 +258,8 @@ class MainWindow(FramelessWindow):
         m.addAction(icons.icon("import"), "Импорт…\tCtrl+O", lambda: self.import_files())
         m.addAction(icons.icon("sparkles"), "Разобрать код нейросетью…", lambda: self.import_files("ai"))
         m.addAction(icons.icon("export"), "Экспорт занятия в .ipynb…", lambda: self.export_current("ipynb"))
+        m.addAction(icons.icon("export"), "Тетрадка для учеников (.ipynb, без подсказок)…",
+                    lambda: self.export_current("students"))
         m.addAction(icons.icon("export"), "Экспорт занятия в .json…", lambda: self.export_current("json"))
         m.addSeparator()
         m.addAction(icons.icon("file-code"), "Добавить пример занятия (все возможности)", self._add_tour_sample)
@@ -562,6 +564,7 @@ class MainWindow(FramelessWindow):
         m.addAction(icons.icon("copy"), "Дублировать", lambda: self._duplicate(t))
         m.addSeparator()
         m.addAction(icons.icon("export"), "Экспорт в .ipynb…", lambda: self.export_template(t, "ipynb"))
+        m.addAction(icons.icon("export"), "Тетрадка для учеников…", lambda: self.export_template(t, "students"))
         m.addAction(icons.icon("export"), "Экспорт в .json…", lambda: self.export_template(t, "json"))
         m.addSeparator()
         m.addAction(icons.icon("trash"), "Удалить…", lambda: self._delete_template(t))
@@ -727,14 +730,16 @@ class MainWindow(FramelessWindow):
             self.export_template(v.template, fmt)
 
     def export_template(self, t: Template, fmt: str) -> None:
+        """fmt: ipynb | students (тетрадка для учеников — без подсказок преподавателю) | json."""
         safe = "".join(c for c in t.title if c not in '\\/:*?"<>|').strip() or "template"
-        flt = "Jupyter (*.ipynb)" if fmt == "ipynb" else "JSON (*.json)"
-        path, _ = QFileDialog.getSaveFileName(self, "Экспорт", f"{safe}.{fmt}", flt)
+        flt = "Jupyter (*.ipynb)" if fmt in ("ipynb", "students") else "JSON (*.json)"
+        name = f"{safe} — для учеников.ipynb" if fmt == "students" else f"{safe}.{fmt}"
+        path, _ = QFileDialog.getSaveFileName(self, "Экспорт", name, flt)
         if not path:
             return
         try:
-            if fmt == "ipynb":
-                export_ipynb(t, path)
+            if fmt in ("ipynb", "students"):
+                export_ipynb(t, path, students=fmt == "students")
             else:
                 TemplateStore.export_template(t, path)
             self._notify(f"Сохранено: {path}")
@@ -1115,6 +1120,8 @@ class MainWindow(FramelessWindow):
         if not a:
             return None
         v, block = a
+        if block.type in (BLOCK_STAGE, BLOCK_IMAGE):
+            return None          # этап урока и картинка — для суфлёра, их не печатают
         mode = self._mode_for(block)
         profile = block.profile if block.profile in PROFILES else ""   # окно, выбранное у блока
         if mode == MODE_STEPS:

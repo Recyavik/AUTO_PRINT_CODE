@@ -13,7 +13,7 @@ from PySide6.QtCore import QObject, QTimer
 from PySide6.QtGui import QGuiApplication
 
 from .. import steps as S
-from ..storage import BLOCK_CODE, Block
+from ..storage import BLOCK_CODE, BLOCK_MARKDOWN, Block
 from ..typer import COUNTDOWN, LINE_WAIT, PAUSED, RUNNING
 from .prompter_window import MODE_AUTO, MODE_SELF, PromptCard, PrompterWindow
 
@@ -189,7 +189,7 @@ class PrompterController(QObject):
                 return [t for t in out if t]
             if b.type == BLOCK_CODE:
                 out = []
-            else:
+            elif b.type == BLOCK_MARKDOWN:       # этап урока и картинка — не «что сказать»
                 out.append(plain(b.text))
         return []
 

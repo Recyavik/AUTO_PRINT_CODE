@@ -4,8 +4,10 @@ from __future__ import annotations
 from PySide6.QtCore import QEvent, QObject, Qt, QTimer, Signal
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QMessageBox, QScrollArea, QVBoxLayout, QWidget
 
-from ..storage import BLOCK_CODE, BLOCK_MARKDOWN, Block, Template
-from .blocks import BlockWidget, CodeBlockWidget, MarkdownBlockWidget, make_block_widget
+from .. import scenario
+from ..storage import BLOCK_CODE, BLOCK_IMAGE, BLOCK_MARKDOWN, BLOCK_STAGE, Block, Template
+from .blocks import (BlockWidget, CodeBlockWidget, MarkdownBlockWidget, StageBlockWidget,
+                     make_block_widget)
 from .widgets import button
 
 
@@ -94,20 +96,23 @@ class TemplateView(QWidget):
 
         add_row = QHBoxLayout()
         add_row.setSpacing(10)
-        b_md = button("Текст (Markdown)", "plus")
-        b_md.setObjectName("addBtn")
-        b_md.clicked.connect(lambda: self.add_block(BLOCK_MARKDOWN))
-        b_code = button("Блок кода", "plus")
-        b_code.setObjectName("addBtn")
-        b_code.clicked.connect(lambda: self.add_block(BLOCK_CODE))
-        add_row.addWidget(b_md, 1)
-        add_row.addWidget(b_code, 1)
+        for text, kind, tip in (("Текст", BLOCK_MARKDOWN, "Текст в Markdown: условие, пояснение, подсказки суфлёра "
+                                                          "(говоришь, спроси, делаешь…) — тип выбирается в шапке блока"),
+                                ("Код", BLOCK_CODE, "Блок кода — его печатает программа"),
+                                ("Этап урока", BLOCK_STAGE, "Этап урока для суфлёра: название и минуты"),
+                                ("Картинка", BLOCK_IMAGE, "Слайд или скриншот для суфлёра")):
+            b = button(text, "plus")
+            b.setObjectName("addBtn")
+            b.setToolTip(tip)
+            b.clicked.connect(lambda _=False, k=kind: self.add_block(k))
+            add_row.addWidget(b, 1)
         self.page_lay.addLayout(add_row)
         self.page_lay.addStretch(1)
         self.scroll.setWidget(self.page)
         lay.addWidget(self.scroll, 1)
 
         self.changed.connect(self.refresh_header)
+        self.changed.connect(self.refresh_stage_times)
         self._rebuild()
 
     # ------------------------------------------------------------ заголовок
@@ -115,8 +120,19 @@ class TemplateView(QWidget):
         t = self.template
         self.title_lbl.setText(t.title)
         n, code = len(t.blocks), len(t.code_blocks())
-        self.lede.setText(f"{n} {_plural(n, 'блок', 'блока', 'блоков')} · "
+        k = sum(b.type == BLOCK_STAGE for b in t.blocks)
+        stages = f"{k} {_plural(k, 'этап', 'этапа', 'этапов')} · {scenario.total_minutes(t)} мин · " if k else ""
+        self.lede.setText(f"{stages}{n} {_plural(n, 'блок', 'блока', 'блоков')} · "
                           f"кода — {code} · двойной щелчок по названию слева — переименовать")
+
+    def refresh_stage_times(self) -> None:
+        """Время этапов от начала урока («0:10–0:20») — в шапках блоков-этапов."""
+        _intro, stages = scenario.stages(self.template)
+        by_id = {s.block.id: s for s in stages}
+        for w in self.widgets:
+            if isinstance(w, StageBlockWidget) and w.block.id in by_id:
+                s = by_id[w.block.id]
+                w.set_time(s.start_min, s.end_min)
 
     # ------------------------------------------------------------ блоки
     def _rebuild(self, keep_scroll: bool = False) -> None:
@@ -141,6 +157,7 @@ class TemplateView(QWidget):
             self.arm(codes[0].block.id)   # активный блок — код или текст; нет никакого — первый блок кода
         self._apply_armed()
         self.refresh_header()
+        self.refresh_stage_times()
         if keep_scroll:
             QTimer.singleShot(0, self, lambda: self.scroll.verticalScrollBar().setValue(scroll_pos))
         else:
@@ -182,7 +199,7 @@ class TemplateView(QWidget):
 
     def _insert_block(self, idx: int, kind: str) -> None:
         bl = self.template.blocks
-        b = Block(kind, "")
+        b = Block(kind, "", minutes=5 if kind == BLOCK_STAGE else 0)
         if kind == BLOCK_CODE:
             last = next((x for x in reversed(bl[:idx]) if x.type == BLOCK_CODE), None) \
                 or next((x for x in bl if x.type == BLOCK_CODE), None)
@@ -196,6 +213,8 @@ class TemplateView(QWidget):
             wdg.editor.setFocus()
         elif isinstance(wdg, MarkdownBlockWidget):
             wdg.set_editing(True)
+        elif isinstance(wdg, StageBlockWidget):
+            wdg.title.setFocus()
         QTimer.singleShot(50, wdg, lambda: self.scroll.ensureWidgetVisible(wdg))
         self.changed.emit()
 
@@ -222,6 +241,13 @@ class TemplateView(QWidget):
                 last = next((x for x in self.template.blocks if x.type == BLOCK_CODE), None)
                 b.lang = last.lang if last else b.lang
             b.type = BLOCK_CODE
+        elif key in (BLOCK_STAGE, BLOCK_IMAGE):
+            if key == BLOCK_STAGE and b.type != BLOCK_STAGE:
+                first = b.text.strip().split("\n")[0].lstrip("# ").strip()
+                b.title = b.title or first[:120]      # первая строка текста — название этапа
+                b.text = ""
+                b.minutes = b.minutes or 5
+            b.type = key
         else:
             b.type = BLOCK_MARKDOWN
             b.role = key

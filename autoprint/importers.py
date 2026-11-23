@@ -9,7 +9,10 @@ import json
 import re
 from pathlib import Path
 
-from .storage import BLOCK_CODE, BLOCK_MARKDOWN, Block, Template
+from .storage import BLOCK_CODE, BLOCK_IMAGE, BLOCK_MARKDOWN, BLOCK_STAGE, Block, Template
+
+# подсказки преподавателю — в тетрадку для учеников не попадают (суфлёр урока)
+TEACHER_ROLES = {"say", "tell", "ask", "do", "important", "show", "trap"}
 
 
 def _cell_text(cell: dict) -> str:
@@ -29,6 +32,18 @@ def _build(title: str, cells: list[tuple], lang: str) -> Template:
             steps = [max(1, int(s)) for s in m.get("steps") or []]
         except (TypeError, ValueError):
             steps = []
+        if kind == "markdown" and m.get("type") == BLOCK_STAGE:      # этап урока из нашей же тетрадки
+            try:
+                minutes = max(0, int(m.get("minutes") or 0))
+            except (TypeError, ValueError):
+                minutes = 0
+            blocks.append(Block(BLOCK_STAGE, str(m.get("note") or ""), title=str(m.get("title") or ""),
+                                minutes=minutes, stage_kind=str(m.get("stage_kind") or ""),
+                                part=str(m.get("part") or "")))
+            continue
+        if kind == "markdown" and m.get("type") == BLOCK_IMAGE and m.get("src"):
+            blocks.append(Block(BLOCK_IMAGE, str(m["src"]), title=str(m.get("title") or "")))
+            continue
         blocks.append(Block(BLOCK_MARKDOWN if kind == "markdown" else BLOCK_CODE, text, lang=lang,
                             role=m.get("role", "text"), title=m.get("title", ""), steps=steps))
     return Template(title=title, blocks=blocks)
@@ -192,8 +207,10 @@ def parse_pasted(text: str, lang: str = "") -> tuple[Template, str]:
     return t, f"код ({code_lang})"
 
 
-def export_ipynb(t: Template, path: str) -> None:
-    """Образец → тетрадка: условие → markdown-ячейка, блок кода → code-ячейка."""
+def export_ipynb(t: Template, path: str, students: bool = False) -> None:
+    """Образец → тетрадка: условие → markdown-ячейка, блок кода → code-ячейка. Этап урока — заголовком,
+    картинка — ссылкой на файл (обратно в программу они возвращаются этапом и картинкой).
+    students=True — тетрадка для учеников: без подсказок преподавателю (говоришь, спроси, ловушки…)."""
     def src(text: str) -> list[str]:
         lines = text.split("\n")
         return [ln + "\n" for ln in lines[:-1]] + [lines[-1]]
@@ -201,7 +218,25 @@ def export_ipynb(t: Template, path: str) -> None:
     cells = []
     lang = "python"
     for b in t.blocks:
-        if b.type == BLOCK_MARKDOWN:
+        if b.type == BLOCK_STAGE:
+            head = f"## {b.title or 'Этап'}"
+            if not students:
+                info = " · ".join(x for x in (f"{b.minutes} мин" if b.minutes else "", b.text.strip()) if x)
+                head += f"\n*{info}*" if info else ""
+            meta = {} if students else {"autoprintcode": {"type": BLOCK_STAGE, "title": b.title, "minutes": b.minutes,
+                                                          "stage_kind": b.stage_kind, "part": b.part,
+                                                          "note": b.text}}
+            cells.append({"cell_type": "markdown", "source": src(head), "metadata": meta})
+        elif b.type == BLOCK_IMAGE:
+            if not b.text.strip():
+                continue
+            uri = b.text if b.text.lower().startswith(("http://", "https://")) else Path(b.text).as_uri() \
+                if Path(b.text).is_absolute() else b.text
+            cells.append({"cell_type": "markdown", "source": src(f"![{b.title}]({uri})"),
+                          "metadata": {"autoprintcode": {"type": BLOCK_IMAGE, "src": b.text, "title": b.title}}})
+        elif b.type == BLOCK_MARKDOWN:
+            if students and b.role in TEACHER_ROLES:
+                continue
             cells.append({"cell_type": "markdown", "source": src(b.text),
                           "metadata": {"autoprintcode": {"role": b.role, "title": b.title}}})
         else:

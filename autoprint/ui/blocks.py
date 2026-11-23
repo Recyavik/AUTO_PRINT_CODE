@@ -1,14 +1,20 @@
 """Виджеты блоков образца: текстовый (Markdown) и код."""
 from __future__ import annotations
 
+import hashlib
+import shutil
+from pathlib import Path
+
 from PySide6.QtCore import QRectF, QSize, Qt, QTimer, Signal
-from PySide6.QtGui import QIcon, QPainter, QTextCursor
-from PySide6.QtWidgets import (QApplication, QComboBox, QFrame, QHBoxLayout, QLabel, QLineEdit, QMenu,
-                               QPlainTextEdit, QSizePolicy, QStackedWidget, QStyle, QStyleOptionComboBox,
+from PySide6.QtGui import QGuiApplication, QIcon, QImage, QPainter, QPixmap, QTextCursor
+from PySide6.QtWidgets import (QApplication, QComboBox, QFileDialog, QFrame, QHBoxLayout, QLabel, QLineEdit, QMenu,
+                               QPlainTextEdit, QSizePolicy, QSpinBox, QStackedWidget, QStyle, QStyleOptionComboBox,
                                QStylePainter, QTextBrowser, QToolButton, QVBoxLayout)
 
+from .. import storage
 from ..highlighter import LANGUAGES
-from ..storage import BLOCK_CODE, BLOCK_MARKDOWN, PROFILE_SHORT, PROFILES, ROLES, Block
+from ..storage import BLOCK_CODE, BLOCK_IMAGE, BLOCK_MARKDOWN, BLOCK_STAGE, PROFILE_SHORT, PROFILES, ROLES, \
+    STAGE_KINDS, Block
 from ..textprint import PRINT_MODES, find_selection
 from . import icons
 from .code_editor import CodeEditor, code_font
@@ -22,7 +28,49 @@ ROLE_ICONS = {"text": "text", "task": "file-text", "explain": "info", "hint": "s
               "say": "mic", "tell": "message", "ask": "help", "do": "pointer", "important": "alert",
               "show": "monitor", "trap": "bug", "extra": "zap"}
 TYPE_ITEMS = [(name, key, ROLE_ICONS.get(key, "text"), f"role_{key}") for key, (_i, name, _c) in ROLES.items()] \
-    + [("Код", CODE_TYPE, "code", "accent")]
+    + [("Код", CODE_TYPE, "code", "accent"), ("Этап урока", BLOCK_STAGE, "flag", "role_stage"),
+       ("Картинка", BLOCK_IMAGE, "image", "role_image")]
+INSERT_KINDS = [("Текст (Markdown)", BLOCK_MARKDOWN, "text"), ("Блок кода", BLOCK_CODE, "code"),
+                ("Этап урока", BLOCK_STAGE, "flag"), ("Картинка", BLOCK_IMAGE, "image")]
+IMAGE_FILTER = "Картинки (*.png *.jpg *.jpeg *.gif *.webp *.bmp *.svg)"
+
+
+def type_key(block: Block) -> str:
+    """Ключ типа блока для списка типов: роль текста, «code», «stage» или «image»."""
+    if block.type == BLOCK_CODE:
+        return CODE_TYPE
+    if block.type in (BLOCK_STAGE, BLOCK_IMAGE):
+        return block.type
+    return block.role
+
+
+def media_dir() -> Path:
+    return storage.DATA_DIR / "media"
+
+
+def store_image_file(src: str) -> Path:
+    """Копия картинки в data/media (имя — по содержимому: тот же файл — та же копия)."""
+    data = Path(src).read_bytes()
+    ext = Path(src).suffix.lower() or ".png"
+    out = media_dir() / f"img-{hashlib.sha1(data).hexdigest()[:16]}{ext}"
+    if not out.exists():
+        out.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(src, out)
+    return out
+
+
+def store_qimage(img: QImage) -> Path | None:
+    """Картинка из буфера обмена → PNG в data/media."""
+    if img.isNull():
+        return None
+    tmp = media_dir() / "clipboard.tmp.png"
+    tmp.parent.mkdir(parents=True, exist_ok=True)
+    if not img.save(str(tmp), "PNG"):
+        return None
+    try:
+        return store_image_file(str(tmp))
+    finally:
+        tmp.unlink(missing_ok=True)
 
 
 class IconCombo(QComboBox):
@@ -76,10 +124,11 @@ class BlockWidget(QFrame):
         self.kind = IconCombo()
         self.kind.setObjectName("kindCombo")
         self.kind.setIconSize(QSize(15, 15))
-        self.kind.setToolTip("Тип блока: текст, условие, пояснение, подсказка или код")
+        self.kind.setToolTip("Тип блока: текст и подсказки суфлёра (говоришь, спроси, делаешь…), код, этап урока "
+                             "или картинка")
         for text, key, _ic, _tok in TYPE_ITEMS:
             self.kind.addItem(text, key)
-        self.kind.setCurrentIndex(self.kind.findData(CODE_TYPE if block.type == BLOCK_CODE else block.role))
+        self.kind.setCurrentIndex(max(0, self.kind.findData(type_key(block))))
         self.kind.activated.connect(self._on_kind)
         self.header.addWidget(self.kind)
 
@@ -130,10 +179,9 @@ class BlockWidget(QFrame):
         for name, tip, after in (("insert-above", "Вставить блок выше", 0), ("insert-below", "Вставить блок ниже", 1)):
             b = IconButton(name, tip, 15, box=26)
             m = QMenu(b)
-            self._insert_actions += [
-                (m.addAction("Текст (Markdown)", lambda a=after: self.insert_requested.emit(self, a, BLOCK_MARKDOWN)),
-                 "text"),
-                (m.addAction("Блок кода", lambda a=after: self.insert_requested.emit(self, a, BLOCK_CODE)), "code")]
+            for text, kind, ic in INSERT_KINDS:
+                act = m.addAction(text, lambda a=after, k=kind: self.insert_requested.emit(self, a, k))
+                self._insert_actions.append((act, ic))
             b.setMenu(m)
             b.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
             self.header.addWidget(b)
@@ -167,6 +215,8 @@ class BlockWidget(QFrame):
     def role_token(self) -> str:
         if self.block.type == BLOCK_CODE:
             return "accent"
+        if self.block.type in (BLOCK_STAGE, BLOCK_IMAGE):
+            return f"role_{self.block.type}"
         # роль приходит и из импорта (.ipynb, .json) — незнакомая рисуется как обычный текст
         return f"role_{self.block.role}" if self.block.role in ROLES else "role_text"
 
@@ -206,9 +256,13 @@ class BlockWidget(QFrame):
 
     def _on_kind(self, _i: int) -> None:
         key = self.kind.currentData()
-        current = CODE_TYPE if self.block.type == BLOCK_CODE else self.block.role
-        if key != current:
+        if key != type_key(self.block):
             self.type_requested.emit(self, key)
+
+    def _not_printable(self) -> None:
+        """Этап и картинка — для суфлёра: печатать их нечего, «активный» и выбор окна не нужны."""
+        self.arm_btn.hide()
+        self.window.hide()
 
     def _on_window(self, _i: int) -> None:
         self.block.profile = self.window.currentData()
@@ -664,7 +718,162 @@ def typing_slice(text: str, sel: list[int], whole_lines: bool) -> tuple[str, int
     return text[a:b], a
 
 
+# ------------------------------------------------------------------ Этап урока
+
+class StageBlockWidget(BlockWidget):
+    """Этап урока (суфлёр): название — в шапке, ниже минуты, вид (обычный / перерыв / зарядка), раздел и пометка.
+    Время этапа от начала урока («0:10–0:20») ставит лента занятия."""
+
+    def __init__(self, block: Block) -> None:
+        super().__init__(block)
+        self._not_printable()
+        self.title.setMinimumWidth(300)
+        self.title.setMaximumWidth(560)
+        self.title.setStyleSheet("font-weight: 700; font-size: 14px;")
+        self.title.setToolTip("Название этапа — так он называется в плане урока и на суфлёре")
+        self.time_lbl = QLabel()
+        self.time_lbl.setObjectName("stageTime")
+        self.left_slot.addWidget(self.time_lbl)
+        row = QHBoxLayout()
+        row.setSpacing(8)
+        self.minutes = QSpinBox()
+        self.minutes.setRange(0, 600)
+        self.minutes.setSuffix(" мин")
+        self.minutes.setValue(block.minutes)
+        self.minutes.setToolTip("Сколько минут идёт этап. 0 — мгновенный (отметка в плане)")
+        self.minutes.valueChanged.connect(self._on_minutes)
+        row.addWidget(self.minutes)
+        self.kind_combo = QComboBox()
+        for key, name in STAGE_KINDS.items():
+            self.kind_combo.addItem(name, key)
+        self.kind_combo.setCurrentIndex(max(0, self.kind_combo.findData(block.stage_kind)))
+        self.kind_combo.setToolTip("Перерыв и зарядка на суфлёре включаются на экране «Эфира» одной кнопкой")
+        self.kind_combo.currentIndexChanged.connect(self._on_kind_combo)
+        row.addWidget(self.kind_combo)
+        self.part_edit = QLineEdit(block.part)
+        self.part_edit.setPlaceholderText("Раздел (например, «Тёмная тема»)")
+        self.part_edit.textChanged.connect(self._on_part)
+        row.addWidget(self.part_edit, 1)
+        self.note_edit = QLineEdit(block.text)
+        self.note_edit.setPlaceholderText("Пометка: теория, практика на платформе…")
+        self.note_edit.textChanged.connect(self._on_note)
+        row.addWidget(self.note_edit, 2)
+        self.body.addLayout(row)
+        self.body.setContentsMargins(6, 0, 0, 0)
+
+    def set_time(self, start: int, end: int) -> None:
+        def hm(m: int) -> str:
+            return f"{m // 60}:{m % 60:02d}"
+        self.time_lbl.setText(f"{hm(start)}–{hm(end)}")
+
+    def _on_minutes(self, v: int) -> None:
+        self.block.minutes = int(v)
+        self.changed.emit()
+
+    def _on_kind_combo(self, _i: int) -> None:
+        self.block.stage_kind = self.kind_combo.currentData() or ""
+        self.changed.emit()
+
+    def _on_part(self, text: str) -> None:
+        self.block.part = text
+        self.changed.emit()
+
+    def _on_note(self, text: str) -> None:
+        self.block.text = text
+        self.changed.emit()
+
+
+# ------------------------------------------------------------------ Картинка
+
+class ImageBlockWidget(BlockWidget):
+    """Картинка (слайд, скриншот) для суфлёра: файл копируется в data/media; подпись — в шапке."""
+
+    PREVIEW_W, PREVIEW_H = 420, 236
+
+    def __init__(self, block: Block) -> None:
+        super().__init__(block)
+        self._not_printable()
+        self.title.setToolTip("Подпись к картинке")
+        self.preview = QLabel()
+        self.preview.setObjectName("imagePreview")
+        self.preview.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        self.preview.setMinimumHeight(60)
+        row = QHBoxLayout()
+        row.setSpacing(8)
+        pick = QToolButton()
+        pick.setObjectName("textBtn")
+        pick.setText("Файл…")
+        pick.setToolTip("Выбрать картинку на компьютере (копия сохранится в данных программы)")
+        pick.clicked.connect(self._pick)
+        paste = QToolButton()
+        paste.setObjectName("textBtn")
+        paste.setText("Из буфера")
+        paste.setToolTip("Вставить картинку из буфера обмена (скриншот, слайд)")
+        paste.clicked.connect(self.paste_clipboard)
+        self.path_lbl = QLabel()
+        self.path_lbl.setObjectName("dim")
+        row.addWidget(pick)
+        row.addWidget(paste)
+        row.addWidget(self.path_lbl, 1)
+        self.body.addWidget(self.preview)
+        self.body.addLayout(row)
+        self.body.setContentsMargins(6, 0, 0, 0)
+        self._show()
+
+    def _show(self) -> None:
+        src = (self.block.text or "").strip()
+        if src.lower().startswith(("http://", "https://")):
+            self.preview.setPixmap(QPixmap())
+            self.preview.setText("Картинка из интернета — видна на странице суфлёра")
+            self.path_lbl.setText(src)
+            return
+        pm = QPixmap(src) if src and Path(src).is_file() else QPixmap()
+        if pm.isNull():
+            self.preview.setPixmap(QPixmap())
+            self.preview.setText("Картинки нет — «Файл…» или «Из буфера»" if not src else f"Нет файла: {src}")
+            self.path_lbl.setText("")
+            return
+        self.preview.setText("")
+        self.preview.setPixmap(pm.scaled(self.PREVIEW_W, self.PREVIEW_H, Qt.AspectRatioMode.KeepAspectRatio,
+                                         Qt.TransformationMode.SmoothTransformation))
+        self.path_lbl.setText(Path(src).name)
+
+    def set_image_file(self, path: str) -> None:
+        try:
+            self.block.text = str(store_image_file(path))
+        except OSError as e:
+            self.path_lbl.setText(f"Не скопировать: {e}")
+            return
+        self._show()
+        self.changed.emit()
+
+    def _pick(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(self, "Картинка", "", IMAGE_FILTER)
+        if path:
+            self.set_image_file(path)
+
+    def paste_clipboard(self) -> None:
+        img = QGuiApplication.clipboard().image()
+        out = store_qimage(img)
+        if out is None:
+            self.path_lbl.setText("В буфере обмена нет картинки")
+            return
+        self.block.text = str(out)
+        self._show()
+        self.changed.emit()
+
+    def keyPressEvent(self, e) -> None:
+        if e.key() == Qt.Key.Key_V and e.modifiers() & Qt.KeyboardModifier.ControlModifier:
+            self.paste_clipboard()
+            return
+        super().keyPressEvent(e)
+
+
 def make_block_widget(block: Block, code_number: int) -> BlockWidget:
     if block.type == BLOCK_CODE:
         return CodeBlockWidget(block, code_number)
+    if block.type == BLOCK_STAGE:
+        return StageBlockWidget(block)
+    if block.type == BLOCK_IMAGE:
+        return ImageBlockWidget(block)
     return MarkdownBlockWidget(block)

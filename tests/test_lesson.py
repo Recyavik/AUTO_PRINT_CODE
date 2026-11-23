@@ -667,11 +667,125 @@ class ControllerTest(unittest.TestCase):
         self.assertEqual((self.t.preset, self.win.settings.lesson_preset), (w.id, w.id))
         self.assertEqual(self.snap()["lesson"]["preset"], w.id)
 
+    def test_armed_stage_not_printed(self):
+        st = next(b for b in self.t.blocks if b.type == BLOCK_STAGE and b.text)    # с пометкой «теория»
+        keep = self.t.active_block
+        self.t.active_block = st.id
+        try:
+            self.assertIsNone(self.win._job_for_armed())
+        finally:
+            self.t.active_block = keep
+
     def test_unknown_cmd_ignored(self):
         self.win.lesson.command({"cmd": "rm -rf"})
         self.win.lesson.command({"nothing": 1})
         self.win.lesson.command({"cmd": "arm", "block": "нет-такого"})
         self.win.lesson.command({"cmd": "start_at", "index": "x"})
+
+
+def make_png(path: Path) -> Path:
+    from PySide6.QtGui import QColor, QImage
+    img = QImage(64, 36, QImage.Format.Format_RGB32)
+    img.fill(QColor("#336699"))
+    img.save(str(path))
+    return path
+
+
+class EditorTest(unittest.TestCase):
+    def view(self, t: Template):
+        from autoprint.ui.template_view import TemplateView
+        v = TemplateView(t)
+        v.resize(900, 700)
+        pump(20)
+        return v
+
+    def test_view_builds_all_types(self):
+        from autoprint.ui.blocks import CodeBlockWidget, ImageBlockWidget, MarkdownBlockWidget, StageBlockWidget
+        t = dark_theme_lesson()
+        t.blocks.append(Block(BLOCK_IMAGE, str(make_png(TMP / "e1.png")), title="Слайд"))
+        v = self.view(t)
+        kinds = [type(w).__name__ for w in v.widgets]
+        self.assertEqual(kinds.count("StageBlockWidget"), 3)
+        self.assertEqual(kinds.count("ImageBlockWidget"), 1)
+        stages_w = [w for w in v.widgets if isinstance(w, StageBlockWidget)]
+        self.assertIn("0:02–0:10", stages_w[1].time_lbl.text())
+        self.assertFalse(stages_w[0].arm_btn.isVisibleTo(stages_w[0]))
+        self.assertTrue(any(isinstance(w, CodeBlockWidget) for w in v.widgets))
+        self.assertTrue(any(isinstance(w, MarkdownBlockWidget) for w in v.widgets))
+        self.assertIn("этап", v.lede.text())
+
+    def test_stage_minutes_edit(self):
+        from autoprint.ui.blocks import StageBlockWidget
+        t = dark_theme_lesson()
+        v = self.view(t)
+        changed = []
+        v.changed.connect(lambda: changed.append(1))
+        first, second = [w for w in v.widgets if isinstance(w, StageBlockWidget)][:2]
+        first.minutes.setValue(12)
+        self.assertEqual(first.block.minutes, 12)
+        self.assertTrue(changed)
+        self.assertIn("0:12–0:20", second.time_lbl.text())
+        first.kind_combo.setCurrentIndex(first.kind_combo.findData("break"))
+        self.assertEqual(first.block.stage_kind, "break")
+        first.part_edit.setText("Летучка 2")
+        first.note_edit.setText("без экрана")
+        self.assertEqual((first.block.part, first.block.text), ("Летучка 2", "без экрана"))
+
+    def test_image_from_file(self):
+        from autoprint.storage import DATA_DIR
+        from autoprint.ui.blocks import ImageBlockWidget
+        t = Template(title="К", blocks=[Block(BLOCK_IMAGE)])
+        v = self.view(t)
+        w = next(x for x in v.widgets if isinstance(x, ImageBlockWidget))
+        src = make_png(TMP / "e2.png")
+        w.set_image_file(str(src))
+        self.assertTrue(Path(t.blocks[0].text).is_file())
+        self.assertEqual(Path(t.blocks[0].text).parent, DATA_DIR / "media")
+        self.assertFalse(w.preview.pixmap().isNull())
+        w.set_image_file(str(src))                          # тот же файл — та же копия, без дублей
+        self.assertEqual(len(list((DATA_DIR / "media").glob("*.png"))), len({p.read_bytes() for p in (DATA_DIR / "media").glob("*.png")}))
+
+    def test_change_type_to_stage(self):
+        from autoprint.ui.blocks import StageBlockWidget
+        t = Template(title="К", blocks=[md("text", "Вступление"), Block(BLOCK_CODE, "x = 1")])
+        v = self.view(t)
+        v._change_type(v.widgets[0], "stage")
+        self.assertEqual(t.blocks[0].type, BLOCK_STAGE)
+        self.assertIsInstance(v.widgets[0], StageBlockWidget)
+        v._insert_block(2, BLOCK_IMAGE)
+        v._insert_block(3, BLOCK_STAGE)
+        self.assertEqual([b.type for b in t.blocks], [BLOCK_STAGE, BLOCK_CODE, BLOCK_IMAGE, BLOCK_STAGE])
+        self.assertEqual(t.blocks[3].minutes, 5)
+
+    def test_export_students_and_roundtrip(self):
+        from autoprint.importers import export_ipynb, import_ipynb
+        t = dark_theme_lesson()
+        t.blocks.append(Block(BLOCK_IMAGE, str(make_png(TMP / "e3.png")), title="Слайд"))
+        full = TMP / "full.ipynb"
+        export_ipynb(t, str(full))
+        back = import_ipynb(str(full))
+        self.assertEqual([(b.type, b.title, b.minutes, b.stage_kind) for b in back.blocks if b.type == BLOCK_STAGE],
+                         [(BLOCK_STAGE, "Вступление", 2, ""), (BLOCK_STAGE, "Зачем нужна тёмная тема", 8, ""),
+                          (BLOCK_STAGE, "Перерыв", 10, "break")])
+        self.assertEqual([b.role for b in back.blocks if b.type == BLOCK_MARKDOWN], ["task", "say", "ask", "important"])
+        self.assertEqual(back.blocks[-1].type, BLOCK_IMAGE)
+        kids = TMP / "kids.ipynb"
+        export_ipynb(t, str(kids), students=True)
+        text = json.dumps(json.loads(kids.read_text(encoding="utf-8")), ensure_ascii=False)
+        for gone in ("Очень рад видеть", "Какие темы", "Чистого чёрного #000"):
+            self.assertNotIn(gone, text)
+        for kept in ("Тёмная тема", ".darkTheme", "## Зачем нужна тёмная тема"):
+            self.assertIn(kept, text)
+
+    def test_prompter_intro_skips_stage_and_image(self):
+        from types import SimpleNamespace
+        from autoprint.ui.prompter_control import PrompterController
+        t = dark_theme_lesson()
+        t.blocks.insert(6, Block(BLOCK_IMAGE, "C:/x/slide.png", title="Слайд"))
+        code = t.code_blocks()[0]
+        said = PrompterController._intro(SimpleNamespace(template=t), code)
+        self.assertTrue(any("Какие темы" in s for s in said))
+        self.assertFalse(any("slide.png" in s or "теория" == s for s in said))
 
 
 if __name__ == "__main__":
