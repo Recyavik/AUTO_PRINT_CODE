@@ -257,3 +257,57 @@ _LANGS = {
 def lang_info(lang: str) -> tuple[str, str]:
     key = (lang or "").strip().lower()
     return _LANGS.get(key, (lang or "", ""))
+
+
+# ---------------------------------------------------------------- состояние страницы суфлёра
+
+def _block_state(b: Block, media_url) -> dict | None:
+    from pathlib import Path
+    from .storage import BLOCK_CODE, BLOCK_IMAGE
+    if b.type == BLOCK_CODE:
+        if not b.text.strip():
+            return None
+        label, icon = lang_info(b.lang)
+        return {"id": b.id, "role": "code", "lang": b.lang, "label": label, "icon": icon, "title": b.title,
+                "html": code_html(b.text, b.lang)}
+    if b.type == BLOCK_IMAGE:
+        src = (b.text or "").strip()
+        url, missing = "", True
+        if re.match(r"https?://", src, re.I):
+            url, missing = src, False
+        elif src and not re.match(r"[a-z][a-z0-9+.-]*:(?![\\/])", src, re.I) and Path(src).is_file():
+            url, missing = media_url(src), False
+        return {"id": b.id, "role": "image", "url": url, "missing": missing, "caption": b.title,
+                "name": Path(src).name if src and not url.startswith("http") else ""}
+    if not b.text.strip():
+        return None
+    role = b.role if b.role else "text"
+    if role == "ask":
+        question, answers = ask_parts(b.text)
+        return {"id": b.id, "role": role, "html": md_html(question), "answers": [_inline(a) for a in answers]}
+    return {"id": b.id, "role": role, "html": md_html(b.text)}
+
+
+def lesson_state(t: Template | None, *, live_anchor_ms: int | None, armed: str, media_url, presets,
+                 preset: str, dark: bool, efir_mode: str, tab: str, hotkey: str) -> dict:
+    """Всё, что нужно странице суфлёра: урок по этапам (HTML блоков уже готов и безопасен), идёт ли урок
+    (якорь времени — мс; минуты этапов страница отсчитывает сама), какой блок печатается следующим.
+    Простые поля (названия, подписи) — обычным текстом: страница вставляет их как текст, не как HTML."""
+    base = {"live": {"anchor": live_anchor_ms} if live_anchor_ms else None, "armed": armed, "dark": dark,
+            "efir": {"mode": efir_mode, "tab": tab}, "hotkey": hotkey}
+    if t is None:
+        return {"lesson": None, **base}
+    intro, st = stages(t)
+
+    def blocks(items):
+        return [x for x in (_block_state(b, media_url) for b in items) if x]
+
+    lesson = {
+        "id": t.id, "title": t.title, "total": total_minutes(t), "start": t.start, "has_stages": bool(st),
+        "intro": blocks(intro),
+        "stages": [{"i": s.index, "id": s.block.id, "title": s.block.title or "Этап", "minutes": s.end_min - s.start_min,
+                    "kind": s.block.stage_kind, "part": s.block.part, "note": s.block.text.strip(),
+                    "start": s.start_min, "end": s.end_min, "blocks": blocks(s.blocks)} for s in st],
+        "presets": [{"id": pid, "title": title} for pid, title in presets], "preset": preset,
+    }
+    return {"lesson": lesson, **base}
