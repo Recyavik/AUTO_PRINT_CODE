@@ -915,7 +915,8 @@ class MainWindow(FramelessWindow):
         if LESSON_SAMPLE_ID not in seen:
             # 0.9: пример урока для суфлёра — этапы, подсказки, код, картинки. Обновившимся — сразу открыть
             t = lesson_sample()
-            self.store.templates.insert(0, t)
+            # в новой базе первой остаётся экскурсия по программе, у обновившихся пример урока — наверх
+            self.store.templates.insert(1 if self.store.created_fresh else 0, t)
             if not self.store.created_fresh and not tour_id:
                 tour_id = t.id
             seen.append(LESSON_SAMPLE_ID)
