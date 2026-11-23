@@ -131,8 +131,10 @@ class _Handler(BaseHTTPRequestHandler):
                 if f.is_file():
                     return self._send(200, f.read_bytes(), "image/svg+xml", {"Cache-Control": "max-age=86400"})
                 return self._send(404, b"not found", "text/plain")
-            if path == "/favicon.ico":
-                return self._send(204, b"", "image/x-icon")
+            if path in ("/favicon.svg", "/favicon.ico"):
+                # знак AutoPrintCode — значок вкладки эфира и окна суфлёра
+                return self._send(200, (PAGE_DIR / "favicon.svg").read_bytes(), "image/svg+xml",
+                                  {"Cache-Control": "max-age=86400"})
             m = re.fullmatch(r"/media/([0-9a-f]{16})/[^/]*", path)
             if m:
                 f = owner.media_path(m.group(1))

@@ -96,6 +96,12 @@ user32.VkKeyScanExW.argtypes = (wintypes.WCHAR, ctypes.c_void_p)
 user32.VkKeyScanExW.restype = ctypes.c_short
 user32.PostMessageW.argtypes = (wintypes.HWND, wintypes.UINT, wintypes.WPARAM, ctypes.c_void_p)
 user32.GetWindowTextLengthW.argtypes = (wintypes.HWND,)
+user32.IsWindowVisible.argtypes = (wintypes.HWND,)
+user32.IsIconic.argtypes = (wintypes.HWND,)
+user32.ShowWindow.argtypes = (wintypes.HWND, ctypes.c_int)
+user32.SetForegroundWindow.argtypes = (wintypes.HWND,)
+WNDENUMPROC = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+user32.EnumWindows.argtypes = (WNDENUMPROC, wintypes.LPARAM)
 user32.GetWindowTextW.argtypes = (wintypes.HWND, wintypes.LPWSTR, ctypes.c_int)
 
 
@@ -172,6 +178,30 @@ def window_pid(hwnd: int) -> int:
     pid = wintypes.DWORD()
     user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
     return pid.value
+
+
+def find_process_window(pid: int) -> int:
+    """Видимое окно верхнего уровня с заголовком, принадлежащее процессу pid (0 — нет такого)."""
+    if not pid:
+        return 0
+    found = []
+
+    def cb(hwnd, _lp):
+        if user32.IsWindowVisible(hwnd) and window_pid(hwnd) == pid and user32.GetWindowTextLengthW(hwnd) > 0:
+            found.append(hwnd)
+            return False
+        return True
+    user32.EnumWindows(WNDENUMPROC(cb), 0)
+    return int(found[0]) if found else 0
+
+
+def raise_window(hwnd: int) -> None:
+    """Показать окно поверх: развернуть из свёрнутого и сделать активным."""
+    if not hwnd:
+        return
+    if user32.IsIconic(hwnd):
+        user32.ShowWindow(hwnd, 9)            # SW_RESTORE
+    user32.SetForegroundWindow(hwnd)
 
 
 def is_own_window(hwnd: int) -> bool:

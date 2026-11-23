@@ -33,19 +33,71 @@ def _edge_path() -> str | None:
     return None
 
 
-def launch_app_window(url: str) -> bool:
-    """Суфлёр — отдельным окном Edge без вкладок и адресной строки: его не перепутать с вкладкой, которую
-    захватывают в демонстрации. Edge нет — False (тогда откроется браузер по умолчанию)."""
-    edge = _edge_path()
-    if not edge:
-        return False
-    try:
-        subprocess.Popen([edge, f"--app={url}", "--window-size=1000,1000"], close_fds=True,
-                         creationflags=getattr(subprocess, "DETACHED_PROCESS", 0))
+class PrompterWindow:
+    """Окно суфлёра — Edge без вкладок и адресной строки, со своим профилем (не смешивается с браузером
+    человека, его не перепутать с вкладкой, которую захватывают в демонстрации). Окно одно: повторное
+    «Суфлёр урока» поднимает его; программа завершается — окно закрывается вместе с ней."""
+
+    def __init__(self, profile_dir: Path, popen=subprocess.Popen, edge=_edge_path, find_window=None,
+                 raise_window=None) -> None:
+        from .. import winapi
+        self.profile_dir = Path(profile_dir)
+        self._popen, self._edge = popen, edge
+        self._find = find_window or winapi.find_process_window
+        self._raise = raise_window or winapi.raise_window
+        self.proc = None
+
+    def alive(self) -> bool:
+        return self.proc is not None and self.proc.poll() is None
+
+    def open(self, url: str) -> bool:
+        """True — окно показано (поднято или открыто); False — Edge нет, пусть откроется браузер по умолчанию."""
+        if self.alive():
+            hwnd = self._find(self.proc.pid)
+            if hwnd:
+                self._raise(hwnd)
+                return True
+        edge = self._edge()
+        if not edge:
+            return False
+        try:
+            proc = self._popen([edge, f"--app={url}", f"--user-data-dir={self.profile_dir}", "--no-first-run",
+                                "--no-default-browser-check", "--window-size=1000,1000"], close_fds=True,
+                               creationflags=getattr(subprocess, "DETACHED_PROCESS", 0))
+        except OSError as e:
+            log.warning("Edge не запустился: %s", e)
+            return False
+        if not self.alive():
+            self.proc = proc          # главный процесс профиля; повторный запуск лишь передаёт ему адрес
         return True
-    except OSError as e:
-        log.warning("Edge не запустился: %s", e)
-        return False
+
+    def close(self) -> None:
+        if self.alive():
+            try:
+                self.proc.terminate()
+            except OSError as e:
+                log.warning("Окно суфлёра не закрылось: %s", e)
+        self.proc = None
+
+
+_window: PrompterWindow | None = None
+
+
+def prompter_window() -> PrompterWindow:
+    global _window
+    if _window is None:
+        from ..storage import DATA_DIR
+        _window = PrompterWindow(DATA_DIR / "edge-suflor")
+    return _window
+
+
+def launch_app_window(url: str) -> bool:
+    return prompter_window().open(url)
+
+
+def close_app_window() -> None:
+    if _window is not None:
+        _window.close()
 
 
 class LessonController(QObject):
@@ -117,6 +169,9 @@ class LessonController(QObject):
             self.efir.launch_lesson(t, show=False)
 
     # ------------------------------------------------------------ страница
+    def shutdown(self) -> None:
+        close_app_window()
+
     def open_page(self) -> None:
         if not self.efir.ensure_server():
             return

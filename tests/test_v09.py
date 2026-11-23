@@ -233,5 +233,119 @@ class ThemeTest(unittest.TestCase):
         self.assertLess(took, 3.0, f"смена темы {took:.1f} с")
 
 
+
+# ================================================================ Task 3: трей, окно суфлёра, логотип
+
+class TrayTest(unittest.TestCase):
+    def test_default_is_tray(self):
+        from autoprint.storage import Settings
+        self.assertTrue(Settings().close_to_tray)
+
+    def test_migration_turns_tray_on_once(self):
+        from autoprint.storage import Settings
+        from autoprint.ui.main_window import apply_migrations
+        s = Settings()
+        s.close_to_tray = False                 # так было сохранено у тех, кто ставил 0.8 и раньше
+        self.assertTrue(apply_migrations(s))
+        self.assertTrue(s.close_to_tray)
+        self.assertIn("tray_v1", s.migrations)
+        s.close_to_tray = False                 # выключили сами после обновления — больше не трогаем
+        self.assertFalse(apply_migrations(s))
+        self.assertFalse(s.close_to_tray)
+
+
+class FakeProc:
+    def __init__(self, args):
+        self.args = args
+        self.code = None
+        self.terminated = False
+        self.pid = 4242
+
+    def poll(self):
+        return self.code
+
+    def terminate(self):
+        self.terminated = True
+        self.code = 1
+
+
+class PrompterWinTest(unittest.TestCase):
+    def make(self, edge="C:/Edge/msedge.exe", window=True):
+        from autoprint.ui.lesson_control import PrompterWindow
+        self.launched, self.raised = [], []
+
+        def popen(args, **_kw):
+            proc = FakeProc(args)
+            self.launched.append(proc)
+            return proc
+        return PrompterWindow(TMP / "edge-suflor", popen=popen, edge=lambda: edge,
+                              find_window=lambda pid: 77 if window else 0,
+                              raise_window=lambda hwnd: self.raised.append(hwnd))
+
+    def test_single_window(self):
+        w = self.make()
+        self.assertTrue(w.open("http://127.0.0.1:1/lesson"))
+        self.assertTrue(w.open("http://127.0.0.1:1/lesson"))
+        self.assertEqual(len(self.launched), 1)
+        self.assertEqual(self.raised, [77])
+
+    def test_relaunch_after_closed(self):
+        w = self.make()
+        w.open("http://x/lesson")
+        self.launched[0].code = 0                # окно закрыли руками — процесс вышел
+        w.open("http://x/lesson")
+        self.assertEqual(len(self.launched), 2)
+
+    def test_relaunch_when_no_window(self):
+        w = self.make(window=False)              # процесс жив (фоновый режим Edge), а окна нет
+        w.open("http://x/lesson")
+        w.open("http://x/lesson")
+        self.assertEqual(len(self.launched), 2)
+
+    def test_profile_dir_own(self):
+        w = self.make()
+        w.open("http://x/lesson")
+        args = self.launched[0].args
+        self.assertIn("--app=http://x/lesson", args)
+        self.assertIn(f"--user-data-dir={TMP / 'edge-suflor'}", args)
+
+    def test_closed_on_shutdown(self):
+        w = self.make()
+        w.open("http://x/lesson")
+        w.close()
+        self.assertTrue(self.launched[0].terminated)
+        w.close()                                # второй раз — без ошибок
+
+    def test_no_edge_falls_back(self):
+        w = self.make(edge=None)
+        self.assertFalse(w.open("http://x/lesson"))
+        self.assertEqual(self.launched, [])
+
+
+class FaviconTest(unittest.TestCase):
+    def test_favicon_and_logo(self):
+        import urllib.request
+        from autoprint.efir.server import BroadcastServer
+        srv = BroadcastServer(PORT + 2)
+        self.assertTrue(srv.start())
+        try:
+            with urllib.request.urlopen(srv.url + "favicon.svg", timeout=5) as r:
+                self.assertIn("svg", r.headers["Content-Type"])
+                body = r.read().decode("utf-8")
+            self.assertIn("#E9A72C", body.upper())
+            for page in ("lesson", ""):
+                with urllib.request.urlopen(srv.url + page, timeout=5) as r:
+                    self.assertIn('rel="icon" href="/favicon.svg"', r.read().decode("utf-8"))
+        finally:
+            srv.stop()
+
+    def test_title_logo_is_brand(self):
+        from autoprint.ui import logo
+        from autoprint.ui.main_window import title_logo_icon
+        a = title_logo_icon().pixmap(32, 32).toImage()
+        b = logo.make_icon(logo.APP).pixmap(32, 32).toImage()
+        self.assertEqual(a, b)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

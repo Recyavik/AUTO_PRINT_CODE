@@ -236,10 +236,11 @@ class Settings:
     theme: str = "system"              # system — как в Windows | dark | light
     ui_scale: int = 100                # размер интерфейса, % (100 / 125 / 150 / 175) — после перезапуска
 
-    close_to_tray: bool = False        # «закрыть» прячет окно в трей, выход — из меню
+    close_to_tray: bool = True         # «закрыть» прячет окно в трей, выход — из меню (суфлёр не теряет связь)
     pin_tray_icon: bool = False        # значок всегда виден у часов (не в «скрытых значках»)
     autostart: bool = False            # запускать вместе с Windows (сразу в трей)
     samples_seen: list = field(default_factory=list)   # какие примеры уже добавлялись в базу
+    migrations: list = field(default_factory=list)     # разовые переделки настроек при обновлении
 
     update_auto_check: bool = True     # проверять обновления на GitHub сам
     update_interval_h: int = 24        # как часто: 0 — при каждом запуске, 24 — раз в день, 168 — раз в неделю

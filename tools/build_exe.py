@@ -71,7 +71,8 @@ REQUIRED = [
     "_internal/PySide6/Qt6Svg.dll", "_internal/PySide6/plugins/multimedia/windowsmediaplugin.dll",
     "_internal/PySide6/plugins/platforms/qwindows.dll", "_internal/PySide6/plugins/imageformats/qsvg.dll",
     "_internal/PySide6/plugins/iconengines/qsvgicon.dll", "_internal/autoprint/sounds/SOURCES.md", "_internal/autoprint/efir/page/screen.html",
-    "_internal/autoprint/efir/page/lesson.html", "_internal/autoprint/efir/page/lang/python.svg",
+    "_internal/autoprint/efir/page/lesson.html", "_internal/autoprint/efir/page/favicon.svg",
+    "_internal/autoprint/efir/page/lang/python.svg",
     "_internal/PySide6/Qt6Pdf.dll",
 ]
 
@@ -191,7 +192,7 @@ def collect_datas() -> list[tuple[str, str]]:
         sys.exit("Нет звуков в autoprint/sounds — сборка без них была бы немой")
     datas.append((str(sounds / "SOURCES.md"), "autoprint/sounds"))
     page = ROOT / "autoprint" / "efir" / "page"          # страница экрана эфира (вкладка браузера)
-    datas += [(str(f), "autoprint/efir/page") for f in sorted(page.glob("*.html"))]
+    datas += [(str(f), "autoprint/efir/page") for f in sorted(page.glob("*.html")) + [page / "favicon.svg"]]
     lang = page / "lang"                                  # значки языков для кода на странице суфлёра урока
     datas += [(str(f), "autoprint/efir/page/lang") for f in sorted(lang.glob("*.svg"))]
     datas.append((str(lang / "LICENSE-devicon.txt"), "autoprint/efir/page/lang"))

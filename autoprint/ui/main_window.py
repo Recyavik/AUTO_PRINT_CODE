@@ -63,10 +63,27 @@ def app_name(exe: str) -> str:
     return APP_NAMES.get(base.lower(), base or "окно")
 
 
+def apply_migrations(s: Settings) -> bool:
+    """Разовые переделки настроек при обновлении. True — что-то поменялось (настройки нужно сохранить)."""
+    changed = False
+    if "tray_v1" not in s.migrations:
+        # 0.9: «закрыть» прячет в трей — иначе вместе с окном пропадали суфлёр и экран эфира
+        s.close_to_tray = True
+        s.migrations.append("tray_v1")
+        changed = True
+    return changed
+
+
+def title_logo_icon():
+    """Знак программы в шапке — фирменный, одинаковый в обеих темах (как на панели задач)."""
+    return logo.make_icon(logo.APP)
+
+
 class MainWindow(FramelessWindow):
     def __init__(self, settings: Settings, store: TemplateStore) -> None:
         super().__init__(APP_NAME)
         self.settings = settings
+        self._migrated = apply_migrations(settings)
         self.store = store
         self._zoom_filter = ZoomWheelFilter(self)
         QApplication.instance().installEventFilter(self._zoom_filter)
@@ -334,7 +351,7 @@ class MainWindow(FramelessWindow):
     def _on_theme(self) -> None:
         self._restore_views_after_theme()
         highlighter.set_palette("dark" if theme.dark else "light")
-        self.logo_btn.setIcon(logo.make_icon(logo.IDLE, theme.c("accent")))
+        self.logo_btn.setIcon(title_logo_icon())
         self.restyle_frame()
         self._update_efir_pill()
         self._on_state(self.engine.state)
@@ -895,6 +912,8 @@ class MainWindow(FramelessWindow):
     def _restore_session(self) -> None:
         s = self.settings
         tour_id = self._ensure_samples()
+        if self._migrated:
+            self._save_settings()
         if s.window_geometry:
             self.restoreGeometry(QByteArray.fromBase64(s.window_geometry.encode()))
         tid = tour_id or (s.current_tab if self.store.get(s.current_tab) else
@@ -1700,6 +1719,7 @@ class MainWindow(FramelessWindow):
         if self.settings_win:
             self.settings_win.close()
         self.prompter_ctl.shutdown()
+        self.lesson.shutdown()          # окно суфлёра закрывается вместе с программой
         self.efir.shutdown()
         self.engine.stop()
         self._save_timer.stop()

@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Суфлёр урока</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <style>
 :root {
   --bg:#1B1B1F; --panel:#232329; --card:#2A2A31; --card2:#32323A; --stroke:rgba(255,255,255,.075);
@@ -44,8 +45,7 @@ code { font-family: "Cascadia Mono", "Cascadia Code", Consolas, monospace; font-
 header { position: sticky; top: 0; z-index: 20; display: flex; flex-wrap: wrap; align-items: center; gap: 10px 18px;
   padding: 12px 24px; background: var(--panel); border-bottom: 1px solid var(--stroke); }
 .brand { display: flex; align-items: center; gap: 12px; flex: 1 1 300px; min-width: 0; }
-.logo { width: 36px; height: 36px; border-radius: 10px; background: var(--accent); display: flex; align-items: center;
-  justify-content: center; flex: none; }
+.logo { width: 36px; height: 36px; flex: none; } .logo img { display: block; width: 36px; height: 36px; border-radius: 10px; }
 .kicker { font-size: 12px; color: var(--dim); font-weight: 600; letter-spacing: .03em; }
 h1 { margin: 0; font-size: 20px; font-weight: 800; line-height: 1.25; overflow-wrap: anywhere; }
 .tools { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
@@ -198,7 +198,7 @@ figcaption { margin-top: 6px; font-size: 13px; color: var(--dim); }
 <body>
 <header>
   <div class="brand">
-    <div class="logo"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#1B1B1F" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M5 6h14M5 10h14M5 14h9M5 18h6"/></svg></div>
+    <div class="logo"><img src="/favicon.svg" alt="AutoPrintCode" width="36" height="36"></div>
     <div style="min-width:0"><div class="kicker" id="kicker">Суфлёр урока · AutoPrintCode</div><h1 id="title">Суфлёр урока</h1></div>
   </div>
   <div class="tools" id="tools"></div>
