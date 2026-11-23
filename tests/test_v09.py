@@ -232,14 +232,18 @@ class ThemeTest(unittest.TestCase):
         self.assertLess(abs(v2.scroll.verticalScrollBar().value() - pos), 80)
 
     def test_theme_switch_fast(self):
+        """Смена темы стоит не больше, чем открыть то же занятие заново (раньше — в 2–4 раза дольше и росла
+        с каждой открытой вкладкой). Сравниваем с открытием, а не с секундами: машины и нагрузка разные."""
         t = self.store.insert(big_template(120, "Ещё сто двадцать"))
+        t0 = time.time()
         self.win.open_template(t.id)
-        pump(50)
+        app.processEvents()
+        opened = time.time() - t0
         t0 = time.time()
         theme.set_mode("light" if theme.dark else "dark")
         app.processEvents()
         took = time.time() - t0
-        self.assertLess(took, 3.0, f"смена темы {took:.1f} с")
+        self.assertLess(took, opened * 1.6 + 0.5, f"смена темы {took:.1f} с, открытие {opened:.1f} с")
 
 
 
@@ -552,8 +556,10 @@ class EfirEditorTest(unittest.TestCase):
         pump(30)
 
     def tearDown(self):
+        import shiboken6
         self.ed._dirty = False
         self.ed.close()
+        shiboken6.delete(self.ed)
         self.ctl.server.stop()
 
     def test_total_on_top(self):
