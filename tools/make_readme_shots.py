@@ -110,10 +110,14 @@ def main() -> int:
         # «Печать ⚙»: меню печати
         e.eval("[...document.querySelectorAll('#tools button')].find((b) => b.textContent.trim() === 'Печать').click()")
         pump(300)
+        # clip снимка — в координатах документа, а getBoundingClientRect — окна: прибавить прокрутку
         r = e.eval("(() => { const m = document.querySelector('.menu'); const r = m.getBoundingClientRect();"
-                   " return {x: r.left, y: r.top, w: r.width, h: r.height}; })()")
+                   " return {x: r.left + scrollX, y: r.top + scrollY, w: r.width, h: r.height}; })()")
         shot("print-menu.png", {"x": max(0, r["x"] - 16), "y": max(0, r["y"] - 16),
                                 "width": r["w"] + 32, "height": r["h"] + 32})
+        if not r["h"]:
+            print("меню «Печать» не открылось")
+            return 1
         e.key("Escape", "Escape", 27)
         e.eval("document.body.click()")
 
