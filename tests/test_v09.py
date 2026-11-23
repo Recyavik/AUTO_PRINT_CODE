@@ -1045,6 +1045,33 @@ class MdTest(unittest.TestCase):
         self.assertEqual(shape(back), shape(t))
 
 
+class MdReviewTest(unittest.TestCase):
+    """Ревью №8 (переоценено в Important): импорт .md не теряет текст и не путает заметки с уроком."""
+
+    def test_github_alert_is_not_lesson(self):
+        from autoprint import importers, lesson_md
+        text = "# Заметки\n\n> [!IMPORTANT]\n> Не забыть\n\n## Раздел\n\nтекст\n"
+        self.assertFalse(lesson_md.looks_like_lesson(text))
+        path = TMP / "gh-notes.md"
+        path.write_text(text, encoding="utf-8")
+        t = importers.load_file(str(path))
+        self.assertFalse(any(b.type == "stage" for b in t.blocks))
+        self.assertIn("Не забыть", "\n".join(b.text for b in t.blocks))
+
+    def test_heading_without_stage_kept(self):
+        from autoprint import lesson_md
+        t = lesson_md.parse("## Этап · 5 мин\n\n> [!say]\n> привет\n\n# Домашнее задание\n\nСделать тёмную тему\n",
+                            None, "x")
+        text = "\n".join(b.text for b in t.blocks if b.type == "markdown")
+        self.assertIn("Домашнее задание", text)
+        self.assertIn("Сделать тёмную тему", text)
+
+    def test_heading_before_stage_is_part(self):
+        from autoprint import lesson_md
+        t = lesson_md.parse("# Часть 1\n\n## Этап · 5 мин\n", None, "x")
+        self.assertEqual([(b.type, b.part) for b in t.blocks], [("stage", "Часть 1")])
+
+
 class MdExampleTest(unittest.TestCase):
     def test_example_file_in_sync(self):
         """examples/Пример урока — тёмная тема.md — тот же урок, что встроенный пример (не отстаёт от кода)."""

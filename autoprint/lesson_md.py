@@ -142,9 +142,16 @@ def looks_like_lesson(text: str) -> bool:
     return False
 
 
+_GITHUB_ALERTS = {"NOTE", "TIP", "IMPORTANT", "WARNING", "CAUTION"}
+
+
 def _role(name: str) -> str:
-    """Роль по имени из [!…]; "" — не наша (обычный текст)."""
-    return _ROLE_BY_NAME.get(name.strip().lower(), "")
+    """Роль по имени из [!…]; "" — не наша (обычный текст). [!IMPORTANT] и др. заглавными — это выноски GitHub
+    в обычных заметках, а не подсказки урока (мы пишем роли строчными)."""
+    n = name.strip()
+    if n in _GITHUB_ALERTS:
+        return ""
+    return _ROLE_BY_NAME.get(n.lower(), "")
 
 
 def _resolve_image(src: str, base: Path | None) -> str:
@@ -180,6 +187,13 @@ def parse(text: str, base: Path | None, title: str) -> Template:
     blocks: list[Block] = []
     para: list[str] = []
     part = ""
+    heading: tuple[str, int] | None = None
+
+    def keep_heading() -> None:
+        nonlocal heading
+        if heading is not None:
+            blocks.insert(heading[1], Block(BLOCK_MARKDOWN, heading[0].strip(), role="text"))
+            heading = None
 
     def flush() -> None:
         txt = "\n".join(para).strip("\n")
@@ -236,6 +250,7 @@ def parse(text: str, base: Path | None, title: str) -> Template:
             if j < n and _NOTE.match(lines[j].strip()):
                 note = _NOTE.match(lines[j].strip()).group(2).strip()
                 j += 1
+            heading = None
             blocks.append(Block(BLOCK_STAGE, note, title=head.strip(), minutes=min(minutes, 1440),
                                 stage_kind=kind, part=part))
             i = j
@@ -243,7 +258,9 @@ def parse(text: str, base: Path | None, title: str) -> Template:
         pm = _PART.match(ln)
         if pm:
             flush()
+            keep_heading()
             part = pm.group(1).strip()
+            heading = (ln, len(blocks))           # станет разделом этапов; этапа после него нет — останется текстом
             i += 1
             continue
         im = _IMAGE.match(ln.strip())
@@ -258,6 +275,7 @@ def parse(text: str, base: Path | None, title: str) -> Template:
         if not ln.strip() and para and not any(x.strip() for x in para):
             para.clear()
     flush()
+    keep_heading()
     t.blocks = blocks
     code = next((b for b in blocks if b.type == BLOCK_CODE), None)
     if code is not None:
