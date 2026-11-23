@@ -6,10 +6,11 @@ import shutil
 from pathlib import Path
 
 from PySide6.QtCore import QPoint, QRectF, QSize, Qt, QTimer, Signal
-from PySide6.QtGui import QGuiApplication, QImage, QPainter, QPixmap, QTextCursor
-from PySide6.QtWidgets import (QApplication, QComboBox, QFileDialog, QFrame, QHBoxLayout, QLabel, QLineEdit, QMenu,
+from PySide6.QtGui import QColor, QGuiApplication, QImage, QPainter, QPixmap, QTextCursor
+from PySide6.QtWidgets import (QApplication, QComboBox, QDialog, QFileDialog, QFrame, QHBoxLayout, QLabel,
+                               QLineEdit, QMenu, QScrollArea,
                                QPlainTextEdit, QSizePolicy, QSpinBox, QStackedWidget, QTextBrowser, QToolButton,
-                               QVBoxLayout)
+                               QVBoxLayout, QWidget)
 
 from .. import storage
 from ..highlighter import LANGUAGES
@@ -242,11 +243,18 @@ class BlockWidget(QFrame):
     def paintEvent(self, e) -> None:
         super().paintEvent(e)
         if self.block.type != BLOCK_CODE:
-            # цветная черта роли слева, как отметка выбранного пункта в PasteTalk
             p = QPainter(self)
             p.setRenderHint(QPainter.RenderHint.Antialiasing)
             p.setPen(Qt.PenStyle.NoPen)
-            p.setBrush(theme.c(self.role_token()))
+            color = theme.c(self.role_token())
+            if self.block.type == BLOCK_MARKDOWN and self.block.role in ROLES and self.block.role != "text":
+                # лёгкий фон цвета роли — как плашки на суфлёре: что говорить, что делать — видно сразу
+                tint = QColor(color)
+                tint.setAlphaF(0.075 if theme.dark else 0.06)
+                p.setBrush(tint)
+                p.drawRoundedRect(QRectF(self.rect()).adjusted(1, 1, -1, -1), 7, 7)
+            # цветная черта роли слева, как отметка выбранного пункта в PasteTalk
+            p.setBrush(color)
             p.drawRoundedRect(QRectF(1, 12, 3, self.height() - 24), 1.5, 1.5)
             p.end()
 
@@ -826,19 +834,51 @@ class StageBlockWidget(BlockWidget):
 
 # ------------------------------------------------------------------ Картинка
 
-class ImageBlockWidget(BlockWidget):
-    """Картинка (слайд, скриншот) для суфлёра: файл копируется в data/media; подпись — в шапке."""
+class ImageViewer(QDialog):
+    """Картинка в натуральную величину (щелчок по превью в редакторе). Большая — с прокруткой."""
 
-    PREVIEW_W, PREVIEW_H = 420, 236
+    def __init__(self, pm: QPixmap, title: str, parent=None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle(title or "Картинка")
+        self._pm = pm
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        area = QScrollArea()
+        area.setWidgetResizable(False)
+        area.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        lbl = QLabel()
+        lbl.setPixmap(pm)
+        lbl.resize(pm.size())
+        area.setWidget(lbl)
+        lay.addWidget(area)
+        scr = QGuiApplication.primaryScreen()
+        avail = scr.availableGeometry().size() if scr else QSize(1600, 1000)
+        self.resize(min(pm.width() + 24, int(avail.width() * 0.92)), min(pm.height() + 24, int(avail.height() * 0.9)))
+
+    def image_size(self) -> QSize:
+        return self._pm.size()
+
+
+class ImageBlockWidget(BlockWidget):
+    """Картинка (слайд, скриншот) для суфлёра: файл копируется в data/media; подпись — в шапке.
+    В редакторе — во всю ширину блока (высота до 520 px, крупнее натуральной не растягиваем);
+    щелчок — в натуральную величину."""
+
+    MAX_H = 520
 
     def __init__(self, block: Block) -> None:
         super().__init__(block)
         self._not_printable()
         self.title.setToolTip("Подпись к картинке")
+        self._pm = QPixmap()
         self.preview = QLabel()
         self.preview.setObjectName("imagePreview")
         self.preview.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         self.preview.setMinimumHeight(60)
+        self.preview.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
+        self.preview.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.preview.setToolTip("Щёлкните — картинка в натуральную величину")
+        self.preview.mousePressEvent = lambda _e: self.open_viewer() if not self._pm.isNull() else None
         row = QHBoxLayout()
         row.setSpacing(8)
         pick = QToolButton()
@@ -863,6 +903,7 @@ class ImageBlockWidget(BlockWidget):
 
     def _show(self) -> None:
         src = (self.block.text or "").strip()
+        self._pm = QPixmap()
         if src.lower().startswith(("http://", "https://")):
             self.preview.setPixmap(QPixmap())
             self.preview.setText("Картинка из интернета — видна на странице суфлёра")
@@ -873,12 +914,40 @@ class ImageBlockWidget(BlockWidget):
         if pm.isNull():
             self.preview.setPixmap(QPixmap())
             self.preview.setText("Картинки нет — «Файл…» или «Из буфера»" if not src else f"Нет файла: {src}")
+            self.preview.setFixedHeight(60)
             self.path_lbl.setText("")
             return
+        self._pm = pm
         self.preview.setText("")
-        self.preview.setPixmap(pm.scaled(self.PREVIEW_W, self.PREVIEW_H, Qt.AspectRatioMode.KeepAspectRatio,
-                                         Qt.TransformationMode.SmoothTransformation))
-        self.path_lbl.setText(Path(src).name)
+        self.path_lbl.setText(f"{Path(src).name} · {pm.width()}×{pm.height()}")
+        self._fit_preview()
+
+    def preview_size(self) -> QSize:
+        return self.preview.pixmap().size() if not self.preview.pixmap().isNull() else QSize()
+
+    def _fit_preview(self) -> None:
+        if self._pm.isNull():
+            return
+        avail = max(120, self.width() - 40)
+        w = min(self._pm.width(), avail)
+        h = round(self._pm.height() * w / self._pm.width())
+        if h > self.MAX_H:
+            h = self.MAX_H
+            w = round(self._pm.width() * h / self._pm.height())
+        if self.preview.pixmap().isNull() or self.preview.pixmap().size() != QSize(w, h):
+            self.preview.setPixmap(self._pm.scaled(w, h, Qt.AspectRatioMode.KeepAspectRatio,
+                                                   Qt.TransformationMode.SmoothTransformation))
+        self.preview.setFixedHeight(h)
+
+    def resizeEvent(self, e) -> None:
+        super().resizeEvent(e)
+        self._fit_preview()
+
+    def open_viewer(self) -> "ImageViewer":
+        dlg = ImageViewer(self._pm, self.block.title, QWidget.window(self))   # self.window — кнопка «куда печатать»
+        dlg.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        dlg.show()
+        return dlg
 
     def set_image_file(self, path: str) -> None:
         try:

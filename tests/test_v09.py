@@ -722,5 +722,86 @@ class PageTest(unittest.TestCase):
         self.assertIn('el("div", "lbl")', css)
 
 
+
+# ================================================================ Task 8: картинка во всю ширину, цвет ролей
+
+def make_image(name: str, w: int, h: int) -> Path:
+    from PySide6.QtGui import QColor, QImage
+    img = QImage(w, h, QImage.Format.Format_RGB32)
+    img.fill(QColor("#3a6ea5"))
+    out = TMP / name
+    img.save(str(out), "PNG")
+    return out
+
+
+def hosted(widget: QWidget, width: int = 900) -> QWidget:
+    host = QWidget()
+    lay = QVBoxLayout(host)
+    lay.setContentsMargins(0, 0, 0, 0)
+    lay.addWidget(widget)
+    host.resize(width, 1200)
+    host.show()
+    pump(60)
+    return host
+
+
+class EditorBlocksTest(unittest.TestCase):
+    def image_widget(self, w: int, h: int):
+        from autoprint.storage import BLOCK_IMAGE, Block
+        from autoprint.ui.blocks import ImageBlockWidget
+        f = make_image(f"img-{w}x{h}.png", w, h)
+        wd = ImageBlockWidget(Block(BLOCK_IMAGE, str(f), title="Стандартный диалог"))
+        return wd, hosted(wd)
+
+    def test_image_fits_width(self):
+        wd, host = self.image_widget(3840, 2160)
+        self.assertGreaterEqual(wd.preview_size().width(), 800)
+        host.close()
+
+    def test_small_image_not_upscaled(self):
+        wd, host = self.image_widget(320, 200)
+        self.assertEqual((wd.preview_size().width(), wd.preview_size().height()), (320, 200))
+        host.close()
+
+    def test_image_height_capped(self):
+        wd, host = self.image_widget(1000, 4000)
+        self.assertLessEqual(wd.preview_size().height(), 520)
+        host.close()
+
+    def test_image_click_opens_viewer(self):
+        wd, host = self.image_widget(1600, 900)
+        dlg = wd.open_viewer()
+        try:
+            self.assertTrue(dlg.isVisible())
+            self.assertEqual(dlg.image_size().width(), 1600)
+        finally:
+            dlg.close()
+            host.close()
+
+    def test_no_role_chip_on_image_and_stage(self):
+        from autoprint.storage import BLOCK_IMAGE, BLOCK_MARKDOWN, BLOCK_STAGE, Block
+        from autoprint.ui.blocks import ImageBlockWidget, MarkdownBlockWidget, StageBlockWidget
+        for cls, b, chip in ((ImageBlockWidget, Block(BLOCK_IMAGE, ""), False),
+                             (StageBlockWidget, Block(BLOCK_STAGE, "", title="Этап", minutes=5), False),
+                             (MarkdownBlockWidget, Block(BLOCK_MARKDOWN, "текст", role="say"), True)):
+            w = cls(b)
+            host = hosted(w)
+            self.assertEqual(w.kind.isVisibleTo(w), chip, cls.__name__)
+            host.close()
+
+    def test_role_tint_painted(self):
+        from autoprint.storage import BLOCK_MARKDOWN, Block
+        from autoprint.ui.blocks import MarkdownBlockWidget
+        say = MarkdownBlockWidget(Block(BLOCK_MARKDOWN, "а", role="say"))
+        plain = MarkdownBlockWidget(Block(BLOCK_MARKDOWN, "а", role="text"))
+        h1, h2 = hosted(say, 600), hosted(plain, 600)
+        a = say.grab().toImage().pixelColor(say.width() - 30, say.height() - 6)
+        b = plain.grab().toImage().pixelColor(plain.width() - 30, plain.height() - 6)
+        self.assertNotEqual(a.name(), b.name())
+        self.assertGreater(a.blue(), b.blue())          # «Говоришь» — голубоватый фон
+        h1.close()
+        h2.close()
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
