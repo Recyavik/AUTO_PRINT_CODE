@@ -234,20 +234,42 @@ class TemplateView(QWidget):
         self.changed.emit()
 
     def _change_type(self, wdg: BlockWidget, key: str) -> None:
-        """Смена типа: роль Markdown-блока или превращение текст ⇄ код (текст, выделение и «активный» сохраняются)."""
+        """Смена типа: роль Markdown-блока или превращение текст ⇄ код (текст, выделение и «активный» сохраняются).
+        В этап или картинку: прежний текст или код уходит отдельным блоком ниже (у этапа — без первой строки,
+        она становится его названием)."""
         b = wdg.block
         if key == "code":
             if b.type != BLOCK_CODE:
                 last = next((x for x in self.template.blocks if x.type == BLOCK_CODE), None)
                 b.lang = last.lang if last else b.lang
             b.type = BLOCK_CODE
-        elif key in (BLOCK_STAGE, BLOCK_IMAGE):
-            if key == BLOCK_STAGE and b.type != BLOCK_STAGE:
-                first = b.text.strip().split("\n")[0].lstrip("# ").strip()
-                b.title = b.title or first[:120]      # первая строка текста — название этапа
-                b.text = ""
+        elif key in (BLOCK_STAGE, BLOCK_IMAGE) and b.type != key:
+            # у этапа и картинки своё содержимое: прежний текст или код не теряется — уходит блоком ниже
+            keep = None
+            if b.type == BLOCK_CODE:
+                if b.text.strip():
+                    keep = Block(BLOCK_CODE, b.text, lang=b.lang, steps=list(b.steps), title=b.title,
+                                 profile=b.profile)
+                b.title = ""
+            elif b.type == BLOCK_MARKDOWN and b.text.strip():
+                lines = b.text.strip().split("\n")
+                rest = b.text.strip()
+                if key == BLOCK_STAGE:
+                    b.title = b.title or lines[0].lstrip("# ").strip()[:120]   # первая строка — название этапа
+                    rest = "\n".join(lines[1:]).strip()
+                if rest:
+                    keep = Block(BLOCK_MARKDOWN, rest, role=b.role, print_as=b.print_as)
+            b.text, b.sel, b.steps = "", [], []
+            if key == BLOCK_STAGE:
                 b.minutes = b.minutes or 5
             b.type = key
+            if keep is not None:
+                bl = self.template.blocks
+                bl.insert(bl.index(b) + 1, keep)
+                if self.template.active_block == b.id:
+                    self.template.active_block = keep.id    # печатать можно только сам код, а не этап
+        elif key in (BLOCK_STAGE, BLOCK_IMAGE):
+            pass
         else:
             b.type = BLOCK_MARKDOWN
             b.role = key

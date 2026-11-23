@@ -541,7 +541,7 @@ QFrame#efirBottom {{ background: {t.css('panel')}; border-top: 1px solid {t.css(
 
     # ------------------------------------------------------------ сохранить
     def result(self) -> Webinar:
-        w = Webinar(id=self.w.id)
+        w = Webinar(id=self.w.id, lesson_id=self.w.lesson_id)   # эфир урока из суфлёра остаётся эфиром урока
         w.title = self.title.text().strip() or "Вебинар"
         w.start = self.start.time().toString("HH:mm")
         w.schedule = [r.activity() for r in self.rows]

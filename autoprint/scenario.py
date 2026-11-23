@@ -64,7 +64,7 @@ def webinar_for(t: Template, preset=None):
         w = Webinar()
     w.schedule = schedule
     w.id, w.lesson_id, w.title = "lesson-" + t.id, t.id, t.title
-    w.start = t.start or w.start
+    w.start = t.start        # пусто — «время по плану» = момент запуска урока (ставит launch_lesson), не старт пресета
     brk = next((a.min for a in schedule if a.kind == KIND_BREAK), 0)
     if brk:
         w.break_min = brk
@@ -271,12 +271,14 @@ def _block_state(b: Block, media_url) -> dict | None:
         return {"id": b.id, "role": "code", "lang": b.lang, "label": label, "icon": icon, "title": b.title,
                 "html": code_html(b.text, b.lang)}
     if b.type == BLOCK_IMAGE:
+        from .storage import media_path
         src = (b.text or "").strip()
         url, missing = "", True
+        local = media_path(src)
         if re.match(r"https?://", src, re.I):
             url, missing = src, False
-        elif src and not re.match(r"[a-z][a-z0-9+.-]*:(?![\\/])", src, re.I) and Path(src).is_file():
-            url, missing = media_url(src), False
+        elif local is not None:
+            url, missing = media_url(str(local)), False
         return {"id": b.id, "role": "image", "url": url, "missing": missing, "caption": b.title,
                 "name": Path(src).name if src and not url.startswith("http") else ""}
     if not b.text.strip():

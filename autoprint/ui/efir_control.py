@@ -234,6 +234,10 @@ class EfirController(QObject):
             anchor = anchor_for(t.start)
         else:
             anchor = datetime.now().replace(microsecond=0)
+        if not parse_hhmm(t.start or ""):
+            # плана нет: «время по плану» — когда урок начали (после «Сдвинуть на сейчас» — то же, что было)
+            old = self.store.get(w.id) if live and live.webinar_id == w.id else None
+            w.start = old.start if old is not None and parse_hhmm(old.start) else anchor.strftime("%H:%M")
         # служебные эфиры прошлых уроков больше не нужны
         self.store.webinars = [x for x in self.store.webinars if not x.lesson_id or x.id == w.id]
         self.store.put(w)
@@ -249,6 +253,25 @@ class EfirController(QObject):
     def live_lesson_id(self) -> str:
         w = self.live_webinar()
         return w.lesson_id if w else ""
+
+    def edit_live(self) -> None:
+        """«Изменить шаблон…» в таймере. Идёт урок из суфлёра — правится его оформление (шаблон-пресет):
+        расписание урока — его этапы, их правят в занятии, а служебный эфир урока руками не трогают."""
+        w = self.live_webinar()
+        if w is None:
+            return
+        if not w.lesson_id:
+            self.edit(w.id)
+            return
+        store = getattr(self.main, "store", None)
+        t = store.get(w.lesson_id) if store is not None else None
+        preset = self.lesson_preset(t) if t is not None else None
+        if preset is None:
+            self.message.emit("Оформление урока берётся из шаблона «Эфира» — создайте шаблон (фон, зарядки, "
+                              "перерыв) и выберите его на странице суфлёра", True)
+            self.show_window()
+            return
+        self.edit(preset.id)
 
     def refresh_live(self) -> None:
         """Шаблон идущего эфира поправили в редакторе — подхватить фон, зарядки, перерыв."""

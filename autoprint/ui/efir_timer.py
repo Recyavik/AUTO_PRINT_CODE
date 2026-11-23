@@ -636,7 +636,8 @@ QToolButton#pinBtn:checked {{ background: {t.css('accent_soft')}; }}
         m.addAction(icons.icon("restart"), f"Время по плану (старт в {w.start if w else '—'})", ctl.reset_to_plan)
         m.addSeparator()
         if w:
-            m.addAction(icons.icon("pencil"), "Изменить шаблон…", lambda: ctl.edit(w.id))
+            m.addAction(icons.icon("pencil"), "Изменить оформление урока…" if w.lesson_id else "Изменить шаблон…",
+                        ctl.edit_live)
         m.addAction(icons.icon("layers"), "Шаблоны вебинаров…", ctl.show_window)
         m.addSeparator()
         m.addAction(icons.icon("x"), "Завершить эфир…", self.close)

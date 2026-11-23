@@ -340,6 +340,7 @@ def _scenario_instruction(opt: Options) -> str:
 
 ОТВЕТ — ТОЛЬКО JSON, без пояснений до и после:
 {{"format": "{FORMAT}", "version": 2, "title": "название урока", "blocks": [ ... ]}}
+Если в материале указано время начала урока — добавь "start": "ЧЧ:ММ" рядом с "title", иначе не добавляй.
 Внутри строк JSON экранируй кавычки и переводы строк как положено (\\" и \\n).
 
 Пример ответа (по смыслу, не копируй):
@@ -564,6 +565,9 @@ def parse_lesson(text: str, title: str = "", material: str = "", style: str = ""
     name = str(data.get("title") or title or "Новое занятие").strip()[:120]
     t = Template(title=name, blocks=blocks)
     t.active_block = next((b.id for b in blocks if b.type == BLOCK_CODE), "")
+    m = re.fullmatch(r"\s*(\d{1,2})[:.](\d{2})\s*", str(data.get("start") or ""))
+    if m and int(m.group(1)) < 24 and int(m.group(2)) < 60:
+        t.start = f"{int(m.group(1)):02d}:{m.group(2)}"       # плановое начало урока, если оно есть в материале
     return Parsed(t, warnings)
 
 

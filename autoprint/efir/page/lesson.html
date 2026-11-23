@@ -306,6 +306,16 @@ function renderTools() {
         sel.onchange = () => cmd({ cmd: "preset", id: sel.value });
         t.appendChild(sel);
       }
+      const startBox = el("label", "chip");
+      startBox.title = "Плановое начало урока: время этапов — от него («По плану»). Пусто — от «Начать урок»";
+      startBox.appendChild(document.createTextNode("Начало"));
+      const tm = el("input");
+      tm.type = "time";
+      tm.value = L.start || "";
+      tm.style.cssText = "font: inherit; color: var(--text); background: transparent; border: none; width: 6.2em;";
+      tm.onchange = () => cmd({ cmd: "set_start", start: tm.value });
+      startBox.appendChild(tm);
+      t.appendChild(startBox);
       if (L.start) {
         const plan = el("button", "", "По плану · " + L.start);
         plan.title = "Время этапов — от планового начала урока";
@@ -597,9 +607,12 @@ function tick() {
     }
     const lbl = st.querySelector(".left .lbl"), big = st.querySelector(".left .big");
     const clock = st.querySelector(".clock");
-    if (S.live && !clock.querySelector("small")) {
-      const sm = el("small", "", clockAt(S.live.anchor + s.start * 60000));
-      clock.appendChild(sm);
+    let sm = clock.querySelector("small");
+    if (S.live) {                       // часы этапа — заново каждый раз: «Сдвинуть на сейчас» меняет якорь
+      if (!sm) { sm = el("small"); clock.appendChild(sm); }
+      sm.textContent = clockAt(S.live.anchor + s.start * 60000);
+    } else if (sm) {
+      sm.remove();
     }
     if (ph === "current") {
       const left = (s.end - elapsed) * 60;
@@ -645,7 +658,7 @@ function apply(state) {
   document.body.classList.toggle("light", !dark);
   offset = (state.server_now || Date.now()) - Date.now();
   S = state;
-  const key = JSON.stringify([state.lesson, state.armed, !!state.live, state.efir, state.hotkey]);
+  const key = JSON.stringify([state.lesson, state.armed, state.live && state.live.anchor, state.efir, state.hotkey]);
   renderTools();
   if (key !== lastLessonKey) {
     const y = window.scrollY;

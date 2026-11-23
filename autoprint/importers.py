@@ -230,8 +230,9 @@ def export_ipynb(t: Template, path: str, students: bool = False) -> None:
         elif b.type == BLOCK_IMAGE:
             if not b.text.strip():
                 continue
-            uri = b.text if b.text.lower().startswith(("http://", "https://")) else Path(b.text).as_uri() \
-                if Path(b.text).is_absolute() else b.text
+            from .storage import media_path
+            local = media_path(b.text)
+            uri = local.as_uri() if local is not None else b.text
             cells.append({"cell_type": "markdown", "source": src(f"![{b.title}]({uri})"),
                           "metadata": {"autoprintcode": {"type": BLOCK_IMAGE, "src": b.text, "title": b.title}}})
         elif b.type == BLOCK_MARKDOWN:

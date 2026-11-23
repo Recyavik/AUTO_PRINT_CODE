@@ -827,7 +827,8 @@ class ImageBlockWidget(BlockWidget):
             self.preview.setText("Картинка из интернета — видна на странице суфлёра")
             self.path_lbl.setText(src)
             return
-        pm = QPixmap(src) if src and Path(src).is_file() else QPixmap()
+        local = storage.media_path(src)
+        pm = QPixmap(str(local)) if local is not None else QPixmap()
         if pm.isNull():
             self.preview.setPixmap(QPixmap())
             self.preview.setText("Картинки нет — «Файл…» или «Из буфера»" if not src else f"Нет файла: {src}")
@@ -840,7 +841,7 @@ class ImageBlockWidget(BlockWidget):
 
     def set_image_file(self, path: str) -> None:
         try:
-            self.block.text = str(store_image_file(path))
+            self.block.text = storage.media_ref(store_image_file(path))
         except OSError as e:
             self.path_lbl.setText(f"Не скопировать: {e}")
             return
@@ -858,7 +859,7 @@ class ImageBlockWidget(BlockWidget):
         if out is None:
             self.path_lbl.setText("В буфере обмена нет картинки")
             return
-        self.block.text = str(out)
+        self.block.text = storage.media_ref(out)
         self._show()
         self.changed.emit()
 

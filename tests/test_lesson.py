@@ -244,6 +244,20 @@ class MaterialsTest(unittest.TestCase):
         f.write_bytes("Тема урока: циклы".encode("cp1251"))
         self.assertEqual(materials.extract(str(f)).text.strip(), "Тема урока: циклы")
 
+    def test_broken_office_file_is_value_error(self):
+        from autoprint import materials
+        for name, data in (("broken.docx", b"not a zip at all"), ("broken.pptx", b"PK\x03\x04garbage")):
+            f = TMP / name
+            f.write_bytes(data)
+            with self.assertRaises(ValueError, msg=name):
+                materials.extract(str(f))
+        import zipfile
+        bad_xml = TMP / "badxml.docx"
+        with zipfile.ZipFile(bad_xml, "w") as z:
+            z.writestr("word/document.xml", "<w:document><unclosed>")
+        with self.assertRaises(ValueError):
+            materials.extract(str(bad_xml))
+
     def test_old_doc_explains(self):
         from autoprint import materials
         f = TMP / "old.doc"
@@ -304,6 +318,13 @@ class ScenarioAiTest(unittest.TestCase):
         self.assertEqual(t.active_block, t.code_blocks()[0].id)
         self.assertEqual(t.title, "Тёмная тема")
         self.assertIn("этапов: 3", r.summary)
+
+    def test_parse_start_time(self):
+        from autoprint import lesson_ai as L
+        r = L.parse_lesson('{"start": "09:15", "blocks": [{"type": "stage", "title": "А", "min": 5}]}')
+        self.assertEqual(r.template.start, "09:15")
+        r = L.parse_lesson('{"start": "утром", "blocks": [{"type": "stage", "title": "А", "min": 5}]}')
+        self.assertEqual(r.template.start, "")
 
     def test_parse_no_code_ok(self):
         from autoprint import lesson_ai as L
@@ -493,6 +514,24 @@ class EfirLessonTest(unittest.TestCase):
         self.ctl.stop_live()
         self.assertEqual(self.ctl.live_lesson_id(), "")
 
+    def test_launch_start_is_lesson_time(self):
+        """Ревью №5: без планового начала урока «время по плану» — момент запуска, а не старт пресета."""
+        from autoprint.efir.model import Activity, Webinar
+        preset = Webinar(title="1Т", start="11:00", schedule=[Activity("Пара", 90)])
+        self.ctl.store.add([preset])
+        t = self.lesson()
+        t.preset = preset.id
+        self.ctl.launch_lesson(t, show=False)
+        w = self.ctl.live_webinar()
+        self.assertEqual(w.start, self.ctl.store.live.anchor.strftime("%H:%M"))
+        first = w.start
+        self.ctl.start_now(1)                                   # сдвиг — «по плану» остаётся прежним
+        self.ctl.launch_lesson(t, show=False)
+        self.assertEqual(self.ctl.live_webinar().start, first)
+        t.start = "16:30"
+        self.ctl.launch_lesson(t, show=False)
+        self.assertEqual(self.ctl.live_webinar().start, "16:30")
+
     def test_launch_without_minutes_refused(self):
         t = Template(title="Пусто", blocks=[stage("Ноль", 0), md("say", "Привет")])
         self.assertFalse(self.ctl.launch_lesson(t, show=False))
@@ -676,6 +715,68 @@ class ControllerTest(unittest.TestCase):
         finally:
             self.t.active_block = keep
 
+    def test_edit_from_timer_keeps_lesson(self):
+        """Ревью №2: «Изменить шаблон…» в таймере идущего урока правит оформление (пресет), а не служебный эфир."""
+        from autoprint.efir.model import Activity, Webinar
+        preset = Webinar(title="Пресет урока", schedule=[Activity("Пара", 90)], background="anim:cube")
+        self.win.efir.store.add([preset])
+        self.win.lesson.command({"cmd": "preset", "id": preset.id})
+        self.win.lesson.command({"cmd": "start", "now": True})
+        try:
+            ctl = self.win.efir
+            ctl.edit_live()
+            ed = ctl.editors[-1]
+            self.assertEqual(ed.w.id, preset.id)
+            w = ed.result()
+            w.background = "anim:stars"
+            ctl.save_webinar(w)
+            pump(450)
+            self.assertEqual(ctl.live_lesson_id(), self.t.id)                       # урок по-прежнему идёт
+            self.assertEqual(ctl.live_webinar().background, "anim:stars")           # оформление — сразу
+            self.assertEqual([x.title for x in ctl.store.visible()].count("Пресет урока"), 1)
+            lesson_w = ctl.live_webinar()
+            ed2 = type(ed)(ctl, lesson_w, None)                                     # служебный эфир в редакторе
+            self.assertEqual(ed2.result().lesson_id, self.t.id)
+            ed2._dirty = False
+            ed2.close()
+        finally:
+            for e in list(self.win.efir.editors):
+                e._dirty = False
+                e.close()
+            self.win.lesson.command({"cmd": "stop"})
+
+    def test_set_start_cmd(self):
+        from autoprint.efir.model import anchor_for
+        self.win.lesson.command({"cmd": "set_start", "start": "16:30"})
+        self.assertEqual(self.t.start, "16:30")
+        self.win.lesson.command({"cmd": "set_start", "start": "25:99"})       # неверное — не меняет
+        self.assertEqual(self.t.start, "16:30")
+        self.assertEqual(self.snap()["lesson"]["start"], "16:30")
+        self.win.lesson.command({"cmd": "start", "now": False})
+        try:
+            self.assertEqual(self.win.efir.store.live.anchor, anchor_for("16:30"))
+        finally:
+            self.win.lesson.command({"cmd": "stop"})
+            self.win.lesson.command({"cmd": "set_start", "start": ""})
+        self.assertEqual(self.t.start, "")
+
+    def test_same_state_not_republished(self):
+        """Во время зарядки экран эфира шлёт ход видео раз в секунду — страница суфлёра не должна
+        перерисовываться (и терять щелчки по кнопкам), если для неё ничего не поменялось."""
+        srv = self.win.efir.server
+        self.win.lesson.publish()
+        rev = srv._revs["lesson"]
+        self.win.lesson.publish()
+        self.win.efir.screen_changed.emit()
+        pump(450)
+        self.assertEqual(srv._revs["lesson"], rev)
+        self.t.title = "Урок 3. Тёмная тема!"
+        try:
+            self.win.lesson.publish()
+            self.assertEqual(srv._revs["lesson"], rev + 1)
+        finally:
+            self.t.title = "Урок 3. Тёмная тема"
+
     def test_unknown_cmd_ignored(self):
         self.win.lesson.command({"cmd": "rm -rf"})
         self.win.lesson.command({"nothing": 1})
@@ -739,11 +840,42 @@ class EditorTest(unittest.TestCase):
         w = next(x for x in v.widgets if isinstance(x, ImageBlockWidget))
         src = make_png(TMP / "e2.png")
         w.set_image_file(str(src))
-        self.assertTrue(Path(t.blocks[0].text).is_file())
-        self.assertEqual(Path(t.blocks[0].text).parent, DATA_DIR / "media")
+        from autoprint.storage import media_path
+        self.assertTrue(media_path(t.blocks[0].text).is_file())
+        self.assertEqual(media_path(t.blocks[0].text).parent, DATA_DIR / "media")
         self.assertFalse(w.preview.pixmap().isNull())
         w.set_image_file(str(src))                          # тот же файл — та же копия, без дублей
         self.assertEqual(len(list((DATA_DIR / "media").glob("*.png"))), len({p.read_bytes() for p in (DATA_DIR / "media").glob("*.png")}))
+
+    def test_image_ref_survives_data_move(self):
+        """Ревью №4: картинка хранится относительно папки данных — переезд данных её не ломает."""
+        import shutil
+        from autoprint import storage
+        from autoprint.ui.blocks import ImageBlockWidget
+        t = Template(title="К", blocks=[Block(BLOCK_IMAGE)])
+        v = self.view(t)
+        w = next(x for x in v.widgets if isinstance(x, ImageBlockWidget))
+        w.set_image_file(str(make_png(TMP / "move.png")))
+        ref = t.blocks[0].text
+        self.assertTrue(ref.startswith("media/"), ref)
+        old_abs = storage.DATA_DIR / ref
+        moved = TMP / f"moved-data-{time.time_ns()}"
+        (moved / "media").mkdir(parents=True)
+        shutil.copy2(old_abs, moved / ref)
+        orig = storage.DATA_DIR
+        storage.DATA_DIR = moved
+        try:
+            self.assertEqual(storage.media_path(ref), moved / ref)
+            # старый урок с абсолютным путём из прежней папки данных — находится по имени в новой
+            self.assertEqual(storage.media_path(str(TMP / "gone" / "data" / ref)), moved / ref)
+            st = scenario.lesson_state(Template(title="К", blocks=[Block(BLOCK_IMAGE, ref)]), live_anchor_ms=None,
+                                       armed="", media_url=media, presets=[], preset="", dark=True,
+                                       efir_mode="idle", tab="", hotkey="")
+            self.assertFalse(st["lesson"]["intro"][0]["missing"])
+            self.assertIsNone(storage.media_path("media/нет-такого.png"))
+            self.assertIsNone(storage.media_path("https://x.y/a.png"))
+        finally:
+            storage.DATA_DIR = orig
 
     def test_change_type_to_stage(self):
         from autoprint.ui.blocks import StageBlockWidget
@@ -756,6 +888,29 @@ class EditorTest(unittest.TestCase):
         v._insert_block(3, BLOCK_STAGE)
         self.assertEqual([b.type for b in t.blocks], [BLOCK_STAGE, BLOCK_CODE, BLOCK_IMAGE, BLOCK_STAGE])
         self.assertEqual(t.blocks[3].minutes, 5)
+
+    def test_change_type_keeps_content(self):
+        """Ревью №3: текст и код при смене типа на «Этап» или «Картинка» не пропадают — уходят блоком ниже."""
+        from autoprint.ui.blocks import ImageBlockWidget, StageBlockWidget
+        t = Template(title="К", blocks=[md("say", "## Вступление\nОчень рад видеть.\nКак дела?"),
+                                        Block(BLOCK_CODE, "x = 1\ny = 2", lang="python", steps=[1, 2]),
+                                        md("text", "не картинка, а текст")])
+        v = self.view(t)
+        v._change_type(v.widgets[0], "stage")
+        self.assertEqual((t.blocks[0].type, t.blocks[0].title, t.blocks[0].text), (BLOCK_STAGE, "Вступление", ""))
+        self.assertEqual((t.blocks[1].type, t.blocks[1].role, t.blocks[1].text),
+                         (BLOCK_MARKDOWN, "say", "Очень рад видеть.\nКак дела?"))
+        code_w = next(w for w in v.widgets if w.block.type == BLOCK_CODE)
+        v._change_type(code_w, "stage")
+        i = next(k for k, b in enumerate(t.blocks) if b.type == BLOCK_CODE)
+        self.assertEqual(t.blocks[i - 1].type, BLOCK_STAGE)
+        self.assertEqual((t.blocks[i].text, t.blocks[i].lang, t.blocks[i].steps), ("x = 1\ny = 2", "python", [1, 2]))
+        txt_w = v.widgets[-1]
+        v._change_type(txt_w, "image")
+        self.assertEqual((t.blocks[-2].type, t.blocks[-2].text), (BLOCK_IMAGE, ""))
+        self.assertEqual(t.blocks[-1].text, "не картинка, а текст")
+        self.assertIsInstance(v.widgets[0], StageBlockWidget)
+        self.assertTrue(any(isinstance(w, ImageBlockWidget) for w in v.widgets))
 
     def test_export_students_and_roundtrip(self):
         from autoprint.importers import export_ipynb, import_ipynb
@@ -827,9 +982,18 @@ class ImportTest(unittest.TestCase):
         self.assertIsNotNone(d._ai_parsed)
         t = d._ai_parsed.template
         img = next(b for b in t.blocks if b.type == BLOCK_IMAGE)
-        self.assertTrue(Path(img.text).is_file())
-        self.assertEqual(Path(img.text).parent, DATA_DIR / "media")
+        from autoprint.storage import media_path
+        self.assertTrue(img.text.startswith("media/"), img.text)
+        self.assertEqual(media_path(img.text).parent, DATA_DIR / "media")
         self.assertTrue(d.add_btn.isEnabled())
+
+    def test_broken_material_no_crash(self):
+        d = self.dialog()
+        f = TMP / "broken2.docx"
+        f.write_bytes(b"not a zip")
+        d.material.setPlainText("прежний текст")
+        d.load_material(str(f))                         # не исключение, а сообщение
+        self.assertEqual(d.material.toPlainText(), "прежний текст")
 
     def test_material_docx(self):
         d = self.dialog()

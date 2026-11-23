@@ -33,11 +33,15 @@ def extract(path: str) -> Material:
     ext = p.suffix.lower()
     if ext == ".pdf":
         return _pdf(p)
-    if ext == ".docx":
-        return Material(_docx(p))
-    if ext == ".pptx":
-        text, n = _pptx(p)
-        return Material(text, pages=n)
+    if ext in (".docx", ".pptx"):
+        try:
+            if ext == ".docx":
+                return Material(_docx(p))
+            text, n = _pptx(p)
+            return Material(text, pages=n)
+        except (zipfile.BadZipFile, KeyError, ET.ParseError) as e:   # не тот файл или повреждён
+            raise ValueError(f"Файл {p.name} не открылся как документ {ext[1:].upper()} — возможно, он повреждён "
+                             f"или это другой формат ({e.__class__.__name__}). Сохраните его заново или в PDF.") from e
     if ext in (".doc", ".ppt"):
         raise ValueError(f"Старый формат {ext}: сохраните файл как .{ext[1:]}x (Word/PowerPoint → «Сохранить как») "
                          "или в PDF.")

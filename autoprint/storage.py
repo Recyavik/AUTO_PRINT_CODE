@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import shutil
 import sys
 import time
@@ -125,6 +126,39 @@ def _atomic_write(path: Path, data: dict, backup: bool = False) -> None:
 
 def new_id() -> str:
     return uuid.uuid4().hex[:12]
+
+
+# ---------------------------------------------------------------- картинки уроков (data/media)
+
+MEDIA_FOLDER = "media"
+_SCHEME = re.compile(r"[a-z][a-z0-9+.-]+:(?![\\/])", re.I)     # http:, javascript:… (но не диск «C:\»)
+
+
+def media_ref(path) -> str:
+    """Как записать картинку в блок: файл в папке данных — относительно неё («media/…»), чтобы урок пережил
+    переезд данных (установка в Program Files, другой компьютер); иначе — путь как есть."""
+    p = Path(path)
+    try:
+        return p.resolve().relative_to(DATA_DIR.resolve()).as_posix()
+    except (ValueError, OSError):
+        return str(p)
+
+
+def media_path(ref: str) -> Path | None:
+    """Файл картинки блока. Относительный путь — от папки данных; абсолютный, которого больше нет (урок из
+    прежней папки данных), — ищется по имени в data/media. None — адрес в интернете или файла нет."""
+    ref = (ref or "").strip()
+    if not ref or _SCHEME.match(ref):
+        return None
+    p = Path(ref)
+    cand = p if p.is_absolute() else DATA_DIR / p
+    try:
+        if cand.is_file():
+            return cand
+        alt = DATA_DIR / MEDIA_FOLDER / p.name
+        return alt if p.name and alt.is_file() else None
+    except (OSError, ValueError):
+        return None
 
 
 # ---------------------------------------------------------------- настройки

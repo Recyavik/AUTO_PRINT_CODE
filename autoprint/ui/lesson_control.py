@@ -7,6 +7,7 @@
 """
 from __future__ import annotations
 
+import json
 import logging
 import os
 import subprocess
@@ -57,9 +58,18 @@ class LessonController(QObject):
         self.efir.server.on_command = self._cmd.emit
         self._cmd.connect(self.command)
         self._timer = QTimer(self, singleShot=True, interval=300, timeout=self.publish)
+        self._last = ""          # что ушло на страницу в последний раз: то же самое второй раз не шлём
         for sig in (self.efir.live_changed, self.efir.screen_changed, self.efir.tab_changed,
                     self.efir.webinars_changed, theme.changed):
             sig.connect(self.schedule_publish)
+        self.efir.webinars_changed.connect(self._restyle_live)
+
+    def _restyle_live(self) -> None:
+        """Шаблоны «Эфира» поменялись (например, правили оформление урока) — идущий урок берёт его сразу."""
+        lid = self.efir.live_lesson_id()
+        t = self.main.store.get(lid) if lid else None
+        if t is not None:
+            self.efir.launch_lesson(t, show=False)
 
     # ------------------------------------------------------------ что показывать
     @property
@@ -90,6 +100,12 @@ class LessonController(QObject):
             media_url=self.efir.server.media_url, presets=[(w.id, w.title) for w in self.efir.store.visible()],
             preset=preset.id if preset is not None else "", dark=theme.dark, efir_mode=self.efir.mode,
             tab=self.efir.tab_status()[0], hotkey=self.main.settings.hotkey_toggle)
+        # во время зарядки экран эфира шлёт ход видео раз в секунду: странице суфлёра от этого ничего не
+        # меняется — не перерисовывать её (иначе пересоздаются кнопки и теряются щелчки)
+        key = json.dumps(state, ensure_ascii=False, sort_keys=True)
+        if key == self._last:
+            return
+        self._last = key
         self.efir.server.publish(state, channel="lesson")
 
     def _sync_live(self, t: Template) -> None:
@@ -136,6 +152,8 @@ class LessonController(QObject):
                 self.efir.show_background()
             elif cmd == "preset" and t is not None:
                 self._set_preset(t, str(d.get("id") or ""))
+            elif cmd == "set_start" and t is not None:
+                self._set_start(t, str(d.get("start") or "").strip())
         except (TypeError, ValueError) as e:
             log.warning("Команда суфлёра %r не выполнена: %s", d, e)
         self.schedule_publish()
@@ -174,6 +192,17 @@ class LessonController(QObject):
         """Перерыв или зарядка до «Начать урок»: оформление экрана — из пресета урока."""
         if self.efir.webinar is None:
             self.efir.webinar = scenario.webinar_for(t, self.efir.lesson_preset(t))
+
+    def _set_start(self, t: Template, start: str) -> None:
+        """Плановое начало урока «ЧЧ:ММ» (пусто — без плана: время от «Начать урок»)."""
+        from ..efir.model import parse_hhmm
+        if start and not parse_hhmm(start):
+            return
+        if start:
+            h, m = parse_hhmm(start)
+            start = f"{h:02d}:{m:02d}"
+        t.start = start
+        self.main._save_timer.start()
 
     def _set_preset(self, t: Template, wid: str) -> None:
         w = self.efir.store.get(wid)
