@@ -36,7 +36,7 @@ def main() -> int:
         sys.stdout.reconfigure(encoding="utf-8")
     py = sys.executable
     steps = [
-        ("Python: тесты ядра и интерфейса (unittest)", [py, "-m", "unittest", "tests.test_core", "tests.test_ui"], ROOT),
+        ("Python: тесты ядра и интерфейса (unittest)", [py, "-m", "unittest", "tests.test_core"], ROOT),
         # остальные тесты — сценарии со своим main(): каждый в своём процессе (свои заглушки и папка данных)
         *[(f"Python: {name}", [py, f"tests/{name}.py"], ROOT) for name in SCRIPT_TESTS],
         ("Эталоны веб-версии совпадают с Python", [sys.executable, "tools/make_web_fixtures.py", "--check"], ROOT),

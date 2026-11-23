@@ -204,8 +204,20 @@ def raise_window(hwnd: int) -> None:
     user32.SetForegroundWindow(hwnd)
 
 
+# окна, в которые печатать нельзя, хотя они другого процесса: экран урока (окно Edge, запущенное нами).
+# Его заголовок кончается на OWN_TITLE_SUFFIX — так оно узнаётся, даже если Edge передал окно другому процессу
+own_pids: set[int] = set()
+OWN_TITLE_SUFFIX = " — AutoPrintCode"
+
+
 def is_own_window(hwnd: int) -> bool:
-    return bool(hwnd) and window_pid(hwnd) == os.getpid()
+    """Окно самой программы или её экрана урока: печатать в него нельзя (код набрался бы в страницу)."""
+    if not hwnd:
+        return False
+    pid = window_pid(hwnd)
+    if pid == os.getpid() or pid in own_pids:
+        return True
+    return window_title(hwnd).endswith(OWN_TITLE_SUFFIX)
 
 
 # ---------------------------------------------------------------- мышь во время печати

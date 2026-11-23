@@ -31,7 +31,7 @@ from autoprint.storage import (BLOCK_CODE, BLOCK_MARKDOWN, PROFILE_IDE, PROFILE_
                                PROFILE_TERMINAL, Block, Settings, Template, TemplateStore, sample_template)
 from autoprint.textprint import find_selection, markdown_to_plain, printable, selection_text  # noqa: E402
 from autoprint.typer import FINISHED, IDLE, PAUSED, RUNNING, TypingEngine, build_units  # noqa: E402
-from autoprint.ui.blocks import typing_slice  # noqa: E402
+from autoprint.printing import typing_slice  # noqa: E402
 
 CODE = '''def total(nums):
     """Сумма (без sum)."""
@@ -201,7 +201,7 @@ class BuildUnitsTest(unittest.TestCase):
         self.assertEqual(ends[-1], len(CODE))
 
     def test_humanize_keeps_text_and_makes_typos(self):
-        s = replace(Settings(), profile=PROFILE_PLAIN, human_typing=False, typo_per_100_words=40)
+        s = replace(Settings(), profile=PROFILE_PLAIN, human_typing=False)
         base = build_units(CODE, s)
         for seed in range(30):
             units = humanize([replace(u) for u in base], s, random.Random(seed))
@@ -211,7 +211,7 @@ class BuildUnitsTest(unittest.TestCase):
         self.assertGreater(typos, 0)
 
     def test_typos_never_touch_brackets_quotes_or_newlines(self):
-        s = replace(Settings(), typo_per_100_words=100)
+        s = replace(Settings())
         base = build_units(CODE, s)
         units = humanize([replace(u) for u in base], s, random.Random(1))
         for i, u in enumerate(units):
@@ -244,7 +244,7 @@ class EngineTest(unittest.TestCase):
 
     def test_ide_profile_with_human_typing(self):
         ed = FakeEditor(ide=True)
-        self.run_engine(CODE, fast(profile=PROFILE_IDE, human_typing=True, typo_per_100_words=30), ed)
+        self.run_engine(CODE, fast(profile=PROFILE_IDE, human_typing=True, typos_per_100=1.5), ed)
         self.assertEqual(ed.text, CODE.replace("\t", "    "))
 
     def test_terminal_gets_no_shift_home_end_tab_or_esc(self):

@@ -213,16 +213,10 @@ class Settings:
     selection_whole_lines: bool = True # выделение в образце расширяется до целых строк
     strip_comments: bool = False       # не печатать комментарии из кода
     human_typing: bool = False         # имитация ручного ввода: живой ритм, обдумывание, опечатки
-    typo_per_100_words: int = 3        # устарело (до 0.5): опечатки на 100 слов — см. typos_per_100
     typos_per_100: float = 1.5         # опечаток на 100 символов текста (исправляются Backspace)
     think_pause_s: float = 1.5         # пауза на обдумывание перед новой строкой (до …, с)
 
     print_mode: str = "block"          # block — блок целиком | lines — по строкам | steps — по шагам
-    show_prompter: bool = True         # суфлёр: что дальше и что сказать (комментарии шага)
-    prompter_window: bool = False      # суфлёр в отдельном окне (открыт)
-    prompter_mode: str = "auto"        # окно суфлёра: auto — печатает программа, self — набираю сам
-    prompter_font: int = 20            # окно суфлёра: размер текста «что сказать»
-    prompter_geometry: str = ""        # окно суфлёра: место и размер
     # «Эфир» (autoprint/efir, ui/efir_*.py): шаблоны вебинаров — в data/efir/webinars.json
     efir_port: int = 8791              # адрес вкладки эфира: http://127.0.0.1:<порт>/ (занят — следующие)
     efir_pinned: bool = True           # окно таймера поверх всех окон
@@ -245,10 +239,8 @@ class Settings:
 
     hotkey_start_delay_ms: int = 150   # пауза перед стартом по хоткею
     button_countdown_s: int = 3        # отсчёт при старте кнопкой в окне
-    minimize_on_button_start: bool = True
     autopause_on_focus_change: bool = True
     guard_enabled: bool = True         # пауза при нажатии клавиши / клике во время печати
-    auto_advance: bool = False         # по окончании выбрать следующий блок кода
     always_on_top: bool = False
     theme: str = "system"              # system — как в Windows | dark | light
     ui_scale: int = 100                # размер интерфейса, % (100 / 125 / 150 / 175) — после перезапуска
@@ -283,10 +275,8 @@ class Settings:
     lesson_minutes: int = 90           # «Сценарий урока»: длительность урока
     lesson_break: int = 0              # «Сценарий урока»: перерыв, мин (0 — только если он есть в материале)
 
-    open_tabs: list = field(default_factory=list)
     current_tab: str = ""
     window_geometry: str = ""
-    splitter_state: str = ""
 
     @classmethod
     def load(cls) -> "Settings":

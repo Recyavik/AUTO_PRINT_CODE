@@ -496,9 +496,8 @@ QScrollArea#importScroll, QScrollArea#importScroll > QWidget > QWidget {{ backgr
             return None
         key = (self._material_pdf, n)
         if key not in self._slides:
-            from .blocks import media_dir
-            from ..storage import media_ref
-            out = materials.render_page(self._material_pdf, n, media_dir())
+            from ..storage import DATA_DIR, MEDIA_FOLDER, media_ref
+            out = materials.render_page(self._material_pdf, n, DATA_DIR / MEDIA_FOLDER)
             self._slides[key] = media_ref(out) if out else None
         return self._slides[key]
 

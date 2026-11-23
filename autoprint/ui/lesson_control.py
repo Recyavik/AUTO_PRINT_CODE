@@ -70,6 +70,8 @@ class PrompterWindow:
             return False
         if not self.alive():
             self.proc = proc          # главный процесс профиля; повторный запуск лишь передаёт ему адрес
+            from .. import winapi
+            winapi.own_pids.add(proc.pid)    # в окно экрана урока печатать нельзя (E13)
         return True
 
     def close(self) -> None:
@@ -113,7 +115,7 @@ class LessonController(QObject):
         self._timer = QTimer(self, singleShot=True, interval=300, timeout=self.publish)
         self._last = ""          # что ушло на страницу в последний раз: то же самое второй раз не шлём
         for sig in (self.efir.live_changed, self.efir.screen_changed, self.efir.tab_changed,
-                    self.efir.webinars_changed, theme.changed):
+                    self.efir.webinars_changed, theme.changed, main.printer.changed):
             sig.connect(self.schedule_publish)
         self.efir.webinars_changed.connect(self._restyle_live)
 
@@ -130,12 +132,11 @@ class LessonController(QObject):
         return self.efir.url + "lesson"
 
     def current(self) -> Template | None:
-        lid = self.efir.live_lesson_id()
-        t = self.main.store.get(lid) if lid else None
-        if t is not None:
-            return t
-        v = self.main.current_view()
-        return v.template if v is not None else None
+        """Урок экрана урока — урок в фокусе печати: идущий, иначе открытый."""
+        return self.main.printer.focus()
+
+    def page_alive(self) -> bool:
+        return _window is not None and _window.alive()
 
     def schedule_publish(self) -> None:
         """Отправить состояние странице не позже чем через 300 мс после первого изменения. Уже ждём — не
@@ -219,6 +220,8 @@ class LessonController(QObject):
                 self._set_preset(t, str(d.get("id") or ""))
             elif cmd == "set_start" and t is not None:
                 self._set_start(t, str(d.get("start") or "").strip())
+            elif cmd == "open":
+                self.main.open_lesson(str(d.get("lesson") or ""))
         except (TypeError, ValueError) as e:
             log.warning("Команда суфлёра %r не выполнена: %s", d, e)
         self.schedule_publish()
@@ -246,12 +249,7 @@ class LessonController(QObject):
         self.efir.live_changed.emit()
 
     def _arm(self, t: Template, bid: str) -> None:
-        if not t.find_block(bid):
-            return
-        v = self.main.open_template(t.id)
-        if v is not None:
-            v.go_to_block(bid)
-            self.main._update_armed_label()
+        self.main.printer.arm(bid)       # только код: заметку или картинку печатать нельзя
 
     def _ensure_screen(self, t: Template) -> None:
         """Перерыв или зарядка до «Начать урок»: оформление экрана — из пресета урока."""

@@ -49,54 +49,37 @@ def main() -> int:
     store = TemplateStore()
     win = MainWindow(settings, store)
     win.setAttribute(Qt.WidgetAttribute.WA_DontShowOnScreen, True)
-    win.resize(1320, 840)
     win.show()
     settle(app)
     shot(win, "main-dark")
 
-    # печать «идёт»: ход в пульте, подсветка в блоке
-    job = win._job_for_armed()
-    assert job, "в примере должен быть активный блок кода"
-    win.job = job
-    win._target = "VS Code"
-    win._last_pos = job["text"].index("result +=") if "result +=" in job["text"] else 20
-    win.strip.set_state(RUNNING)
-    win._show_job_progress()
+    # печать «идёт»: строка печати внизу окна
+    t = store.templates[0]
+    win.printer.set_focus(t.id)
+    first = t.next_code()
+    assert first, "в примере должен быть код"
+    win.printer.arm(first.id)
+    job = win.printer.job_for_armed()
+    win.printer.job = job
+    win.printer.target = "VS Code"
+    win.printer._last_pos = len(job["text"]) // 3
+    win.engine.state = RUNNING
+    win.print_bar.refresh()
     settle(app)
+    assert win.print_bar.isVisible(), "строка печати не видна"
     shot(win, "main-dark-running")
-    win.job = None
-    win._clear_progress()
-    win._on_state()   # пульт — снова по настоящему состоянию движка («Готов»), а не «Печатает» из снимка
-    win._update_armed_label()
-
-    # пошаговый урок: режим «По шагам», без комментариев — суфлёр и цветные шаги
-    steps_t = next(t for t in store.templates if t.title.startswith("Пример: пошаговый"))
-    win.open_template(steps_t.id)
-    win.strip.sw_strip.setChecked(True)
-    win._on_mode("steps")
-    settle(app)
-    shot(win, "main-steps-dark")
-    code_id = steps_t.code_blocks()[0].id
-    win._set_step_pointer(code_id, 3)   # шаг 3 — возврат наверх
-    settle(app)
-    shot(win, "main-steps3-dark")
-    win._on_mode("lines")
-    settle(app)
-    shot(win, "main-lines-dark")
-    win._on_mode("block")
-    win.strip.sw_strip.setChecked(False)
-    win.open_template(store.templates[0].id)
-    settle(app)
+    win.printer.job = None
+    win.engine.state = "idle"
+    win.print_bar.refresh()
 
     settings.theme = "light"
     theme.set_mode("light")
     settle(app)
     shot(win, "main-light")
-
-    win.resize(1000, 700)
+    win.resize(420, 520)
     settle(app)
-    shot(win, "main-light-narrow")
-    win.resize(1320, 840)
+    shot(win, "main-light-small")
+    win.resize(520, 720)
 
     settings.theme = "dark"
     theme.set_mode("dark")

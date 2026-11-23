@@ -14,8 +14,7 @@ from ..efir.model import (ANIMATIONS, BG_BLACK, DEMO_NONE, DEMO_OFF, DEMO_ON, DE
 from . import icons
 from .frameless import FramelessWindow
 from .theme import theme
-from .blocks import MenuButton
-from .widgets import IconButton, Note, Switch, Toast, accent_button, button, group_title, label
+from .widgets import IconButton, MenuButton, Note, Switch, Toast, accent_button, button, group_title, label
 
 VIDEO_FILTER = "Видео и картинки (*.mp4 *.webm *.mov *.m4v *.png *.jpg *.jpeg *.gif *.webp);;Все файлы (*.*)"
 IMAGE_FILTER = "Картинки (*.png *.jpg *.jpeg *.gif *.webp *.bmp);;Все файлы (*.*)"

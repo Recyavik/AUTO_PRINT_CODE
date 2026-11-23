@@ -7,7 +7,7 @@ from PySide6.QtGui import QFont, QFontMetrics, QPainter, QPen
 from PySide6.QtWidgets import (QAbstractButton, QAbstractScrollArea, QAbstractSlider, QAbstractSpinBox,
                                QApplication, QButtonGroup, QComboBox, QDoubleSpinBox, QFrame,
                                QGraphicsOpacityEffect, QHBoxLayout, QLabel, QLayout, QPushButton, QScrollBar,
-                               QSizePolicy, QSlider, QSpinBox, QToolButton, QVBoxLayout, QWidget)
+                               QMenu, QSizePolicy, QSlider, QSpinBox, QToolButton, QVBoxLayout, QWidget)
 
 from . import icons
 from .theme import theme
@@ -739,3 +739,26 @@ class FlowLayout(QLayout):
                 it.setGeometry(QRect(-10000, -10000, 0, 0))
         total = (y - self._v if lines else y) - rect.y() + m.bottom()
         return total
+
+
+class MenuButton(QToolButton):
+    """Кнопка, меню которой строится только по щелчку (fill(menu) — заполнить)."""
+
+    def __init__(self, fill, object_name: str = "pickBtn") -> None:
+        super().__init__()
+        self._fill = fill
+        self.setObjectName(object_name)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        self.setIconSize(QSize(13, 13))
+        self.clicked.connect(self.popup)
+
+    def build_menu(self) -> QMenu:
+        m = QMenu(self)
+        self._fill(m)
+        return m
+
+    def popup(self) -> None:
+        m = self.build_menu()
+        m.exec(self.mapToGlobal(QPoint(0, self.height())))
+        m.deleteLater()

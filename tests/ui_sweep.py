@@ -105,7 +105,7 @@ def step(name: str, fn) -> None:
 
 def main() -> int:
     from autoprint.storage import Settings, TemplateStore
-    from autoprint.ui.blocks import MenuButton
+    from autoprint.ui.widgets import MenuButton
     from autoprint.ui.main_window import MainWindow
     from autoprint.ui.settings_window import PAGES
     from autoprint.ui.theme import theme
@@ -120,27 +120,17 @@ def main() -> int:
     win._restart = lambda: None                     # «перезапустить сейчас» — не перезапускать тест
     step("главное окно", win.show)
 
-    # образцы, режимы, меню блоков и контекстное меню кода
+    # уроки в фокусе, режимы печати, «Печать ⚙» (то же, что делает экран урока)
     for t in list(store.templates):
-        step(f"образец «{t.title}»", lambda t=t: win.open_template(t.id))
-        for w in list(win.current_view().widgets):
-            for b in w.findChildren(QToolButton):
-                if b.menu() is not None and b.isVisibleTo(w):
-                    step(f"меню блока «{b.objectName() or b.text()}»", b.showMenu)
-                elif isinstance(b, MenuButton) and b.isVisibleTo(w):     # меню строится по щелчку
-                    step(f"меню блока «{b.objectName() or b.text()}»", b.popup)
-            ed = getattr(w, "editor", None)
-            if ed is not None:
-                step("контекстное меню кода", lambda ed=ed: QApplication.sendEvent(
-                    ed.viewport(), QContextMenuEvent(QContextMenuEvent.Reason.Mouse, QPoint(8, 8),
-                                                     ed.mapToGlobal(QPoint(8, 8)))))
+        step(f"урок «{t.title}»", lambda t=t: win.printer.set_focus(t.id))
         for mode in ("lines", "steps", "block"):
-            step(f"режим {mode}", lambda m=mode: win._on_mode(m))
-    step("без комментариев", lambda: (win.strip.sw_strip.setChecked(True), win.strip.sw_strip.setChecked(False)))
+            step(f"режим {mode}", lambda m=mode: win.printer.set_option("mode", m))
+    step("без комментариев", lambda: (win.printer.set_option("strip", True), win.printer.set_option("strip", False)))
     step("сообщение внизу окна", lambda: win._notify("проверка"))
-    step("шаг назад", lambda: (win._on_mode("steps"), win.cmd_step_back(), win._on_mode("block")))
-    step("меню библиотеки", lambda: win._library_menu(QPoint(10, 10)))
-    step("новый образец", win.new_template)
+    step("шаг назад", lambda: (win.printer.set_option("mode", "steps"), win.printer.step_back(),
+                               win.printer.set_option("mode", "block")))
+    step("меню списка уроков", lambda: win._library_menu(QPoint(10, 10)))
+    step("новый урок", win.new_template)
     step("смена темы", lambda: (theme.set_mode("light"), theme.set_mode("dark")))
 
     # меню логотипа — каждый пункт, кроме «Выход»
@@ -202,7 +192,7 @@ def main() -> int:
     opened = spy.shown
     check("открылись все окна и диалоги",
           all(opened.get(k, 0) > 0 for k in ("MainWindow", "SettingsWindow", "RecordDialog", "ReportDialog",
-                                             "UpdateDialog", "QInputDialog")) and opened.get("QMenu", 0) >= 10,
+                                             "UpdateDialog", "ImportDialog", "EfirWindow")) and opened.get("QMenu", 0) >= 2,
           repr(dict(sorted(opened.items()))))
     check("нет лишних окон на панели задач", not spy.stray,
           "; ".join(f"{k} [{', '.join(sorted(v))[:80]}]" for k, v in spy.stray.items())[:600])

@@ -114,8 +114,8 @@ def main() -> int:
     d.grab().save(str(SHOTS / "import-paste.png"))
     d.add_btn.click()
     pump()
-    check("вставка: занятие добавлено и открыто", len(win.store.templates) == n0 + 1
-          and win.current_view().template.code_blocks()[0].lang == "javascript" and not d.isVisible())
+    check("вставка: урок добавлен и открыт на экране урока", len(win.store.templates) == n0 + 1
+          and win.printer.focus().code_blocks()[0].lang == "javascript" and not d.isVisible())
 
     # --- «С помощью нейросети» без подключения: промпт и ответ своего чата
     win.import_files("ai")
@@ -141,7 +141,7 @@ def main() -> int:
     win._apply_settings()
     d.add_btn.click()
     pump()
-    t = win.current_view().template
+    t = win.printer.focus()
     check("занятие по шагам добавлено, включены «По шагам» и «Без комментариев»",
           t.title == "Оценки" and win.settings.print_mode == "steps" and win.settings.strip_comments
           and any(len(set(b.steps)) > 1 for b in t.code_blocks()), f"{win.settings.print_mode}")

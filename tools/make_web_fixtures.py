@@ -22,7 +22,7 @@ from autoprint.comments import strip_comments  # noqa: E402
 from autoprint.storage import Settings  # noqa: E402
 from autoprint.textprint import find_selection, printable, selection_text  # noqa: E402
 from autoprint.typer import build_units  # noqa: E402
-from autoprint.ui.blocks import typing_slice  # noqa: E402
+from autoprint.printing import typing_slice  # noqa: E402
 
 FIXTURES = Path(__file__).resolve().parent.parent / "web" / "tests" / "fixtures"
 

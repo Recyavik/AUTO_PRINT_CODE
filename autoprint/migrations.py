@@ -44,6 +44,11 @@ def apply(settings, store=None) -> bool:
         settings.close_to_tray = True
         done.append("tray_v1")
         changed = True
+    if "window_v10" not in done:
+        # 0.10: окно программы — маленький список уроков; размер большого окна с редактором не возвращаем
+        settings.window_geometry = ""
+        done.append("window_v10")
+        changed = True
     if store is None:
         return changed
     if "roles_v10" not in done:

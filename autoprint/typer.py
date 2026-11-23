@@ -380,8 +380,8 @@ class TypingEngine(QObject):
         hwnd = w.foreground_window()
         if w.is_own_window(hwnd):
             log.info("Не начато: в фокусе окно самого AutoPrintCode")
-            self.message.emit("Курсор стоит в окне AutoPrintCode. Перейдите в целевое окно "
-                              "и нажмите хоткей ещё раз.")
+            self.message.emit("Поставьте курсор в Jupyter (или другой редактор) и нажмите хоткей там — "
+                              "сейчас впереди окно AutoPrintCode.")
             return None
         if not w.self_elevated() and w.window_elevated(hwnd):
             log.warning("Не начато: окно с правами администратора %s", w.describe_window(hwnd))

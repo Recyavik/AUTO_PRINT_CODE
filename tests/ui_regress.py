@@ -84,7 +84,7 @@ def main() -> int:
     win.show()
     pump()
 
-    check("при запуске образец выделен в библиотеке", win.library.list.currentRow() == 0)
+    check("при запуске урок выделен в списке", win.library.list.currentRow() == 0)
 
     # смена темы после закрытия настроек и после вставки блока — без ошибок
     win.open_settings()
@@ -93,32 +93,16 @@ def main() -> int:
     pump()
     win.settings_win.close()
     pump()
-    v = win.current_view()
-    v.add_block(BLOCK_CODE)   # новый пустой блок становится активным — удаляем его же
-    pump()
-    new = next(w for w in v.widgets if w.block.id == v.template.active_block)
-    v._delete_block(new)
-    pump()
     errors.clear()
     for mode in ("light", "dark", "light"):
         s.theme = mode
         theme.set_mode(mode)
         pump()
     check("смена темы без ошибок", not errors, errors[0].splitlines()[-1] if errors else "")
-    check("пульт перекрашен в светлую тему", theme.c("ok").name() in win.strip.state_lbl.text(),
-          win.strip.state_lbl.text())
 
     # сочетания в меню логотипа — только подписи, иначе они перебивают сочетания окна
     win._fill_logo_menu()
     check("в меню логотипа нет двойных сочетаний", all(a.shortcut().isEmpty() for a in win.logo_menu.actions()))
-
-    # сорвавшийся старт: задание загружено (progress 0), но печать не началась — блок не гаснет
-    job = win._job_for_armed()
-    win._load_job(job)
-    pump()
-    cw = win.current_view().code_widget(job["bid"])
-    check("блок не гаснет без печати", cw.editor._progress is None, str(cw.editor._progress))
-    win.cmd_stop()
 
     # окно настроек принадлежит главному (иначе при «поверх остальных» оно под ним)
     win.open_settings()
@@ -154,45 +138,8 @@ def main() -> int:
     check("пауза во время отсчёта: остаётся «Пауза», печать не началась", st == PAUSED and RUNNING not in states
           and e.state == IDLE, f"состояние={st}, поток жив={alive}, история={states}")
 
-    # узкое окно: кнопки пульта переносятся на третью строку — и она не обрезается
-    win.resize(win.minimumWidth(), 700)
-    pump(0.3)
-    sw = win.strip.sw_strip
-    top = sw.parentWidget()
-    check("узкое окно: «Без комментариев» на пульте видно целиком",
-          sw.geometry().bottom() <= top.height() and sw.geometry().right() <= top.width(),
-          f"переключатель {sw.geometry()}, строка {top.size()}")
-    win.resize(1320, 840)
-    pump()
-
-    # выбранный сегмент полужирный — его название не обрезается
-    from PySide6.QtGui import QFont, QFontMetrics
-    for b in win.strip.mode.buttons.values():
-        bold = QFont(b.font())
-        bold.setWeight(QFont.Weight.DemiBold)
-        if b.width() < QFontMetrics(bold).horizontalAdvance(b.text()) + 16:
-            check(f"сегмент «{b.text()}» шире полужирного названия", False, f"{b.width()} px")
-            break
-    else:
-        check("сегменты пульта шире полужирных названий", True)
-
-    # Shift+Enter в редакторе кода — настоящая новая строка (иначе номера строк и шаги разъезжаются)
-    from PySide6.QtTest import QTest
-    cw = win.current_view().code_widget(win.current_view().template.active_block)
-    ed = cw.editor
-    c = ed.textCursor()
-    c.movePosition(c.MoveOperation.End)
-    ed.setTextCursor(c)
-    QTest.keyClick(ed, Qt.Key.Key_Return, Qt.KeyboardModifier.ShiftModifier)
-    QTest.keyClicks(ed, "z = 0")
-    pump()
-    check("Shift+Enter в коде — новая строка документа",
-          ed.blockCount() == cw.block.text.count("\n") + 1 == len(ed.line_steps()) and " " not in
-          ed.document().toRawText(), f"строк {ed.blockCount()}, в тексте {cw.block.text.count(chr(10)) + 1}")
-    ed.undo()
-    ed.undo()
-
     # хоткей без Ctrl/Alt/Win (просто буква) не принимается — он перестал бы печататься во всех программах
+    from PySide6.QtTest import QTest
     from autoprint.ui.settings_window import HotkeyField
     f = HotkeyField("Ctrl+F9")
     got = []

@@ -264,7 +264,6 @@ def make_window(profile: str):
     s.update_auto_check = False
     s.profile = profile
     s.button_countdown_s = 0
-    s.minimize_on_button_start = False
     s.hotkey_start_delay_ms = 0
     store = TemplateStore()
     win = M.MainWindow(s, store)
@@ -273,6 +272,15 @@ def make_window(profile: str):
     win.show()
     pump()
     return win, s, store
+
+
+def focus(win, t) -> None:
+    """Урок — на экран урока (в фокус печати), его первый код — следующим к печати."""
+    win.printer.set_focus(t.id)
+    first = t.next_code()
+    if first is not None:
+        win.printer.arm(first.id)
+    pump()
 
 
 def press_enter(win) -> bool:
@@ -287,15 +295,15 @@ def steps_lesson(profile: str, strip: bool) -> None:
     ED.reset(ide=profile == PROFILE_IDE)
     win, s, store = make_window(profile)
     t = next(t for t in store.templates if t.title.startswith("Пример: пошаговый"))
-    win.open_template(t.id)
-    win.strip.sw_strip.setChecked(strip)
-    win._on_mode("steps")
+    focus(win, t)
+    win.printer.set_option("strip", strip)
+    win.printer.set_option("mode", "steps")
     pump()
     b = t.code_blocks()[0]
     ok, detail = True, ""
     for k in S.step_numbers(b.steps, b.text.count("\n") + 1):
-        win.cmd_toggle()
-        if not wait_for(lambda: win.engine.state == FINISHED and win.job is None):
+        win.printer.toggle()
+        if not wait_for(lambda: win.engine.state == FINISHED and win.printer.job is None):
             ok, detail = False, f"шаг {k}: не закончился ({win.engine.state})"
             break
         lines = S.analyze(b.text, b.steps, b.lang, strip)
@@ -305,11 +313,11 @@ def steps_lesson(profile: str, strip: bool) -> None:
             break
     check(f"по шагам, {profile}, без комментариев={strip}: в редакторе ровно шаги 1…k", ok, detail)
     check(f"по шагам, {profile}: после урока все шаги напечатаны, защита снята",
-          win._step_pointer(b.id) is None and not win.guard.armed and not win.guard.watching)
+          win.printer.step_pointer(b.id) is None and not win.guard.armed and not win.guard.watching)
     # «шаг назад» со стрелками: подсказка, куда поставить курсор после стирания шага
     notes: list[str] = []
-    win._notify = lambda text, **_k: notes.append(text)
-    win.cmd_step_back()
+    win.printer.notify.connect(lambda text, *_a: notes.append(text))
+    win.printer.step_back()
     check(f"по шагам, {profile}: «шаг назад» подсказывает, где оставить курсор",
           bool(notes) and "в конец строки" in notes[-1], notes[-1:] or "нет сообщения")
     win.close()
@@ -403,12 +411,12 @@ def closing_tag_tail() -> None:
 def lines_block(profile: str, strip: bool, hotkey_with_ctrl: bool) -> None:
     ED.reset(ide=profile == PROFILE_IDE)
     win, s, store = make_window(profile)
-    win.open_template(store.templates[0].id)
-    win.strip.sw_strip.setChecked(strip)
-    win._on_mode("lines")
+    focus(win, store.templates[0])
+    win.printer.set_option("strip", strip)
+    win.printer.set_option("mode", "lines")
     pump()
-    job = win._job_for_armed()
-    win.cmd_toggle()
+    job = win.printer.job_for_armed()
+    win.printer.toggle()
     waits, watch_ok = 0, True
     while wait_for(lambda: win.engine.state in (LINE_WAIT, FINISHED)) and win.engine.state == LINE_WAIT:
         pump(0.01)
@@ -418,7 +426,7 @@ def lines_block(profile: str, strip: bool, hotkey_with_ctrl: bool) -> None:
             # Ctrl+F9: хоткей сработал, а Ctrl ещё зажат — печать должна дождаться отпускания
             ED.held = {W.VK_CONTROL}
             pos = win.engine._pos
-            win.cmd_toggle()
+            win.printer.toggle()
             threading.Timer(0.15, ED.held.clear).start()
             wait_for(lambda: win.engine._pos > pos or win.engine.state == FINISHED, 5)
         elif not press_enter(win):
@@ -436,21 +444,20 @@ def lines_block(profile: str, strip: bool, hotkey_with_ctrl: bool) -> None:
 def races() -> None:
     ED.reset()
     win, s, store = make_window(PROFILE_PLAIN)
-    win.open_template(store.templates[0].id)
-    pump()
+    focus(win, store.templates[0])
     # запоздалый сигнал «Печатает» после «Стоп» не включает защиту
-    win._on_state(RUNNING)
+    win.printer._on_state(RUNNING)
     check("запоздалое «Печатает» у стоящей печати не включает защиту", not win.guard.armed)
     win.guard.armed = True
-    win._on_guard("key")
+    win.printer._on_guard("key")
     check("срабатывание защиты у стоящей печати её снимает", not win.guard.armed)
 
     # «Стоп», пока движок ждёт отпускания Ctrl после хоткея (дольше, чем ждёт «Стоп»)
     before = ED.text
     ED.held = {W.VK_CONTROL}
-    win.cmd_toggle()
+    win.printer.toggle()
     pump(0.1)
-    win.cmd_stop()
+    win.printer.stop()
     threading.Timer(1.4, ED.held.clear).start()
     pump(2.0)
     check("остановленный поток не возвращает «Печатает»/«Пауза»", win.engine.state == IDLE and not win.guard.armed,
@@ -459,7 +466,7 @@ def races() -> None:
 
     # смена режима в окне настроек во время печати — печать остановлена
     DELAY["s"] = 0.02
-    win.cmd_toggle()
+    win.printer.toggle()
     wait_for(lambda: win.engine.state == RUNNING)
     s.print_mode = "lines"
     win._on_setting_changed("print_mode")
@@ -473,13 +480,11 @@ def races() -> None:
     t = Template("удаление", [Block(BLOCK_CODE, "a = 1\nb = 2\nc = 3")])
     store.insert(t)
     win._fill_library(t.id)
-    v = win.open_template(t.id)
-    pump()
-    win.cmd_toggle()
+    focus(win, t)
+    win.printer.toggle()
     wait_for(lambda: win.engine.state == RUNNING)
-    wb = v.code_widget(t.blocks[0].id)
-    t.blocks[0].text = ""   # пустой блок удаляется без вопроса
-    v._delete_block(wb)
+    t.blocks.pop(0)          # блок удалили (на экране урока) — урок изменился
+    win.touch(t)
     pump(0.2)
     check("удалили печатающийся блок — печать остановлена", win.engine.state == IDLE, win.engine.state)
     DELAY["s"] = 0.0
@@ -494,165 +499,72 @@ def prompter_lines() -> None:
                                               "z = 3  # хвост z")])
     store.insert(t)
     win._fill_library(t.id)
-    win.open_template(t.id)
-    win.strip.sw_strip.setChecked(True)
-    win._on_mode("lines")
+    focus(win, t)
+    win.printer.set_option("strip", True)
+    win.printer.set_option("mode", "lines")
     pump(0.3)
-    said = [win.prompter.say.text()]
-    win.cmd_toggle()
+
+    def say() -> str:
+        return "\n".join(win.printer.snapshot()["say"])
+    said = [say()]
+    lines = [win.printer.snapshot()["next_lines"]]
+    win.printer.toggle()
     while wait_for(lambda: win.engine.state in (LINE_WAIT, FINISHED)) and win.engine.state == LINE_WAIT:
         pump(0.02)
-        said.append(win.prompter.say.text())
+        said.append(say())
+        lines.append(win.printer.snapshot()["next_lines"])
         if not press_enter(win):
             break
     exp = ["в начале\nхвост x", "между", "перед z\nхвост z"]
-    check("суфлёр по строкам: комментарии между строками и хвостовые", said == exp, repr(said))
+    check("экран урока по строкам: «Скажи» — комментарии между строками и хвостовые", said == exp, repr(said))
+    check("экран урока по строкам: подсвечена следующая строка блока", lines == [[2], [4], [7]], repr(lines))
     check("суфлёр по строкам: напечатан код без комментариев", ED.text == "x = 1\ny = 2\n\nz = 3", repr(ED.text))
     win.close()
     pump()
 
 
-def prompter_window() -> None:
-    """Суфлёр в отдельном окне: «Дальше» печатает шаг за шагом и сам переходит к следующему блоку,
-    «Назад» — к прошлому шагу; «Печатаю сам» — листает шаги и ничего не печатает (и хоткеем тоже)."""
-    from autoprint.storage import BLOCK_MARKDOWN
-    from autoprint.ui.prompter_control import chunk_view
-    ED.reset()
-    win, s, store = make_window(PROFILE_PLAIN)
-    b1 = Block(BLOCK_CODE, "# Заводим x\nx = 1\n# Удвоим\ny = x * 2", steps=[1, 1, 2, 2])
-    b2 = Block(BLOCK_CODE, "# Выводим\nprint(y)\n\n# И ещё раз\nprint(x)")
-    t = Template("суфлёр-окно", [Block(BLOCK_MARKDOWN, "## Задача\nУдвоить **x**.", role="task"), b1, b2])
-    store.insert(t)
-    win._fill_library(t.id)
-    win.open_template(t.id)
-    win.views[t.id].go_to_block(b1.id)
-    win.strip.sw_strip.setChecked(True)
-    win._on_mode("steps")
-    ctl = win.prompter_ctl
-    ctl.show()
-    pump(0.2)
-    w = ctl.window
-    card = ctl.card()
-    check("окно суфлёра открыто, суфлёр под пультом спрятан", ctl.visible() and not win.prompter.isVisible()
-          and s.prompter_window and win.strip.btn_prompter.isChecked())
-    check("окно: шаг 1 из 2, условие задачи и что сказать, код шага",
-          card.title == "шаг 1 из 2" and card.say == ["Задача\nУдвоить x.", "Заводим x"]
-          and card.chunks == [("", ["x = 1"])] and w.btn_next.text().strip() == "Напечатать", repr(card))
-    ctl.next()
-    ok = wait_for(lambda: win.engine.state == FINISHED and win.job is None)
-    pump(0.1)
-    check("«Дальше» печатает шаг 1, окно показывает шаг 2", ok and ED.text == "x = 1"
-          and ctl.card().title == "шаг 2 из 2" and ctl.card().say == ["Удвоим"], repr(ED.text))
-    ctl.next()
-    wait_for(lambda: win.engine.state == FINISHED and win.job is None)
-    moved = wait_for(lambda: win._armed()[1].id == b2.id, 3)
-    pump(0.1)
-    check("блок допечатан — суфлёр сам перешёл к следующему блоку", moved and ED.text == "x = 1\ny = x * 2"
-          and ctl.card().sub.endswith("блок 2 из 2"), ctl.card().sub)
-    ctl.back()
-    pump(0.1)
-    check("«Назад» на первом шаге блока — к последнему шагу прошлого блока",
-          win._armed()[1].id == b1.id and win._step_pointer(b1.id) == 2, str(win._step_pointer(b1.id)))
-    # «Печатаю сам»: хоткей и «Дальше» листают шаги, программа не печатает
-    ED.reset()
-    w.mode_changed.emit("self")
-    win.views[t.id].go_to_block(b2.id)
-    pump(0.1)
-    c = ctl.card()
-    check("«печатаю сам»: блок без разметки — шаги по комментариям",
-          c.title.startswith("шаг 1 из 2") and c.say == ["Выводим"] and c.chunks == [("", ["print(y)"])], repr(c))
-    win._on_hotkey("hotkey_toggle")
-    pump(0.1)
-    c = ctl.card()
-    check("«печатаю сам»: хоткей старта — следующий шаг, в редактор ничего не напечатано",
-          c.title.startswith("шаг 2 из 2") and c.say == ["И ещё раз"] and ED.text == ""
-          and win.engine.state in (IDLE, FINISHED) and win.job is None,
-          repr((c.title, ED.text, win.engine.state)))
-    win._on_hotkey("hotkey_step_back")
-    pump(0.1)
-    check("«печатаю сам»: «шаг назад» — предыдущий шаг", ctl.card().title.startswith("шаг 1 из 2"))
-    ctl.back()
-    pump(0.1)
-    check("«печатаю сам»: «Назад» с первого шага — последний шаг прошлого блока",
-          win._armed()[1].id == b1.id and ctl.card().title.startswith("шаг 2 из 2"), ctl.card().title)
-    # куда вставлять кусок шага, если он не в конце
-    lines = S.analyze("import math\n\nx = 1\ny = math.sqrt(x)", [2, 2, 1, 2], "python", True)
-    chunks, hidden = chunk_view(lines, 2)
-    check("куски шага: import — «в самое начало», остальное — «в конец»",
-          [wh.split(" —")[0] for wh, _ in chunks] == ["↑ в самое начало", "↓ в конец"] and not hidden, repr(chunks))
-    w.mode_changed.emit("auto")
-    w.close()
-    pump(0.1)
-    check("окно закрыли — снова суфлёр под пультом", not ctl.visible() and not s.prompter_window
-          and win.prompter.isVisible() and not win.strip.btn_prompter.isChecked())
-    win.close()
-    pump()
-
-
-def text_blocks() -> None:
-    """Текст тоже печатается (v0.4.1–0.4.2): как Markdown, простым текстом, комментарием по языку кода рядом;
-    выделенные строки — только они; в режиме «По шагам» текст — целиком. Окно у блока (v0.5.2). «Следующий
-    блок» — код и активный текст; на краю ленты печать на паузе не сбрасывается."""
+def notes_never_print() -> None:
+    """0.10: печатается только код. Заметка «Задание» — не печатается и следующей не становится;
+    Ctrl+F9 печатает код урока. Окно у блока кода. «Следующий блок» на краю урока не сбрасывает паузу."""
     from autoprint.storage import BLOCK_MARKDOWN, PROFILE_TERMINAL
     ED.reset()
     win, s, store = make_window(PROFILE_PLAIN)
-    task = Block(BLOCK_MARKDOWN, "## Задача\nПосчитать **сумму** списка.\nБез `sum()`.", role="task")
+    task = Block(BLOCK_MARKDOWN, "## Задача\nПосчитать **сумму** списка.", role="task")
     code = Block(BLOCK_CODE, "total = 0\nfor n in nums:\n    total += n", lang="python")
-    t = Template("текст и код", [task, code])
+    t = Template("заметка и код", [task, code])
     store.insert(t)
     win._fill_library(t.id)
-    win.open_template(t.id)
-    v = win.views[t.id]
-    v.go_to_block(task.id)
-    pump(0.1)
+    win.printer.set_focus(t.id)
+    check("заметку нельзя сделать следующей к печати", not win.printer.arm(task.id) and t.active_block == "")
 
     def print_active() -> str:
         ED.reset()
-        win.cmd_toggle()
-        wait_for(lambda: win.engine.state == FINISHED and win.job is not None, 10)
+        win.printer.toggle()
+        wait_for(lambda: win.engine.state == FINISHED and win.printer.job is not None, 10)
         pump(0.05)
         return ED.text
-    got = {}
-    for mode in ("markdown", "plain", "comment"):
-        task.print_as = mode
-        got[mode] = print_active()
-    check("текст как Markdown — исходник", got["markdown"] == task.text, repr(got["markdown"]))
-    check("текст простым текстом — без разметки", got["plain"] == "Задача\nПосчитать сумму списка.\nБез sum().",
-          repr(got["plain"]))
-    check("текст комментарием — по языку кода рядом (# для python)",
-          got["comment"] == "# Задача\n# Посчитать сумму списка.\n# Без sum().", repr(got["comment"]))
-    task.print_as = "plain"
-    task.sel = [task.text.index("Посчитать"), task.text.index("Без")]
-    check("выделенная строка текста — только она", print_active() == "Посчитать сумму списка.", repr(ED.text))
-    task.sel = []
-    win._on_mode("steps")
-    check("«По шагам», активный текст — печатается целиком", print_active() == "Задача\nПосчитать сумму списка.\n"
-          "Без sum()." and win.job["kind"] == "block", repr(ED.text))
-    win._on_mode("block")
+    check("Ctrl+F9 без указателя — первый код урока, а не заметка", print_active() == code.text, repr(ED.text))
+    check("после кода указатель снят (больше кода нет), последний — этот код",
+          t.active_block == "" and win.printer.last == code.id)
     # окно у блока: «Терминал» при общем «Блокнот»
     code.profile = PROFILE_TERMINAL
-    v.go_to_block(code.id)
-    win._update_armed_label()
-    label = win.strip.info.text()
+    win.printer.restart()                       # «ещё раз» — снова этот код следующим
     print_active()
-    check("окно у блока: «Терминал» — на пульте, в задании и у движка", "окно: Терминал" in label
-          and win.job["profile"] == PROFILE_TERMINAL and win.engine.profile == PROFILE_TERMINAL, label[-80:])
+    check("окно у блока: «Терминал» — в задании и у движка",
+          win.printer.job["profile"] == PROFILE_TERMINAL and win.engine.profile == PROFILE_TERMINAL)
     code.profile = ""
-    # «следующий блок»: из текста — в код под ним; на краю — печать на паузе не сбрасывается
-    v.go_to_block(task.id)
-    win.cmd_block(+1)
-    check("«следующий блок» из условия — в код под ним", t.active_block == code.id)
+    win.printer.arm(code.id)
     DELAY["s"] = 0.02
     ED.reset()
-    win.cmd_toggle()
+    win.printer.toggle()
     wait_for(lambda: win.engine.state == RUNNING, 5)
     win.engine.pause()
     wait_for(lambda: win.engine.state == "paused", 5)
-    win.cmd_block(+1)
-    check("на краю ленты «следующий блок» не сбрасывает печать на паузе",
+    win.printer.step(+1)
+    check("на краю урока «следующий блок» не сбрасывает печать на паузе",
           win.engine.state == "paused" and t.active_block == code.id, win.engine.state)
     DELAY["s"] = 0.0
-    win.cmd_stop()
+    win.printer.stop()
     win.close()
     pump()
 
@@ -794,13 +706,13 @@ def tour_sample() -> None:
     ED.reset()
     win, s, store = make_window(PROFILE_PLAIN)
     titles = [t.title for t in store.templates]
-    check("новая база: экскурсия одна и открыта", titles.count(TOUR_TITLE) == 1 and
-          win.current_view().template.title == TOUR_TITLE, repr(titles))
+    check("новая база: экскурсия одна и в фокусе", titles.count(TOUR_TITLE) == 1 and
+          win.printer.focus().title == TOUR_TITLE, repr(titles))
     win.close()
     pump()
     win, s, store = make_window(PROFILE_PLAIN)   # тот же templates.json, но в настройках пример ещё не видели
-    check("после обновления: экскурсия добавлена наверх и открыта", store.templates[0].title == TOUR_TITLE and
-          win.current_view().template is store.templates[0] and "tour_v1" in s.samples_seen)
+    check("после обновления: экскурсия добавлена наверх и в фокусе", store.templates[0].title == TOUR_TITLE and
+          win.printer.focus() is store.templates[0] and "tour_v1" in s.samples_seen)
     win.close()
     pump()
 
@@ -810,21 +722,20 @@ def tray_click_keeps_pause() -> None:
     «кликом мышью» — пункт меню её оставляет, а не продолжает печать."""
     ED.reset()
     win, s, store = make_window(PROFILE_PLAIN)
-    win.open_template(store.templates[0].id)
-    pump()
+    focus(win, store.templates[0])
     DELAY["s"] = 0.03
     try:
-        win.cmd_toggle()
+        win.printer.toggle()
         wait_for(lambda: win.engine.state == RUNNING, 5)
         MOUSE["clicks"] += 1                     # правый щелчок по значку в трее
         wait_for(lambda: win.engine.state == "paused", 3)
-        win._remember_press()                    # меню открылось (aboutToShow)
-        win.cmd_toggle(countdown=0, pressed=True)   # пункт «Старт / пауза»
+        win.printer.remember_press()             # меню открылось (aboutToShow)
+        win.printer.toggle(countdown=0, pressed=True)   # пункт «Старт / пауза»
         pump(0.3)
         st = win.engine.state
     finally:
         DELAY["s"] = 0.0
-        win.cmd_stop()
+        win.printer.stop()
     check("меню трея «Старт / пауза» во время печати — пауза остаётся", st == "paused", st)
     win.close()
     pump()
@@ -848,8 +759,7 @@ def main() -> int:
     lines_block(PROFILE_IDE, True, hotkey_with_ctrl=True)
     races()
     prompter_lines()
-    prompter_window()
-    text_blocks()
+    notes_never_print()
     plain_in_editor_hint()
     comments_speed()
     check("без исключений", not errors, errors[0].splitlines()[-1] if errors else "")

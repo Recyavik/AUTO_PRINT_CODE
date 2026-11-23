@@ -1,8 +1,8 @@
 """Сквозная проверка нового интерфейса: главное окно готовит текст активного блока и печатает его в Блокнот.
 
-    python tests/ui_print.py [block steps lines prompter vscode]
+    python tests/ui_print.py [block steps lines vscode]
 
-Печать запускается так же, как по хоткею (cmd_toggle). Проверяются оба профиля и режим «Без комментариев»
+Печать запускается так же, как по хоткею (printer.toggle). Проверяются оба профиля и режим «Без комментариев»
 (в нём ход печати сопоставляется с исходным блоком по карте позиций). Во время прогона НЕ трогать
 клавиатуру и мышь. Рабочая папка data/ не используется.
 """
@@ -72,9 +72,10 @@ def run(win: MainWindow, name: str, profile: str, strip: bool) -> bool:
     s = win.settings
     s.profile, s.strip_comments = profile, strip
     win._apply_settings()
-    win._invalidate_job_if_idle()
-    v = win.current_view()
-    block = v.template.find_block(v.template.active_block)
+    win.printer._invalidate_job_if_idle()
+    t = win.printer.focus()
+    block = t.find_block(t.active_block) or t.next_code()
+    win.printer.arm(block.id)
     expected = strip_comments(block.text, block.lang)[0] if strip else block.text
     path = os.path.join(SP, f"{name}.txt")
     open(path, "w", encoding="utf-8").write("")
@@ -83,30 +84,26 @@ def run(win: MainWindow, name: str, profile: str, strip: bool) -> bool:
         print(f"[{name}] Блокнот не получил фокус")
         return False
     pump(1.5)
-    win.cmd_toggle()   # как по хоткею
+    win.printer.toggle()   # как по хоткею
     seen_progress = set()
     end = time.time() + 90
     while time.time() < end and win.engine.state != FINISHED:
         app.processEvents()
-        cw = v.code_widget(block.id)
-        if cw.editor._progress:
-            seen_progress.add(cw.editor._progress[1])
+        seen_progress.add(win.printer.snapshot()["progress"])
         time.sleep(0.01)
     pump(0.5)
     w.tap(ord("S"), w.VK_CONTROL)
     time.sleep(1.0)
     got = open(path, encoding="utf-8-sig").read().replace("\r\n", "\n")
     ok = got.rstrip("\n") == expected.rstrip("\n")
-    lines = win.strip.count.text()
-    print(f"[{name}] state={win.engine.state} {'MATCH' if ok else 'DIFF'} · пульт: «{lines}» · "
-          f"позиций подсветки: {len(seen_progress)}")
+    print(f"[{name}] state={win.engine.state} {'MATCH' if ok else 'DIFF'} · "
+          f"позиций хода печати: {len(seen_progress)}")
     if not ok:
         print("  GOT:", repr(got))
         print("  EXP:", repr(expected))
     w.tap(ord("W"), w.VK_CONTROL)
     pump(1.0)
-    total = expected.count("\n") + 1
-    return ok and len(seen_progress) > 5 and lines == f"{total} / {total} стр."
+    return ok and len(seen_progress) > 5
 
 
 def open_editor(cmd: list[str], path: str, settle: float) -> bool:
@@ -135,20 +132,20 @@ def run_steps(win: MainWindow, name: str, profile: str, cmd: list[str], settle: 
     s = win.settings
     s.profile, s.strip_comments = profile, True
     t = next(t for t in win.store.templates if t.title.startswith("Пример: пошаговый"))
-    win.open_template(t.id)
+    win.printer.set_focus(t.id)
     block = t.code_blocks()[0]
-    win.current_view().arm(block.id)
-    win._on_mode("steps")
+    win.printer.arm(block.id)
+    win.printer.set_option("mode", "steps")
     win._apply_settings()
-    win.step_next.pop(block.id, None)
+    win.printer.step_next.pop(block.id, None)
     expected = strip_comments(block.text, block.lang)[0]
     path = os.path.join(SP, f"{name}.{'py' if 'vs' in name else 'txt'}")
     open(path, "w", encoding="utf-8").write("")
     if not open_editor(cmd, path, settle):
         return False
-    n_steps = len(win._block_steps(block))
+    n_steps = len(win.printer._block_steps(block))
     for i in range(n_steps):
-        win.cmd_toggle()
+        win.printer.toggle()
         if not wait_state(win, (FINISHED,)):
             print(f"[{name}] шаг {i + 1} не закончился, состояние {win.engine.state}")
             return False
@@ -158,89 +155,16 @@ def run_steps(win: MainWindow, name: str, profile: str, cmd: list[str], settle: 
     time.sleep(1.2)
     got = open(path, encoding="utf-8-sig").read().replace("\r\n", "\n")
     ok = got.rstrip("\n") == expected.rstrip("\n")
-    done = win._step_pointer(block.id) is None
+    done = win.printer.step_pointer(block.id) is None
     print(f"[{name}] шагов {n_steps} · {'MATCH' if ok else 'DIFF'} · указатель в конце: "
-          f"{'все шаги' if done else win._step_pointer(block.id)}")
+          f"{'все шаги' if done else win.printer.step_pointer(block.id)}")
     if not ok:
         print("  GOT:", repr(got))
         print("  EXP:", repr(expected))
     w.tap(ord("W"), w.VK_CONTROL)
     pump(1.0)
-    win._on_mode("block")
+    win.printer.set_option("mode", "block")
     return ok and done and win.engine.state in (FINISHED, IDLE)
-
-
-def click(widget) -> None:
-    """Настоящий щелчок мышью по середине виджета (курсор ставит Qt — с учётом масштаба экрана)."""
-    from PySide6.QtGui import QCursor
-    QCursor.setPos(widget.mapToGlobal(widget.rect().center()))
-    time.sleep(0.15)
-    _u.mouse_event(0x0002, 0, 0, 0, 0)   # LEFTDOWN
-    time.sleep(0.05)
-    _u.mouse_event(0x0004, 0, 0, 0, 0)   # LEFTUP
-
-
-def run_prompter(win: MainWindow, name: str) -> bool:
-    """Окно суфлёра вживую: щелчок по «Дальше» печатает шаг в Блокнот — фокус остаётся в Блокноте
-    (окно суфлёра не активируется); «Печатаю сам» — щелчки листают шаги и ничего не печатают."""
-    s = win.settings
-    s.profile, s.strip_comments = "plain", True
-    t = next(t for t in win.store.templates if t.title.startswith("Пример: пошаговый"))
-    win.open_template(t.id)
-    block = t.code_blocks()[0]
-    win.current_view().arm(block.id)
-    win._on_mode("steps")
-    win._apply_settings()
-    win.step_next.pop(block.id, None)
-    ctl = win.prompter_ctl
-    ctl.show()
-    pump(0.5)
-    pw = ctl.window
-    from autoprint.ui.frameless import user32
-    ex = user32.GetWindowLongPtrW(int(pw.winId()), -20)
-    noact = bool(ex & 0x08000000)
-    path = os.path.join(SP, f"{name}.txt")
-    open(path, "w", encoding="utf-8").write("")
-    if not open_editor(["notepad.exe"], path, 1.5):
-        return False
-    n_steps = len(win._block_steps(block))
-    focus_kept = True
-    for i in range(n_steps):
-        click(pw.btn_next)
-        from autoprint.typer import COUNTDOWN, RUNNING
-        started = wait_state(win, (RUNNING, COUNTDOWN), 10)   # сначала — началась печать этого шага
-        if not started or not wait_state(win, (FINISHED,)):
-            print(f"[{name}] шаг {i + 1} не напечатан, состояние {win.engine.state}")
-            return False
-        pump(0.4)
-        focus_kept = focus_kept and f"{name}.txt" in w.window_title(w.foreground_window())
-    expected = strip_comments(block.text, block.lang)[0]
-    w.tap(ord("S"), w.VK_CONTROL)
-    time.sleep(1.2)
-    got = open(path, encoding="utf-8-sig").read().replace("\r\n", "\n")
-    ok = got.rstrip("\n") == expected.rstrip("\n")
-    # «Печатаю сам»: щелчки листают шаги, в Блокнот ничего не попадает
-    click(pw.mode.buttons["self"])
-    pump(0.3)
-    before = ctl.card().title
-    click(pw.btn_next)
-    pump(0.5)
-    after = ctl.card().title
-    w.tap(ord("S"), w.VK_CONTROL)
-    time.sleep(0.8)
-    same = open(path, encoding="utf-8-sig").read().replace("\r\n", "\n") == got
-    print(f"[{name}] окно не активируется: {noact} · шагов {n_steps} щелчками · {'MATCH' if ok else 'DIFF'} · "
-          f"фокус остался в Блокноте: {focus_kept} · «печатаю сам»: «{before}» → «{after}», "
-          f"в Блокноте без изменений: {same}")
-    if not ok:
-        print("  GOT:", repr(got))
-        print("  EXP:", repr(expected))
-    w.tap(ord("W"), w.VK_CONTROL)
-    pump(1.0)
-    pw.mode_changed.emit("auto")
-    pw.close()
-    win._on_mode("block")
-    return ok and noact and focus_kept and before != after and same
 
 
 def run_lines(win: MainWindow, name: str, profile: str) -> bool:
@@ -248,18 +172,18 @@ def run_lines(win: MainWindow, name: str, profile: str) -> bool:
     from autoprint.typer import LINE_WAIT
     s = win.settings
     s.profile, s.strip_comments = profile, False
-    win.open_template(win.store.templates[0].id)
-    v = win.current_view()
-    block = v.template.code_blocks()[0]
-    v.arm(block.id)
-    win._on_mode("lines")
+    t = win.store.templates[0]
+    win.printer.set_focus(t.id)
+    block = t.code_blocks()[0]
+    win.printer.arm(block.id)
+    win.printer.set_option("mode", "lines")
     win._apply_settings()
     expected = block.text
     path = os.path.join(SP, f"{name}.txt")
     open(path, "w", encoding="utf-8").write("")
     if not open_editor(["notepad.exe"], path, 1.5):
         return False
-    win.cmd_toggle()
+    win.printer.toggle()
     waits = 0
     end = time.time() + 120
     while time.time() < end and win.engine.state != FINISHED:
@@ -271,7 +195,7 @@ def run_lines(win: MainWindow, name: str, profile: str) -> bool:
                 w.tap(w.VK_RETURN)                 # как будто Enter нажал человек
                 win.engine.continue_line(by_enter=True)
             else:
-                win.cmd_toggle()                   # хоткей «дальше»
+                win.printer.toggle()               # хоткей «дальше»
             wait_state(win, (FINISHED, "running"), 10)
         time.sleep(0.01)
     pump(0.5)
@@ -286,7 +210,7 @@ def run_lines(win: MainWindow, name: str, profile: str) -> bool:
         print("  EXP:", repr(expected))
     w.tap(ord("W"), w.VK_CONTROL)
     pump(1.0)
-    win._on_mode("block")
+    win.printer.set_option("mode", "block")
     return ok and waits == nonblank
 
 
@@ -313,8 +237,6 @@ def main() -> int:
                     run_steps(win, "ui_steps_ide", "ide", ["notepad.exe"])]
     if "lines" in which:
         results += [run_lines(win, "ui_lines_plain", "plain"), run_lines(win, "ui_lines_ide", "ide")]
-    if "prompter" in which:
-        results.append(run_prompter(win, "ui_prompter"))
     if "vscode" in which:
         if VSCODE.exists():
             cmd = [str(VSCODE), f"--user-data-dir={SP}/vscode-data", f"--extensions-dir={SP}/vscode-ext",

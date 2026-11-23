@@ -156,23 +156,6 @@ class RealWheelTest(unittest.TestCase):
         self.assertEqual(cb.currentIndex(), 0)
         area.close()
 
-    def test_real_wheel_stage_minutes_in_lesson(self):
-        """Тот самый случай: прокручиваешь занятие — минуты этапа под мышью не меняются."""
-        from autoprint.storage import BLOCK_MARKDOWN, BLOCK_STAGE, Block, Template
-        from autoprint.ui.template_view import TemplateView
-        t = Template(title="x", blocks=[Block(BLOCK_STAGE, "", title="Этап", minutes=10)]
-                     + [Block(BLOCK_MARKDOWN, f"текст {i}", role="say") for i in range(30)])
-        v = TemplateView(t)
-        v.resize(900, 500)
-        v.show()
-        pump(80)
-        st = v.widgets[0]
-        self.real_wheel(v, st.minutes)
-        self.real_wheel(v, st.minutes)
-        self.assertEqual(st.minutes.value(), 10)
-        self.assertGreater(v.scroll.verticalScrollBar().value(), 0)
-        v.close()
-
     def test_click_then_wheel_changes(self):
         from PySide6.QtTest import QTest
         sp = QSpinBox()
@@ -219,102 +202,6 @@ def drop_main(win) -> None:
     shiboken6.delete(win)
     pump(10)
 
-
-class ThemeTest(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls):
-        cls.win, cls.store = make_main(PORT + 1)
-        cls.ts = [cls.store.insert(big_template(30, f"Занятие {k}")) for k in range(4)]
-
-    @classmethod
-    def tearDownClass(cls):
-        theme.set_mode("dark")
-        cls.win.efir.shutdown()
-        drop_main(cls.win)
-
-    def test_block_widget_count(self):
-        from autoprint.storage import BLOCK_CODE, BLOCK_MARKDOWN, Block, Template
-        from autoprint.ui.blocks import BlockWidget
-        from autoprint.ui.template_view import TemplateView
-        t = Template(title="x", blocks=[Block(BLOCK_MARKDOWN, "привет **мир**", role="say"),
-                                        Block(BLOCK_CODE, "print(1)\nprint(2)")])
-        v = TemplateView(t)
-        v.show()
-        pump(20)
-        for b in v.findChildren(BlockWidget):
-            n = len(b.findChildren(QWidget))
-            self.assertLessEqual(n, 32, f"{type(b).__name__}: {n} виджетов")
-        v.close()
-
-    def test_role_chip_menu(self):
-        from autoprint.storage import BLOCK_MARKDOWN, Block
-        from autoprint.ui.blocks import MarkdownBlockWidget
-        w = MarkdownBlockWidget(Block(BLOCK_MARKDOWN, "текст", role="text"))
-        got = []
-        w.type_requested.connect(lambda wdg, key: got.append(key))
-        m = w.kind.build_menu()
-        act = next(a for a in m.actions() if a.text() == "Говоришь")
-        act.trigger()
-        self.assertEqual(got, ["say"])
-        self.assertEqual(w.kind.text(), "ЗАМЕТКА")
-
-    def test_views_lru(self):
-        for t in self.ts:
-            self.win.open_template(t.id)
-            pump(10)
-        self.assertLessEqual(len(self.win.views), 2)
-        self.assertIn(self.ts[-1].id, self.win.views)
-
-    def test_running_job_view_kept(self):
-        from autoprint.typer import RUNNING
-        a, b, c = self.ts[0], self.ts[1], self.ts[2]
-        self.win.open_template(a.id)
-        old_job, old_state = self.win.job, self.win.engine.state
-        self.win.job = {"tid": a.id, "bid": a.blocks[0].id}
-        self.win.engine.state = RUNNING
-        try:
-            self.win.open_template(b.id)
-            self.win.open_template(c.id)
-            pump(10)
-            self.assertIn(a.id, self.win.views)
-        finally:
-            self.win.job, self.win.engine.state = old_job, old_state
-
-    def test_theme_rebuild_keeps_place(self):
-        t = self.store.insert(big_template(120, "Сто двадцать блоков"))
-        v = self.win.open_template(t.id)
-        pump(50)
-        target = t.blocks[60]
-        v.arm(target.id)
-        bar = v.scroll.verticalScrollBar()
-        bar.setValue(bar.maximum() // 2)
-        pump(20)
-        pos = bar.value()
-        theme.set_mode("light" if theme.dark else "dark")
-        pump(80)
-        v2 = self.win.current_view()
-        self.assertIsNot(v2, v)
-        self.assertEqual(v2.template.id, t.id)
-        self.assertEqual(v2.template.active_block, target.id)
-        self.assertLess(abs(v2.scroll.verticalScrollBar().value() - pos), 80)
-
-    def test_theme_switch_fast(self):
-        """Смена темы стоит не больше, чем открыть то же занятие заново (раньше — в 2–4 раза дольше и росла
-        с каждой открытой вкладкой). Сравниваем с открытием, а не с секундами: машины и нагрузка разные."""
-        t = self.store.insert(big_template(120, "Ещё сто двадцать"))
-        t0 = time.time()
-        self.win.open_template(t.id)
-        app.processEvents()
-        opened = time.time() - t0
-        t0 = time.time()
-        theme.set_mode("light" if theme.dark else "dark")
-        app.processEvents()
-        took = time.time() - t0
-        self.assertLess(took, opened * 1.6 + 0.5, f"смена темы {took:.1f} с, открытие {opened:.1f} с")
-
-
-
-# ================================================================ Task 3: трей, окно суфлёра, логотип
 
 class TrayTest(unittest.TestCase):
     def test_default_is_tray(self):
@@ -593,7 +480,7 @@ class LessonStartTest(unittest.TestCase):
         cls.win, cls.store = make_main(PORT + 4)
         cls.t = cls.store.insert(Template(title="Урок", blocks=[
             Block(BLOCK_STAGE, title="Вступление", minutes=5), Block(BLOCK_STAGE, title="Теория", minutes=20)]))
-        cls.win.open_template(cls.t.id)
+        cls.win.printer.set_focus(cls.t.id)
 
     @classmethod
     def tearDownClass(cls):
@@ -628,7 +515,7 @@ class LessonStartTest(unittest.TestCase):
         t0 = time.time()
         self.t.blocks.append(Block(BLOCK_STAGE, title="Итоги", minutes=5))
         try:
-            self.win.views[self.t.id].changed.emit()
+            self.win.lesson.schedule_publish()
             pump(250)
             self.win.efir.tab_changed.emit()            # посторонний сигнал прямо перед отправкой
             while time.time() - t0 < 0.45:
@@ -852,67 +739,6 @@ def hosted(widget: QWidget, width: int = 900) -> QWidget:
     return host
 
 
-class EditorBlocksTest(unittest.TestCase):
-    def image_widget(self, w: int, h: int):
-        from autoprint.storage import BLOCK_IMAGE, Block
-        from autoprint.ui.blocks import ImageBlockWidget
-        f = make_image(f"img-{w}x{h}.png", w, h)
-        wd = ImageBlockWidget(Block(BLOCK_IMAGE, str(f), title="Стандартный диалог"))
-        return wd, hosted(wd)
-
-    def test_image_fits_width(self):
-        wd, host = self.image_widget(3840, 2160)
-        self.assertGreaterEqual(wd.preview_size().width(), 800)
-        host.close()
-
-    def test_small_image_not_upscaled(self):
-        wd, host = self.image_widget(320, 200)
-        self.assertEqual((wd.preview_size().width(), wd.preview_size().height()), (320, 200))
-        host.close()
-
-    def test_image_height_capped(self):
-        wd, host = self.image_widget(1000, 4000)
-        self.assertLessEqual(wd.preview_size().height(), 520)
-        host.close()
-
-    def test_image_click_opens_viewer(self):
-        wd, host = self.image_widget(1600, 900)
-        dlg = wd.open_viewer()
-        try:
-            self.assertTrue(dlg.isVisible())
-            self.assertEqual(dlg.image_size().width(), 1600)
-        finally:
-            dlg.close()
-            host.close()
-
-    def test_no_role_chip_on_image_and_stage(self):
-        from autoprint.storage import BLOCK_IMAGE, BLOCK_MARKDOWN, BLOCK_STAGE, Block
-        from autoprint.ui.blocks import ImageBlockWidget, MarkdownBlockWidget, StageBlockWidget
-        for cls, b, chip in ((ImageBlockWidget, Block(BLOCK_IMAGE, ""), False),
-                             (StageBlockWidget, Block(BLOCK_STAGE, "", title="Этап", minutes=5), False),
-                             (MarkdownBlockWidget, Block(BLOCK_MARKDOWN, "текст", role="say"), True)):
-            w = cls(b)
-            host = hosted(w)
-            self.assertEqual(w.kind.isVisibleTo(w), chip, cls.__name__)
-            host.close()
-
-    def test_role_tint_painted(self):
-        from autoprint.storage import BLOCK_MARKDOWN, Block
-        from autoprint.ui.blocks import MarkdownBlockWidget
-        say = MarkdownBlockWidget(Block(BLOCK_MARKDOWN, "а", role="say"))
-        plain = MarkdownBlockWidget(Block(BLOCK_MARKDOWN, "а", role="text"))
-        h1, h2 = hosted(say, 600), hosted(plain, 600)
-        a = say.grab().toImage().pixelColor(say.width() - 30, say.height() - 6)
-        b = plain.grab().toImage().pixelColor(plain.width() - 30, plain.height() - 6)
-        self.assertNotEqual(a.name(), b.name())
-        self.assertGreater(a.blue(), b.blue())          # «Говоришь» — голубоватый фон
-        h1.close()
-        h2.close()
-
-
-
-# ================================================================ Task 9: пример урока с картинками
-
 class SampleTest(unittest.TestCase):
     def test_has_everything(self):
         from autoprint import scenario
@@ -1129,24 +955,6 @@ class IpynbTest(unittest.TestCase):
 class ImageArmTest(unittest.TestCase):
     """Ревью №2: картинку можно сделать активной — кнопкой в редакторе и на странице суфлёра."""
 
-    def test_image_block_arm_button(self):
-        from autoprint.storage import BLOCK_IMAGE, BLOCK_MARKDOWN, Block, Template
-        from autoprint.ui.template_view import TemplateView
-        img = make_image("арм.png", 80, 60)
-        t = Template(title="x", blocks=[Block(BLOCK_MARKDOWN, "текст", role="say"),
-                                        Block(BLOCK_IMAGE, str(img), title="Слайд")])
-        v = TemplateView(t)
-        v.resize(900, 600)
-        v.show()
-        pump(50)
-        w = v.widgets[1]
-        self.assertTrue(w.arm_btn.isVisibleTo(w))
-        self.assertIn("Вставлять", w.arm_btn.text())
-        w.arm_btn.click()
-        self.assertEqual(t.active_block, t.blocks[1].id)
-        self.assertIn("Ctrl+V", w.arm_btn.text() + w.arm_btn.toolTip())
-        v.close()
-
     def test_live_start_field_commits_on_enter(self):
         """Ревью №3: «Начало» идущего урока — не на каждое нажатие (набрали «1» поверх 17:30 — это не 01:30),
         а по Enter/уходу из поля; шапка не перерисовывается, пока в ней печатают. Поведение в Edge проверено
@@ -1156,70 +964,6 @@ class ImageArmTest(unittest.TestCase):
         self.assertNotIn('tm.onchange = () => { if (tm.value) cmd({ cmd: "set_start"', html)
         self.assertIn('tm.addEventListener("blur", commit)', html)
         self.assertIn("if (toolsBusy()) toolsStale = true;", html)
-
-    def test_lesson_page_image_arm(self):
-        from autoprint.efir.server import PAGE_DIR
-        html = (PAGE_DIR / "lesson.html").read_text(encoding="utf-8")
-        self.assertIn("Вставлять эту", html)
-
-
-# ================================================================ Task 11: картинка в Jupyter вставкой
-
-class PasteTest(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls):
-        from autoprint.storage import BLOCK_IMAGE, Block, Template
-        cls.win, cls.store = make_main(PORT + 6)
-        img = make_image("для-вставки.png", 64, 48)
-        cls.t = cls.store.insert(Template(title="Картинки", blocks=[Block(BLOCK_IMAGE, str(img), title="Слайд"),
-                                                                     Block(BLOCK_IMAGE, "нет/такого.png")]))
-        cls.win.open_template(cls.t.id)
-
-    @classmethod
-    def tearDownClass(cls):
-        cls.win.efir.shutdown()
-        drop_main(cls.win)
-
-    def setUp(self):
-        from autoprint import winapi
-        self.taps = []
-        self._saved = (winapi.tap, winapi.foreground_window, winapi.is_own_window, winapi.modifiers_down)
-        winapi.tap = lambda vk, *mods: self.taps.append((vk, mods))
-        winapi.foreground_window = lambda: 4242
-        winapi.is_own_window = lambda hwnd: False
-        winapi.modifiers_down = lambda: False
-        QApplication.clipboard().clear()
-
-    def tearDown(self):
-        from autoprint import winapi
-        winapi.tap, winapi.foreground_window, winapi.is_own_window, winapi.modifiers_down = self._saved
-
-    def arm(self, i: int):
-        self.win.current_view().arm(self.t.blocks[i].id)
-
-    def test_paste_sends_ctrl_v(self):
-        from autoprint import winapi
-        self.arm(0)
-        self.win.cmd_toggle()
-        pump(600)
-        self.assertFalse(QApplication.clipboard().image().isNull())
-        self.assertEqual(self.taps, [(0x56, (winapi.VK_CONTROL,))])
-
-    def test_no_paste_into_self(self):
-        from autoprint import winapi
-        winapi.is_own_window = lambda hwnd: True
-        self.arm(0)
-        self.win.cmd_toggle()
-        pump(600)
-        self.assertEqual(self.taps, [])
-
-    def test_missing_image_no_paste(self):
-        self.arm(1)
-        self.win.cmd_toggle()
-        pump(600)
-        self.assertEqual(self.taps, [])
-        self.assertTrue(QApplication.clipboard().image().isNull())
-
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

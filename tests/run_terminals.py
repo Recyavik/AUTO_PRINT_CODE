@@ -150,7 +150,7 @@ def run(name: str, profile: str, human: bool = False) -> bool:
             return False
         time.sleep(4)     # оболочка загрузилась и показала приглашение (--login читает профиль)
         s = replace(Settings(), profile=profile, cpm=900, jitter=0, newline_pause_ms=400, punct_pause_ms=0,
-                    key_gap_ms=30, human_typing=human, typo_per_100_words=30, think_pause_s=0.3,
+                    key_gap_ms=30, human_typing=human, typos_per_100=1.5, think_pause_s=0.3,
                     autopause_on_focus_change=True)
         problem = type_text(script, s)
         out = d / "out.txt"
