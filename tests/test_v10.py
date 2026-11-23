@@ -709,6 +709,164 @@ class EfirWindowTest(unittest.TestCase):
         self.assertEqual((w.look_id, w.background), (other.id, "anim:cube"))
 
 
+# ================================================================ Task 13: ошибки «Эфира» из разбора
+
+class FixTest(unittest.TestCase):
+    def test_anchor_rule(self):
+        from datetime import datetime
+        from autoprint.efir.model import anchor_at
+        d = datetime(2026, 11, 24, 7, 0)
+        self.assertEqual(anchor_at("20:00", d), datetime(2026, 11, 24, 20, 0))      # за 13 ч — сегодня, не вчера
+        self.assertEqual(anchor_at("20:00", datetime(2026, 11, 24, 20, 20)), datetime(2026, 11, 24, 20, 0))
+        self.assertEqual(anchor_at("00:10", datetime(2026, 11, 24, 23, 50)), datetime(2026, 11, 25, 0, 10))
+        self.assertEqual(anchor_at("23:50", datetime(2026, 11, 25, 3, 0)), datetime(2026, 11, 24, 23, 50))
+        self.assertEqual(anchor_at("08:00", datetime(2026, 11, 24, 15, 0)), datetime(2026, 11, 25, 8, 0))
+
+    def lesson_window(self, port):
+        t = Template("Урок", [stage("A", 10, id="sA"), stage("B", 10, id="sB"), stage("C", 10, id="sC")], id="LT")
+        win = make_window([t], port=port)
+        win.printer.set_focus("LT")
+        return win, t
+
+    def close(self, win):
+        win.efir.stop_live()
+        win.efir.shutdown()
+        win._quitting = True
+        win.close()
+        pump()
+
+    def test_live_edit_keeps_stage(self):
+        from datetime import datetime, timedelta
+        win, t = self.lesson_window(18975)
+        try:
+            win.lesson.command({"cmd": "start"})
+            store = win.efir.store
+            anchor = datetime.now().replace(microsecond=0) - timedelta(minutes=15)      # идёт этап B с 5-й минуты
+            store.set_live(store.live.webinar_id, anchor)
+            win.lesson.publish()
+            t.find_block("sA").minutes = 20
+            win.lesson.publish()
+            self.assertEqual(store.live.anchor, anchor - timedelta(minutes=10))           # B — на тех же часах
+            self.assertEqual(win.efir.live_webinar().schedule[0].min, 20)
+            t.blocks.remove(t.find_block("sB"))                                            # удалили текущий этап
+            before = store.live.anchor
+            win.lesson.publish()
+            self.assertEqual(store.live.anchor, before)
+        finally:
+            self.close(win)
+
+    def test_break_until_stage_end(self):
+        from datetime import datetime, timedelta
+        win, t = self.lesson_window(18976)
+        try:
+            t.find_block("sB").stage_kind = "break"
+            win.lesson.command({"cmd": "start"})
+            store = win.efir.store
+            anchor = datetime.now().replace(microsecond=0) - timedelta(minutes=13)        # перерыв идёт 3 минуты
+            store.set_live(store.live.webinar_id, anchor)
+            win.lesson.command({"cmd": "break", "stage": "sB", "minutes": 10})
+            end = (anchor + timedelta(minutes=20)).timestamp()
+            self.assertEqual(win.efir.mode, "break")
+            self.assertLess(abs(win.efir.brk_ends - end), 2)
+            win.efir.show_background()
+            win.lesson.command({"cmd": "break"})                                           # вне плана
+            self.assertAlmostEqual(win.efir.brk_total, 600, delta=1)                       # break_min урока — 10
+        finally:
+            self.close(win)
+
+    def test_break_auto_background(self):
+        ctl = efir_controller("auto", 18977)
+        from autoprint.efir.model import Activity, Webinar
+        w = ctl.store.add([Webinar(title="Пара", schedule=[Activity("A", 30)])])[0]
+        ctl.launch(w.id, "")
+        ctl.start_break(1)
+        ctl.brk_ends = time.time() - 61
+        ctl._tick()
+        self.assertEqual(ctl.mode, "idle")
+        self.assertIsNone(ctl.store.brk)
+        ctl.stop_live()
+        ctl.server.stop()
+
+    def test_replace_asks(self):
+        ctl = efir_controller("replace", 18978)
+        from autoprint.efir.model import Activity, Webinar
+        a, b = ctl.store.add([Webinar(title="A", schedule=[Activity("x", 30)]),
+                              Webinar(title="B", schedule=[Activity("y", 30)])])
+        asked = []
+        ctl.confirm_replace = lambda cur, new: asked.append((cur, new)) or False
+        ctl.launch(a.id, "")
+        self.assertEqual(asked, [])
+        ctl.launch(b.id, "")
+        self.assertEqual(asked, [("A", "B")])
+        self.assertEqual(ctl.live_webinar().id, a.id)
+        ctl.confirm_replace = lambda cur, new: True
+        ctl.launch(b.id, "")
+        self.assertEqual(ctl.live_webinar().id, b.id)
+        ctl.stop_live()
+        ctl.server.stop()
+
+    def test_restart_keeps_break(self):
+        from autoprint.efir import store as store_mod
+        from autoprint.efir.model import Activity, Webinar
+        from autoprint.ui.efir_control import EfirController
+        ctl = efir_controller("restart", 18979)
+        folder = ctl.store.path.parent
+        w = ctl.store.add([Webinar(title="Пара", schedule=[Activity("A", 60)])])[0]
+        ctl.launch(w.id, "")
+        ctl.start_break(10)
+        ends = ctl.brk_ends
+        ctl.timer_window and ctl.timer_window.close_silently()
+        ctl.server.stop()
+        old = store_mod.efir_dir
+        store_mod.efir_dir = lambda: folder
+        try:
+            ctl2 = EfirController(None)
+        finally:
+            store_mod.efir_dir = old
+        ctl2.settings = ctl.settings
+        ctl2.show_timer = lambda: None
+        ctl2.ensure_server()
+        self.assertEqual(ctl2.server.snapshot("screen")["mode"], "wait")       # до восстановления — прежний кадр
+        ctl2.restore()
+        self.assertEqual(ctl2.mode, "break")
+        self.assertAlmostEqual(ctl2.brk_ends, ends, delta=1)
+        self.assertEqual(ctl2.server.snapshot("screen")["mode"], "break")
+        ctl2.stop_live()
+        ctl2.server.stop()
+
+    def test_stale_exercise_keeps_break(self):
+        ctl = efir_controller("stale", 18980)
+        from autoprint.efir.model import Activity, Webinar
+        w = ctl.store.add([Webinar(title="Пара", schedule=[Activity("A", 30)])])[0]
+        ctl.launch(w.id, "")
+        ctl.ex_index = 3
+        ctl.start_break(5)
+        ctl.refresh_live()
+        self.assertEqual(ctl.mode, "break")
+        ctl.stop_live()
+        ctl.server.stop()
+
+    def test_editor_cancel_asks(self):
+        from PySide6.QtWidgets import QMessageBox
+        import autoprint.ui.efir_editor as ED
+        ctl = efir_controller("cancel", 18981)
+        from autoprint.efir.model import Activity, Webinar
+        w = ctl.store.add([Webinar(title="Пара", schedule=[Activity("A", 30)])])[0]
+        ctl.edit_look(w.look_id)
+        led = ctl.editors[-1]
+        led.caption.setText("Новая надпись")
+        led.caption.textEdited.emit("Новая надпись")                 # как при наборе с клавиатуры
+        asked = []
+        old = ED.QMessageBox.question
+        ED.QMessageBox.question = staticmethod(lambda *a, **k: asked.append(a[1]) or QMessageBox.StandardButton.Discard)
+        try:
+            led.close()
+        finally:
+            ED.QMessageBox.question = old
+        self.assertTrue(asked)
+        ctl.server.stop()
+
+
 # ================================================================ Task 7: правки урока со страницы
 
 class EditTest(unittest.TestCase):

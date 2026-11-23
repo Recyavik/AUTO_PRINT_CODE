@@ -805,7 +805,9 @@ class MainWindow(FramelessWindow):
         mode = ctl.mode
         phase = ""
         tip = "Эфир: таймер вебинара и экран для учеников — фон, зарядка, перерыв"
-        if mode == "break":
+        # перерыв, у которого время вышло, — уже не «Перерыв · 00:00»: плашка — о том, что идёт (D5)
+        brk = mode == "break" and (ctl.brk_left_paused is not None or ctl.break_left() > 0)
+        if brk:
             text = f"Перерыв · {fmt_left(max(0.0, ctl.break_left()))}"
         elif mode == "exercise":
             text = "Зарядка"
@@ -814,7 +816,7 @@ class MainWindow(FramelessWindow):
         if w is not None:
             ag = ctl.agenda()
             phase = ag.phase
-            if mode not in ("break", "exercise"):
+            if not brk and mode != "exercise":
                 if phase == "before":
                     text = f"Эфир · через {fmt_left(ag.left_s)}"
                 elif phase == "live" and ag.current:
@@ -827,7 +829,7 @@ class MainWindow(FramelessWindow):
         if b.text() != text:
             b.setText(text)
         b.setToolTip(tip)
-        token = efir_token(phase, mode)
+        token = efir_token(phase, mode if (brk or mode == "exercise") else "")
         key = (token, theme.dark)
         if getattr(b, "_style_key", None) != key:
             b._style_key = key

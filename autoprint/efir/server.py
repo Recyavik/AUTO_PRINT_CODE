@@ -332,12 +332,13 @@ class BroadcastServer:
         self._httpd: _Server | None = None
         self._thread: threading.Thread | None = None
         self._cond = threading.Condition()
-        self._states: dict[str, dict] = {"screen": {"mode": "idle"}, "lesson": {}}
+        # экран эфира до первого настоящего состояния — «ждать»: открытая вкладка учеников держит прежний кадр
+        # (после перезапуска программы она не мигает чёрным, идущий перерыв не пропадает)
+        self._states: dict[str, dict] = {"screen": {"mode": "wait"}, "lesson": {}, "preview": {}}
         self._revs: dict[str, int] = {ch: 0 for ch in CHANNELS}
         self._media: dict[str, Path] = {}
         self._media_ids: dict[str, str] = {}
         self._counts: dict[str, int] = {ch: 0 for ch in CHANNELS}
-        self.last_report = 0.0
 
     # ------------------------------------------------------------ запуск
     @property
@@ -414,10 +415,6 @@ class BroadcastServer:
         """Открытых вкладок экрана эфира (страницы суфлёра не считаются)."""
         return self._counts["screen"]
 
-    @property
-    def lesson_clients(self) -> int:
-        return self._counts["lesson"]
-
     def _client(self, d: int, channel: str = "screen") -> None:
         with self._cond:
             self._counts[channel] = max(0, self._counts[channel] + d)
@@ -443,7 +440,6 @@ class BroadcastServer:
 
     # ------------------------------------------------------------ от страницы
     def _on_report(self, data: dict) -> None:
-        self.last_report = time.time()
         if self.on_report:
             try:
                 self.on_report(data)

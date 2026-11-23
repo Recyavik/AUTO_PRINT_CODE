@@ -630,13 +630,20 @@ class EfirEditorTest(unittest.TestCase):
 # ================================================================ Task 6: таймер, кнопка «Эфир», экран
 
 class TimerTest(unittest.TestCase):
-    def test_agenda_window(self):
-        from autoprint.ui.efir_timer import agenda_window
-        self.assertEqual(agenda_window(13, 0), (0, 3))
-        self.assertEqual(agenda_window(13, 6), (4, 9))
-        self.assertEqual(agenda_window(13, 12), (10, 13))
-        self.assertEqual(agenda_window(3, 1), (0, 3))
-        self.assertEqual(agenda_window(0, 0), (0, 0))
+    def test_agenda_slice(self):
+        """0.10: «сколько влезает, столько и показывать»: всё влезло — всё; иначе одна строка до текущей."""
+        from autoprint.ui.efir_timer import agenda_slice
+        self.assertEqual(agenda_slice(13, 5, 20), (0, 13))
+        self.assertEqual(agenda_slice(13, 5, 4), (4, 8))
+        self.assertEqual(agenda_slice(13, 0, 4), (0, 4))
+        self.assertEqual(agenda_slice(13, 12, 4), (9, 13))
+        self.assertEqual(agenda_slice(0, 0, 3), (0, 0))
+
+    def test_list_fit(self):
+        from autoprint.ui.efir_timer import list_fit
+        self.assertEqual(list_fit(700, 13), 13)                 # высокое окно — все 13, без «ещё»
+        self.assertGreaterEqual(list_fit(90, 13), 3)
+        self.assertEqual(list_fit(10, 13), 1)
 
     def test_board_mode(self):
         from autoprint.ui.efir_timer import board_mode
@@ -644,7 +651,7 @@ class TimerTest(unittest.TestCase):
         self.assertEqual(board_mode(700, 400), "side")
         self.assertEqual(board_mode(300, 500), "below")
         self.assertEqual(board_mode(200, 80), "hero")
-        self.assertEqual(board_mode(420, 200), "hero")
+        self.assertEqual(board_mode(420, 200), "below")           # окно по умолчанию — со списком
 
     def test_efir_token(self):
         from autoprint.ui.main_window import efir_token
@@ -684,6 +691,19 @@ class TimerWindowTest(unittest.TestCase):
         self.ctl.clients = 1
         self.ctl.tab_changed.emit()
         self.assertFalse(self.tw.btn_tab.isVisibleTo(self.tw))
+
+    def test_default_window_has_list(self):
+        self.tw.resize(440, 270)                                 # размер окна таймера по умолчанию
+        pump(30)
+        self.tw.board.grab()
+        self.assertEqual(self.tw.board.mode, "below")
+        self.assertGreaterEqual(len(self.tw.board._rows), 3)
+
+    def test_tall_shows_all(self):
+        self.tw.resize(520, 900)
+        pump(30)
+        self.tw.board.grab()
+        self.assertEqual(len(self.tw.board._rows), len(self.w.schedule))      # все 12 блоков, без «ещё N»
 
     def test_board_paints_all_sizes(self):
         for size in ((900, 190), (700, 420), (320, 560), (220, 110), (1600, 900)):

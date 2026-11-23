@@ -118,6 +118,7 @@ class LessonController(QObject):
         self._cmd.connect(self.command)
         self._call.connect(self._do_call)
         self.edits = 0           # сколько правок со страницы применено — страница знает, какие уже в состоянии
+        self._timeline: dict[str, tuple[int, int]] = {}   # этапы идущего урока: id → (с минуты, по минуту)
         self._timer = QTimer(self, singleShot=True, interval=300, timeout=self.publish)
         self._last = ""          # что ушло на страницу в последний раз: то же самое второй раз не шлём
         for sig in (self.efir.live_changed, self.efir.screen_changed, self.efir.tab_changed,
@@ -175,12 +176,26 @@ class LessonController(QObject):
         self.efir.server.publish(state, channel="lesson")
 
     def _sync_live(self, t: Template) -> None:
-        """Урок идёт, а его этапы поправили — обновить расписание таймера (время урока не сбивается)."""
+        """Урок идёт, а его этапы поправили — обновить расписание таймера. Начало текущего этапа (по id блока)
+        остаётся на тех же часах: правка минут прошлых этапов не сдвигает «сейчас» (E5). Текущий этап удалили —
+        время урока не трогаем."""
         w = self.efir.live_webinar()
+        st = scenario.stages(t)[1]
+        new = {s.block.id: (s.start_min, s.end_min) for s in st}
         now = [(a.name, a.min, a.kind) for a in w.schedule] if w else []
         want = [(a.name, a.min, a.kind) for a in scenario.webinar_for(t).schedule]
         if want and now != want:
+            live = self.efir.store.live
+            anchor = live.anchor
+            elapsed = (datetime.now() - anchor).total_seconds() / 60
+            cur = next((sid for sid, (a, b) in self._timeline.items() if a <= elapsed < b), None)
+            if cur is not None and cur in new:
+                anchor = anchor + timedelta(minutes=self._timeline[cur][0] - new[cur][0])
             self.efir.launch_lesson(t, show=False)
+            if anchor != live.anchor and self.efir.store.live:
+                self.efir.store.set_live(self.efir.store.live.webinar_id, anchor)
+                self.efir.live_changed.emit()
+        self._timeline = new
 
     # ------------------------------------------------------------ правки урока со страницы
     def _do_call(self, pair) -> None:
@@ -294,8 +309,7 @@ class LessonController(QObject):
             elif cmd == "arm" and t is not None:
                 self._arm(t, str(d.get("block") or ""))
             elif cmd == "break" and t is not None:
-                self._ensure_screen(t)
-                self.efir.start_break(int(d.get("minutes") or 10))
+                self._break(t, str(d.get("stage") or ""), d.get("minutes"))
             elif cmd == "print_settings":
                 self.main.printer.set_option(str(d.get("key") or ""), d.get("value"))
             elif cmd == "new_lesson":
@@ -356,6 +370,24 @@ class LessonController(QObject):
 
     def _arm(self, t: Template, bid: str) -> None:
         self.main.printer.arm(bid)       # только код: заметку или картинку печатать нельзя
+
+    def _break(self, t: Template, sid: str, minutes) -> None:
+        """Перерыв ученикам (E6): с карточки этапа-перерыва, который идёт сейчас, — до планового конца этапа;
+        с другого этапа — его минуты; вне плана — перерыв по умолчанию (break_min эфира урока, обычно 10)."""
+        self._ensure_screen(t)
+        st = next((s for s in scenario.stages(t)[1] if s.block.id == sid), None)
+        live = self.efir.store.live
+        if st is not None and live is not None and self.efir.live_lesson_id() == t.id:
+            elapsed = (datetime.now() - live.anchor).total_seconds() / 60
+            if st.start_min <= elapsed < st.end_min:
+                end = live.anchor + timedelta(minutes=st.end_min)
+                self.efir.start_break(st.end_min - st.start_min, ends_at=end.timestamp())
+                return
+        if st is not None:
+            self.efir.start_break(max(1, st.end_min - st.start_min))
+            return
+        w = self.efir.webinar or self.efir.live_webinar()
+        self.efir.start_break(int(minutes or 0) or (w.break_min if w else 10))
 
     def _ensure_screen(self, t: Template) -> None:
         """Перерыв или зарядка до «Начать урок»: оформление экрана — из пресета урока."""

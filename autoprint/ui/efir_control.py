@@ -12,9 +12,9 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from urllib.parse import quote
 
-from PySide6.QtCore import QObject, QUrl, Signal
+from PySide6.QtCore import QObject, QTimer, QUrl, Signal
 from PySide6.QtGui import QDesktopServices, QGuiApplication
-from PySide6.QtWidgets import QWidget
+from PySide6.QtWidgets import QMessageBox, QWidget
 
 from ..efir import legacy
 from ..efir.model import Webinar, agenda_at, anchor_at, anchor_to_start_at, norm_hhmm, parse_hhmm, segments
@@ -25,6 +25,7 @@ log = logging.getLogger(__name__)
 
 MODE_IDLE, MODE_EXERCISE, MODE_BREAK = "idle", "exercise", "break"
 KEEP_LIVE_AFTER_END = timedelta(minutes=30)    # после конца повестки эфир ещё восстанавливается при запуске
+BREAK_HOLD_S = 60          # «когда время вышло» на экране — столько секунд, потом экран сам возвращается к фону
 
 
 class EfirController(QObject):
@@ -68,6 +69,10 @@ class EfirController(QObject):
         self.timer_window = None
         self.window = None
         self.editors: list = []
+        self._ticker = QTimer(self)
+        self._ticker.setInterval(5000)
+        self._ticker.timeout.connect(self._tick)
+        self._ticker.start()
 
     # ================================================================ сервер и вкладка
     def ensure_server(self) -> bool:
@@ -175,7 +180,7 @@ class EfirController(QObject):
                          "paused_left": None if self.brk_left_paused is None else int(self.brk_left_paused * 1000),
                          "total": int(self.brk_total * 1000), "countdown": w.break_countdown,
                          "title": w.break_title if w.break_show_title else "", "done": w.break_done,
-                         "bg": self._bg(w.break_background)}
+                         "bg": self._bg(w.break_background), "hold": BREAK_HOLD_S}
         return st
 
     def preview_break(self, w: Webinar) -> str:
@@ -212,11 +217,22 @@ class EfirController(QObject):
     def agenda(self, now: datetime | None = None):
         return agenda_at(self.segments(), now or datetime.now())
 
+    def confirm_replace(self, current: str, new: str) -> bool:
+        """E9: идёт другой эфир — заменить его только с согласия."""
+        r = QMessageBox.question(self._owner(), "Идёт эфир", f"Сейчас идёт «{current}». Завершить его и начать «{new}»?")
+        return r == QMessageBox.StandardButton.Yes
+
+    def _may_replace(self, new_id: str, new_title: str) -> bool:
+        cur = self.live_webinar()
+        if cur is None or cur.id == new_id:
+            return True
+        return self.confirm_replace(cur.title, new_title)
+
     def launch(self, wid: str, start: str | None = None) -> None:
         """Запустить эфир по шаблону. start: "" — сейчас, "ЧЧ:ММ" — в это время (запоминается в шаблоне как
         прошлое время старта), None — идущий эфир не трогать (иначе — сейчас)."""
         w = self.store.get(wid)
-        if not w:
+        if not w or not self._may_replace(w.id, w.title):
             return
         live = self.store.live
         now = datetime.now().replace(microsecond=0)
@@ -257,6 +273,8 @@ class EfirController(QObject):
         w = webinar_for(t, self.lesson_look(t))
         if not w.schedule:
             self.message.emit("У урока нет этапов с минутами — эфир по нему не начать", True)
+            return False
+        if not self._may_replace(w.id, w.title):
             return False
         live = self.store.live
         now = datetime.now().replace(microsecond=0)
@@ -302,8 +320,8 @@ class EfirController(QObject):
         w = self.live_webinar()
         if w:
             self.webinar = w
-            if self.ex_index >= len(w.exercises):
-                self.mode = MODE_IDLE
+            if self.mode == MODE_EXERCISE and self.ex_index >= len(w.exercises):
+                self.mode = MODE_IDLE          # зарядку убрали из оформления; перерыв не трогаем (D4)
             self.publish()
             self.live_changed.emit()
 
@@ -317,7 +335,8 @@ class EfirController(QObject):
             tw.close_silently()
 
     def start_now(self, index: int | None = None) -> None:
-        """Сдвинуть расписание: блок index (по умолчанию — текущий, до начала — первый) начинается сейчас."""
+        """«Этап заново с этой минуты»: блок index (по умолчанию — текущий, до начала — первый) начинается сейчас,
+        следующие сдвигаются."""
         segs = self.segments()
         if not segs:
             return
@@ -345,6 +364,8 @@ class EfirController(QObject):
         """При запуске программы: эфир шёл (программу перезапустили) — вернуть таймер."""
         live, w = self.store.live, self.live_webinar()
         if not (live and w):
+            if self.server.running:
+                self.publish()               # эфира нет — фон вместо «ждать»
             return
         end = live.anchor + timedelta(minutes=w.total_min)
         if datetime.now() > end + KEEP_LIVE_AFTER_END or live.anchor.date() < datetime.now().date():
@@ -352,13 +373,28 @@ class EfirController(QObject):
             return
         self.webinar = w
         self.ensure_server()
+        brk = self.store.brk
+        if brk and brk["ends_at"] + BREAK_HOLD_S > time.time():     # перерыв шёл — продолжить (E12)
+            self.mode = MODE_BREAK
+            self.brk_ends, self.brk_total, self.brk_seq = brk["ends_at"], brk["total"], brk["seq"] + 1
+            self.brk_left_paused = None
         self.publish()
         self.show_timer()
+
+    def _tick(self) -> None:
+        """Раз в 5 с: «время вышло» перерыва постояло BREAK_HOLD_S — экран сам возвращается к фону (E6)."""
+        if self.mode == MODE_BREAK and self.brk_left_paused is None and time.time() > self.brk_ends + BREAK_HOLD_S:
+            self.show_background()
+
+    def _forget_break(self) -> None:
+        if self.store.brk is not None:
+            self.store.set_break(None)
 
     # ================================================================ команды экрана
     def show_background(self) -> None:
         self.mode = MODE_IDLE
         self.ex_paused = False
+        self._forget_break()
         self.publish()
 
     def start_exercise(self, index: int) -> None:
@@ -376,6 +412,7 @@ class EfirController(QObject):
         self.video_pos = self.video_dur = 0.0
         self.video_error = ""
         self.mode = MODE_EXERCISE
+        self._forget_break()
         self.publish()
         if self.clients <= 0:
             self.message.emit("Вкладка эфира не открыта — зарядку никто не увидит. Откройте её (⋯ → Открыть вкладку)",
@@ -395,17 +432,26 @@ class EfirController(QObject):
     def exercise_left(self) -> float:
         return max(0.0, self.video_dur - self.video_pos) if self.video_dur else 0.0
 
-    def start_break(self, minutes: int) -> None:
+    def start_break(self, minutes: int, ends_at: float | None = None) -> None:
+        """Перерыв на экран эфира: minutes минут, а если задан конец (ends_at, time.time()) — до него (перерыв
+        по плану урока кончается вместе с этапом)."""
         w = self.webinar or self.live_webinar()
         if not w:
             return
         self.webinar = w
         self.ensure_server()
-        self.brk_total = max(1, int(minutes)) * 60.0
-        self.brk_ends = time.time() + self.brk_total
+        now = time.time()
+        if ends_at is not None and ends_at > now + 30:
+            self.brk_ends = ends_at
+            self.brk_total = ends_at - now
+        else:
+            self.brk_total = max(1, int(minutes)) * 60.0
+            self.brk_ends = now + self.brk_total
         self.brk_left_paused = None
         self.brk_seq += 1
         self.mode = MODE_BREAK
+        if self.store.live:
+            self.store.set_break({"ends_at": self.brk_ends, "total": self.brk_total, "seq": self.brk_seq})
         self.publish()
         if self.clients <= 0:
             self.message.emit("Вкладка эфира не открыта — заставку перерыва никто не увидит", True)

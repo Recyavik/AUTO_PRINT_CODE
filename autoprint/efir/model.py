@@ -11,7 +11,7 @@ import json
 import re
 import uuid
 from dataclasses import asdict, dataclass, field
-from datetime import date, datetime, timedelta
+from datetime import datetime, timedelta
 
 KIND_NORMAL, KIND_BREAK, KIND_EXERCISE = "", "break", "exercise"
 KINDS = [(KIND_NORMAL, "Обычный"), (KIND_BREAK, "Перерыв"), (KIND_EXERCISE, "Зарядка")]
@@ -397,27 +397,28 @@ class Agenda:
     current: Segment | None = None
     next: Segment | None = None
     left_s: float = 0.0               # live — до конца блока, before — до начала эфира
-    next_in_s: float = 0.0            # до начала следующего блока
     frac: float = 0.0                 # прошло от текущего блока, 0..1
     total_frac: float = 0.0           # прошло от всего эфира, 0..1
     start: datetime | None = None
     end: datetime | None = None
 
 
-def anchor_for(start: str, day: date | None = None) -> datetime:
-    hm = parse_hhmm(start) or (11, 0)
-    d = day or date.today()
-    return datetime(d.year, d.month, d.day, hm[0], hm[1])
+RECENT_START = timedelta(hours=6)       # начало в прошлом не дальше этого — урок уже идёт (опоздали, перезапуск)
 
 
 def anchor_at(hhmm: str, now: datetime) -> datetime:
-    """Начало эфира «в ЧЧ:ММ»: из вчера, сегодня и завтра — ближайшее к now. Опоздали на 20 минут — сегодня
-    (эфир уже идёт); 23:50 → «00:10» — завтра; 00:05 → «23:50» — вчера. Пусто или неверно — now."""
+    """Начало эфира «в ЧЧ:ММ». Время в пределах последних 6 часов — оно (эфир уже идёт: опоздали на 20 минут;
+    00:05 → «23:50» — вчера); иначе — ближайшее будущее: сегодня или завтра («20:00», выбранное в 7 утра, —
+    сегодня вечером, а не вчера). Пусто или неверно — now."""
     hm = parse_hhmm(hhmm)
     if not hm:
         return now
     base = now.replace(hour=hm[0], minute=hm[1], second=0, microsecond=0)
-    return min((base + timedelta(days=d) for d in (-1, 0, 1)), key=lambda t: abs((t - now).total_seconds()))
+    cands = [base + timedelta(days=d) for d in (-1, 0, 1)]
+    past = [c for c in cands if c <= now and now - c <= RECENT_START]
+    if past:
+        return max(past)
+    return min(c for c in cands if c > now)
 
 
 def norm_hhmm(hhmm: str) -> str:
@@ -440,8 +441,7 @@ def agenda_at(segs: list[Segment], now: datetime) -> Agenda:
     start, end = segs[0].start, segs[-1].end
     total = max(1.0, (end - start).total_seconds())
     if now < start:
-        return Agenda("before", next=segs[0], left_s=(start - now).total_seconds(),
-                      next_in_s=(start - now).total_seconds(), start=start, end=end)
+        return Agenda("before", next=segs[0], left_s=(start - now).total_seconds(), start=start, end=end)
     if now >= end:
         return Agenda("after", total_frac=1.0, start=start, end=end)
     for s in segs:
@@ -449,7 +449,6 @@ def agenda_at(segs: list[Segment], now: datetime) -> Agenda:
             nxt = segs[s.index + 1] if s.index + 1 < len(segs) else None
             dur = max(1.0, (s.end - s.start).total_seconds())
             return Agenda("live", s.index, s, nxt, left_s=(s.end - now).total_seconds(),
-                          next_in_s=(s.end - now).total_seconds() if nxt else 0.0,
                           frac=(now - s.start).total_seconds() / dur,
                           total_frac=(now - start).total_seconds() / total, start=start, end=end)
     return Agenda("after", total_frac=1.0, start=start, end=end)

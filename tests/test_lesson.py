@@ -507,7 +507,10 @@ class EfirLessonTest(unittest.TestCase):
         self.assertEqual(self.ctl.store.live.anchor, first)
         self.assertEqual(self.ctl.live_webinar().schedule[-1].name, "Итоги")
         other = Template(title="Другой", blocks=[stage("А", 5)])
+        asked = []
+        self.ctl.confirm_replace = lambda cur, new: asked.append((cur, new)) or True   # E9: спросить перед заменой
         self.ctl.launch_lesson(other, start="09:30", show=False)
+        self.assertEqual(asked, [(t.title, "Другой")])
         self.assertEqual(self.ctl.store.live.anchor, anchor_at("09:30", datetime.now()))
         self.assertEqual([w.lesson_id for w in self.ctl.store.webinars if w.lesson_id], [other.id])   # старый убран
         self.ctl.stop_live()

@@ -433,6 +433,10 @@ function startScreen() {
     const left = b.paused_left != null ? b.paused_left : b.ends_at - now();
     const t = brkEl.querySelector('.title'), tm = brkEl.querySelector('.time'), sub = brkEl.querySelector('.sub');
     const done = left <= 0;
+    if (done && b.paused_left == null && -left > (b.hold || 60) * 1000) {   // «Продолжаем» постояла — снова фон
+      brkEl.classList.remove('on');
+      return;
+    }
     brkEl.classList.toggle('done', done);
     if (done) { t.textContent = ''; tm.textContent = b.done || b.title; sub.textContent = b.done ? 'перерыв завершён' : ''; }
     else if (b.countdown) {
@@ -480,6 +484,7 @@ function startScreen() {
   }
 
   function apply(st) {
+    if (st.mode === 'wait') return;          // программа только запускается — прежний кадр остаётся
     S = st; offset = (st.server_now || Date.now()) - Date.now();
     applyFont(st.font, st.color);
     setBackground(st.bg);

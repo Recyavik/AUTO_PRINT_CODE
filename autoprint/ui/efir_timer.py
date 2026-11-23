@@ -2,9 +2,10 @@
 
 Шапка — узкая: название шаблона, «⋯» (все команды), «Закрепить» (поверх всех окон; нажата — закреплено),
 «Свернуть», «Закрыть» (только с подтверждением: закрыть = завершить эфир). Под шапкой — плашка кнопок
-экрана эфира: Фон, Зарядка, Перерыв. Ниже табло: что идёт, сколько осталось, что дальше; в большом окне —
-вся повестка. Размер любой — от крошечного до во весь экран, текст подстраивается сам. Окно перетаскивается
-за любое место табло (кроме списка повестки: двойной щелчок по блоку — «начать с него»).
+экрана эфира: Фон, Зарядка, Перерыв. Ниже табло: что идёт, сколько осталось, что дальше; повестка — столько
+строк, сколько помещается. Размер любой — от крошечного до во весь экран, текст подстраивается сам. Окно
+перетаскивается за любое место табло. «Начать с блока…» — в «⋯», с вопросом (двойной щелчок по строке больше
+не сдвигает расписание: промахнуться при перетаскивании легко).
 """
 from __future__ import annotations
 
@@ -49,30 +50,47 @@ def _clamp(v: float, lo: float, hi: float) -> float:
     return max(lo, min(hi, v))
 
 
-def agenda_window(n: int, cur: int, k: int = 2) -> tuple[int, int]:
-    """Какие блоки повестки показывать: k до текущего, текущий и k после — срез [a, b). Всё расписание
-    в маленьком окне превращалось в мелкий текст; пять строк читаются с любого расстояния."""
+ROW_MIN = 22.0         # строка повестки не ниже — иначе не прочитать
+NOTE_H = 14.0          # строка «ещё N раньше / дальше»
+CELL_MIN = 120.0       # клетка полосы не уже
+
+
+def agenda_slice(n: int, cur: int, fit: int) -> tuple[int, int]:
+    """Какие блоки повестки показывать — срез [a, b): все, если влезают; иначе одна строка до текущей и дальше
+    будущие («сколько влазит, столько и показывать»)."""
     if n <= 0:
         return 0, 0
+    if fit >= n:
+        return 0, n
+    fit = max(1, fit)
     cur = max(0, min(cur, n - 1))
-    return max(0, cur - k), min(n, cur + k + 1)
+    a = max(0, min(cur - 1, n - fit))
+    return a, a + fit
+
+
+def list_fit(height: float, n: int, row: float = ROW_MIN, note: float = NOTE_H) -> int:
+    """Сколько строк повестки помещается по высоте (если не все — с одной строкой «ещё N»)."""
+    if n <= 0:
+        return 0
+    if n * row <= height:
+        return n
+    return max(1, int((height - note) // row))
 
 
 def board_mode(w: float, h: float) -> str:
     """Раскладка табло по размеру: strip — широкое низкое окно (повестка полосой справа), side — повестка
-    списком справа, below — список под табло (высокое узкое окно), hero — только «что сейчас»."""
-    if w >= 640 and h < 230 and w >= 2.6 * h:
+    списком справа, below — список под «сейчас», hero — только «что сейчас» (совсем маленькое окно)."""
+    if w >= 640 and 60 <= h < 230 and w >= 2.6 * h:
         return "strip"
+    if h < 150 or w < 260:
+        return "hero"
     if w >= 560 and h >= 230:
         return "side"
-    if h >= 380 and w >= 260 and h >= w * 0.9:
-        return "below"
-    return "hero"
+    return "below"
 
 
 class Board(QWidget):
     """Табло: рисуется целиком само — так текст масштабируется под любой размер окна."""
-    row_activated = Signal(int)
 
     def __init__(self, ctl) -> None:
         super().__init__()
@@ -84,20 +102,7 @@ class Board(QWidget):
         self.setMouseTracking(True)
 
     def drag_at(self, pt: QPointF) -> bool:
-        return not self._list_rect.contains(pt)
-
-    def mouseDoubleClickEvent(self, e) -> None:
-        for rect, i in self._rows:
-            if rect.contains(e.position()):
-                self.row_activated.emit(i)
-                return
-        super().mouseDoubleClickEvent(e)
-
-    def mouseMoveEvent(self, e) -> None:
-        over = any(r.contains(e.position()) for r, _ in self._rows)
-        self.setCursor(Qt.CursorShape.PointingHandCursor if over else Qt.CursorShape.ArrowCursor)
-        self.setToolTip("Двойной щелчок — начать эфир с этого блока сейчас" if over else "")
-        super().mouseMoveEvent(e)
+        return True                      # табло целиком — ручка окна (строки повестки — не кнопки)
 
     # ------------------------------------------------------------ рисование
     def paintEvent(self, e) -> None:
@@ -116,7 +121,7 @@ class Board(QWidget):
             self._draw_hero(p, QRectF(r.left(), r.top(), w - lw, h), ag)
             self._draw_list(p, QRectF(r.right() - lw, r.top(), lw, h).adjusted(0, pad, -pad, -pad), segs, ag)
         elif self.mode == "below":
-            hh = _clamp(h * 0.45, 180, 320)
+            hh = _clamp(h * 0.42, 90, 320)
             self._draw_hero(p, QRectF(r.left(), r.top(), w, hh), ag)
             self._draw_list(p, QRectF(r.left(), r.top() + hh, w, h - hh).adjusted(pad, 0, -pad, -pad), segs, ag)
         elif self.mode == "strip":
@@ -275,7 +280,8 @@ class Board(QWidget):
         p.drawText(rect, align | Qt.AlignmentFlag.AlignVCenter, text)
 
     def _draw_list(self, p: QPainter, r: QRectF, segs: list[Segment], ag: Agenda) -> None:
-        """Повестка списком: два блока до, текущий (подсвечен), два после; строки растут вместе с окном."""
+        """Повестка списком: столько строк, сколько влезает (все — если помещаются); не влезло — одна строка до
+        текущей, дальше будущие, и одна строка «ещё N раньше · ещё N дальше»."""
         self._list_rect = QRectF(r)
         path = QPainterPath()
         path.addRoundedRect(r, 10, 10)
@@ -283,27 +289,20 @@ class Board(QWidget):
         p.setPen(QPen(theme.c("stroke"), 1))
         p.drawPath(path)
         inner = r.adjusted(6, 6, -6, -6)
-        cur = self._focus_index(segs, ag)
-        a, b = agenda_window(len(segs), cur)
-        note_h = _clamp(inner.height() * 0.08, 14, 22)
-        top, bottom = a > 0, b < len(segs)
-        avail = inner.height() - note_h * (top + bottom)
-        rh = _clamp(avail / 5, 22, 96)
-        px = _clamp(rh * 0.40, 11, 28)
-        used = rh * (b - a) + note_h * (top + bottom)
-        y = inner.top() + max(0.0, (inner.height() - used) / 2)      # большое окно — список посередине
-        if top:
-            self._more(p, QRectF(inner.left() + 10, y, inner.width() - 20, note_h), f"↑ ещё {a} раньше",
-                       Qt.AlignmentFlag.AlignLeft)
-            y += note_h
+        n = len(segs)
+        a, b = agenda_slice(n, self._focus_index(segs, ag), list_fit(inner.height(), n))
+        note_h = NOTE_H if (a > 0 or b < n) else 0.0
+        rh = _clamp((inner.height() - note_h) / max(1, b - a), ROW_MIN, 56)
+        px = _clamp(rh * 0.42, 11, 22)
+        y = inner.top()
         for s in segs[a:b]:
             row = QRectF(inner.left(), y, inner.width(), rh)
             self._rows.append((row, s.index))
             self._draw_row(p, row, s, ag, px)
             y += rh
-        if bottom:
-            self._more(p, QRectF(inner.left() + 10, y, inner.width() - 20, note_h),
-                       f"↓ ещё {len(segs) - b} дальше", Qt.AlignmentFlag.AlignLeft)
+        if note_h:
+            more = " · ".join(x for x in (f"↑ ещё {a} раньше" if a else "", f"↓ ещё {n - b} дальше" if b < n else "") if x)
+            self._more(p, QRectF(inner.left() + 10, y, inner.width() - 20, note_h), more, Qt.AlignmentFlag.AlignLeft)
 
     def _draw_row(self, p: QPainter, row: QRectF, s: Segment, ag: Agenda, px: float) -> None:
         rh = row.height()
@@ -343,21 +342,22 @@ class Board(QWidget):
         p.drawText(QRectF(x, row.top(), name_w, rh), Qt.AlignmentFlag.AlignVCenter, _elide(p, s.activity.name, name_w))
 
     def _draw_strip(self, p: QPainter, r: QRectF, segs: list[Segment], ag: Agenda) -> None:
-        """Широкое низкое окно: те же пять блоков полосой слева направо — текущий посередине и подсвечен."""
+        """Широкое низкое окно: блоки полосой слева направо — столько клеток, сколько влезает."""
         self._list_rect = QRectF(r)
-        cur = self._focus_index(segs, ag)
-        a, b = agenda_window(len(segs), cur)
-        side = _clamp(r.width() * 0.05, 26, 60)
-        left, right = a > 0, b < len(segs)
+        n, gap = len(segs), 6
+        cells = max(1, int((r.width() + gap) // (CELL_MIN + gap)))
+        a, b = agenda_slice(n, self._focus_index(segs, ag), cells)
+        side = 30.0
+        left, right = a > 0, b < n
         inner = r.adjusted(side if left else 0, 0, -(side if right else 0), 0)
         if left:
             self._more(p, QRectF(r.left(), r.top(), side, r.height()), f"‹ {a}", Qt.AlignmentFlag.AlignCenter)
         if right:
-            self._more(p, QRectF(r.right() - side, r.top(), side, r.height()), f"{len(segs) - b} ›",
+            self._more(p, QRectF(r.right() - side, r.top(), side, r.height()), f"{n - b} ›",
                        Qt.AlignmentFlag.AlignCenter)
-        gap = 6
-        cw = (inner.width() - gap * 4) / 5
-        x = inner.left() + (5 - (b - a)) * (cw + gap) / 2 if b - a < 5 else inner.left()
+        k = max(1, b - a)
+        cw = min(260.0, (inner.width() - gap * (k - 1)) / k)
+        x = inner.left()
         h = inner.height()
         px = _clamp(min(h * 0.2, cw * 0.11), 10, 24)
         for s in segs[a:b]:
@@ -464,7 +464,6 @@ class TimerWindow(FramelessWindow):
         sl.addWidget(self.tab_lbl, 1)
         lay.addWidget(self.strip)
         self.board = Board(ctl)
-        self.board.row_activated.connect(self._start_from)
         lay.addWidget(self.board, 1)
 
         self._geo_timer = QTimer(self)
@@ -743,12 +742,15 @@ QToolButton#pinBtn:checked {{ background: {t.css('accent_soft')}; }}
         if ag.phase == "before":
             m.addAction(icons.icon("play"), "Начать эфир сейчас (с первого блока)", lambda: ctl.start_now(0))
         elif ag.phase == "live":
-            m.addAction(icons.icon("clock"), f"Сдвинуть расписание: «{ag.current.activity.name}» — с этой минуты",
+            m.addAction(icons.icon("clock"), f"Этап заново с этой минуты: «{ag.current.activity.name}»",
                         lambda: ctl.start_now(None))
         else:
             m.addAction(icons.icon("play"), "Начать эфир заново сейчас", lambda: ctl.start_now(0))
         if w:
             m.addAction(icons.icon("restart"), "Изменить начало…", self._change_start)
+            sub = m.addMenu(icons.icon("next"), "Начать с блока…")
+            for s in ctl.segments():
+                sub.addAction(f"{s.activity.name} · {s.activity.min} мин", lambda i=s.index: self._start_from(i))
         m.addSeparator()
         if w:
             m.addAction(icons.icon("pencil"), "Изменить оформление урока…" if w.lesson_id else "Изменить шаблон…",
@@ -768,7 +770,11 @@ QToolButton#pinBtn:checked {{ background: {t.css('accent_soft')}; }}
 
     def _start_from(self, index: int) -> None:
         segs = self.ctl.segments()
-        if 0 <= index < len(segs):
+        if not 0 <= index < len(segs):
+            return
+        r = QMessageBox.question(self, "Начать с блока", f"Эфир пойдёт с блока «{segs[index].activity.name}» — "
+                                 "время сдвинется на сейчас. Так?")
+        if r == QMessageBox.StandardButton.Yes:
             self.ctl.start_now(index)
 
     # ------------------------------------------------------------ закрыть

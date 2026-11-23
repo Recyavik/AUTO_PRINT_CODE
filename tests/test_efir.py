@@ -31,7 +31,7 @@ theme.setup(app, "dark")
 
 from autoprint.efir import legacy  # noqa: E402
 from autoprint.efir.model import (BG_BLACK, KIND_BREAK, KIND_EXERCISE, KIND_NORMAL, Activity, Exercise,  # noqa: E402
-                                  Webinar, agenda_at, ai_prompt, anchor_for, anchor_to_start_at, export_json,
+                                  Webinar, agenda_at, ai_prompt, anchor_to_start_at, export_json,
                                   fmt_left, guess_kind, parse_webinars, sample_webinar, segments)
 from autoprint.efir.server import BroadcastServer  # noqa: E402
 from autoprint.efir.store import WebinarStore, media_dir  # noqa: E402
@@ -101,7 +101,6 @@ class ModelTest(unittest.TestCase):
         self.assertEqual(fmt_left(0), "00:00")
         self.assertEqual(fmt_left(59.2), "01:00")
         self.assertEqual(fmt_left(3725), "1:02:05")
-        self.assertEqual(anchor_for("09:05", datetime(2026, 1, 2).date()), datetime(2026, 1, 2, 9, 5))
 
     def test_guess_kind(self):
         self.assertEqual(guess_kind("ПЕРЕРЫВ"), KIND_BREAK)
