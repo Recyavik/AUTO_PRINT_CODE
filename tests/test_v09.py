@@ -699,5 +699,28 @@ class TimerWindowTest(unittest.TestCase):
         self.assertIn(self.tw.board.mode, ("strip", "side", "below", "hero"))
 
 
+
+# ================================================================ Task 7: суфлёр как PDF — плашки ролей
+
+class PageTest(unittest.TestCase):
+    def test_block_state_has_label_title(self):
+        from autoprint import scenario
+        from autoprint.storage import BLOCK_MARKDOWN, Block
+        st = scenario._block_state(Block(BLOCK_MARKDOWN, "Здравствуйте!", role="say", title="Повторение"),
+                                   lambda p: "")
+        self.assertEqual((st["label"], st["title"]), ("Говоришь", "Повторение"))
+        st = scenario._block_state(Block(BLOCK_MARKDOWN, "Вопрос?\n→ ответ", role="ask"), lambda p: "")
+        self.assertEqual((st["label"], st["title"]), ("Спроси", ""))
+
+    def test_page_role_styles(self):
+        from autoprint.efir.server import PAGE_DIR
+        css = (PAGE_DIR / "lesson.html").read_text(encoding="utf-8")
+        for role in ("say", "tell", "ask", "do", "important", "show", "trap", "extra"):
+            self.assertIn(f".r-{role} {{ --rc:", css, role)
+        self.assertIn("border-left: 4px solid var(--rc)", css)
+        self.assertIn("color-mix(in srgb, var(--rc)", css)
+        self.assertIn('el("div", "lbl")', css)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

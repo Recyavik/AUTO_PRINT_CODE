@@ -113,32 +113,52 @@ main { flex: 999 1 560px; min-width: 0; display: flex; flex-direction: column; g
 .stage.past.collapsed { opacity: .72; }
 .empty-stage { color: var(--dim); font-size: 14px; padding: 12px 0; }
 
-.row { display: flex; gap: 14px; padding: 12px 0; border-top: 1px solid var(--stroke); }
-.body > .row:first-child { border-top: none; }
+/* плашки ролей — как в PDF-суфлёре: лёгкий фон цвета роли, полоса слева, сверху подпись капителью.
+   С одного взгляда видно: читать вслух (говоришь), своими словами, спросить, сделать молча, не пропустить, можно пропустить */
+.row { --rc: var(--faint); position: relative; margin: 10px 0; padding: 9px 16px 11px; border-radius: 10px;
+  border-left: 4px solid var(--rc); background: color-mix(in srgb, var(--rc) 9%, transparent); }
+.body > .row:first-child { margin-top: 6px; }
 .ic { width: 30px; height: 30px; border-radius: 9px; display: flex; align-items: center; justify-content: center; flex: none; }
 .ic svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
-.r-say .ic { color: var(--say); background: color-mix(in srgb, var(--say) 14%, transparent); }
-.r-tell .ic { color: var(--tell); background: color-mix(in srgb, var(--tell) 14%, transparent); }
-.r-ask .ic { color: var(--ask); background: color-mix(in srgb, var(--ask) 14%, transparent); }
-.r-do .ic, .r-code .ic, .r-text .ic { color: var(--do); background: color-mix(in srgb, var(--do) 12%, transparent); }
-.r-important .ic, .r-trap .ic { color: var(--trap); background: color-mix(in srgb, var(--trap) 14%, transparent); }
-.r-show .ic, .r-extra .ic { color: var(--show); background: color-mix(in srgb, var(--show) 14%, transparent); }
-.r-task .ic, .r-explain .ic, .r-hint .ic { color: var(--accent); background: var(--accent-soft); }
-.r-image .ic { color: var(--image); background: color-mix(in srgb, var(--image) 14%, transparent); }
-.c { flex: 1; min-width: 0; padding-top: 3px; font-size: 15px; line-height: 1.55; color: var(--text2); overflow-wrap: anywhere; }
+.lbl { display: flex; align-items: center; gap: 6px; margin-bottom: 3px; font-size: 11.5px; font-weight: 800;
+  letter-spacing: .09em; text-transform: uppercase; color: var(--rc); }
+.lbl .ic { width: 18px; height: 18px; border-radius: 0; background: none !important; color: var(--rc); }
+.lbl .ic svg { width: 15px; height: 15px; }
+.lbl .sub { opacity: .85; }
+.lbl .armed, .lbl .armbtn { margin-left: 8px; text-transform: none; letter-spacing: 0; }
+.r-code { margin-top: 14px; }
+.r-say { --rc: var(--say); }
+.r-tell { --rc: var(--tell); }
+.r-ask { --rc: var(--ask); }
+.r-do { --rc: var(--do); background: color-mix(in srgb, var(--do) 7%, transparent); }
+.r-important { --rc: var(--imp); background: color-mix(in srgb, var(--imp) 13%, transparent); }
+.r-show { --rc: var(--show); }
+.r-trap { --rc: var(--trap); background: color-mix(in srgb, var(--trap) 7%, transparent); }
+.r-extra { --rc: var(--extra); background: transparent; border: 1px dashed color-mix(in srgb, var(--rc) 55%, transparent);
+  border-left: 4px dashed var(--rc); }
+.r-task { --rc: var(--accent); }
+.r-explain { --rc: var(--say); }
+.r-hint { --rc: var(--show); }
+.r-text { background: transparent; border-left-color: var(--stroke2); }
+.r-code, .r-image { background: transparent; border-left-color: transparent; padding-left: 0; padding-right: 0; }
+#legend .grid div { background: none; border: none; }      /* значок в обозначениях — цветом роли, без плашки */
+#legend .ic { color: var(--rc); background: color-mix(in srgb, var(--rc) 14%, transparent); }
+#legend .r-code, #legend .r-image, #legend .r-text { --rc: var(--dim); }
+.c { min-width: 0; font-size: 15px; line-height: 1.55; color: var(--text2); overflow-wrap: anywhere; }
 .c p { margin: 0 0 6px; } .c p:last-child { margin-bottom: 0; }
 .c ul, .c ol { margin: 0; padding-left: 20px; }
 .c h2, .c h3, .c h4, .c h5, .c h6 { margin: 0 0 4px; font-size: 16px; }
 .c pre { margin: 6px 0; padding: 10px 12px; border-radius: 8px; background: var(--code-bg); color: var(--code-fg);
   font: 13px/1.5 "Cascadia Mono", Consolas, monospace; overflow-x: auto; }
-.r-say .c { font-size: 18px; color: var(--text); font-weight: 500; padding-top: 1px; }
+.r-say .c { font-size: 18px; color: var(--text); font-weight: 500; }
+.r-tell .c { font-size: 16px; color: var(--text); }
 .r-ask .q { font-size: 18px; font-weight: 600; color: var(--text); }
-.r-ask .ans { margin-top: 4px; font-size: 14px; color: var(--ask-ans); }
-.r-do .c { color: var(--do-text); }
+.r-ask .ans { margin-top: 4px; font-size: 15px; color: var(--ask-ans); }
+.r-do .c { color: var(--do-text); font-size: 14.5px; }
 .r-important .c { color: var(--imp); font-weight: 700; font-size: 16px; }
 .r-trap .c { color: var(--text2); }
 .r-trap .c li::marker { color: var(--trap); }
-.r-extra .c { color: var(--text2); }
+.r-extra .c { color: var(--dim); }
 
 .codecap { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin-bottom: 8px; min-height: 26px; }
 .codecap .ttl { font-size: 14px; color: var(--dim); }
@@ -367,8 +387,17 @@ function renderLegend() {
 
 // ---------------------------------------------------------------- блоки
 function blockRow(b) {
-  const row = el("div", "row r-" + (ICONS[b.role] ? b.role : "text"));
-  row.appendChild(icon(ICONS[b.role] ? b.role : "text"));
+  const role = ICONS[b.role] ? b.role : "text";
+  const row = el("div", "row r-" + role);
+  if (role !== "text") {                       // подпись плашки: значок, роль, заголовок блока
+    const lbl = el("div", "lbl");
+    lbl.appendChild(icon(role));
+    lbl.appendChild(el("span", "", NAMES[role] || ""));
+    if (b.title) lbl.appendChild(el("span", "sub", "· " + b.title));
+    row.appendChild(lbl);
+  } else if (b.title) {
+    row.appendChild(el("div", "lbl", b.title));
+  }
   const c = el("div", "c");
   if (b.role === "ask") {
     const q = el("div", "q");
@@ -380,8 +409,7 @@ function blockRow(b) {
       c.appendChild(d);
     }
   } else if (b.role === "code") {
-    const cap = el("div", "codecap");
-    if (b.title) cap.appendChild(el("span", "ttl", b.title));
+    const cap = row.querySelector(".lbl");          // «КОД · заголовок» и печать — одной строкой
     const on = S.armed === b.id;
     if (on) {
       cap.appendChild(el("span", "armed", "▶ Печатается следующим" + (S.hotkey ? " · " + S.hotkey : "")));
@@ -391,7 +419,6 @@ function blockRow(b) {
       arm.onclick = () => cmd({ cmd: "arm", block: b.id });
       cap.appendChild(arm);
     }
-    c.appendChild(cap);
     const box = el("div", "codebox" + (on ? " on" : ""));
     const pre = el("pre");
     pre.innerHTML = b.html;

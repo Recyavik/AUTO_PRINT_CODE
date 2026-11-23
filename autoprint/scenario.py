@@ -283,11 +283,15 @@ def _block_state(b: Block, media_url) -> dict | None:
                 "name": Path(src).name if src and not url.startswith("http") else ""}
     if not b.text.strip():
         return None
+    from .storage import ROLES
     role = b.role if b.role else "text"
+    # подпись плашки на суфлёре: «ГОВОРИШЬ · ПОВТОРЕНИЕ» — роль и заголовок блока (обычным текстом)
+    head = {"label": ROLES[role][1] if role in ROLES else "", "title": b.title or ""}
     if role == "ask":
         question, answers = ask_parts(b.text)
-        return {"id": b.id, "role": role, "html": md_html(question), "answers": [_inline(a) for a in answers]}
-    return {"id": b.id, "role": role, "html": md_html(b.text)}
+        return {"id": b.id, "role": role, "html": md_html(question), "answers": [_inline(a) for a in answers],
+                **head}
+    return {"id": b.id, "role": role, "html": md_html(b.text), **head}
 
 
 def lesson_state(t: Template | None, *, live_anchor_ms: int | None, armed: str, media_url, presets,
