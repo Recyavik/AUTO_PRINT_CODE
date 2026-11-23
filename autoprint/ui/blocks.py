@@ -18,7 +18,9 @@ from .widgets import IconButton, repolish
 ZOOM_MIN, ZOOM_MAX, ZOOM_STEP = 50, 300, 10
 
 CODE_TYPE = "code"
-ROLE_ICONS = {"text": "text", "task": "file-text", "explain": "info", "hint": "help"}
+ROLE_ICONS = {"text": "text", "task": "file-text", "explain": "info", "hint": "search",
+              "say": "mic", "tell": "message", "ask": "help", "do": "pointer", "important": "alert",
+              "show": "monitor", "trap": "bug", "extra": "zap"}
 TYPE_ITEMS = [(name, key, ROLE_ICONS.get(key, "text"), f"role_{key}") for key, (_i, name, _c) in ROLES.items()] \
     + [("Код", CODE_TYPE, "code", "accent")]
 

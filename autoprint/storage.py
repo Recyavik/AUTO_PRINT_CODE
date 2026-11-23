@@ -262,14 +262,26 @@ class Settings:
 
 BLOCK_MARKDOWN = "markdown"
 BLOCK_CODE = "code"
+BLOCK_STAGE = "stage"     # этап урока: название, минуты, вид (обычный / перерыв / зарядка) — суфлёр урока
+BLOCK_IMAGE = "image"     # картинка: слайд, скриншот (text — путь к копии в data/media или адрес http(s))
 
-# Типы Markdown-блоков: ключ → (значок, название, цвет полоски)
+# Типы Markdown-блоков: ключ → (значок, название, цвет полоски). Первые четыре — подсказки ученику и
+# преподавателю у кода; остальные — суфлёр урока (что сказать, спросить, сделать, показать)
 ROLES = {
     "text": ("📝", "Текст", "#8b949e"),
     "task": ("📋", "Условие", "#3b82f6"),
     "explain": ("💡", "Пояснение", "#d29922"),
     "hint": ("🔎", "Подсказка", "#a855f7"),
+    "say": ("🎙", "Говоришь", "#7fb4ff"),          # почти дословно
+    "tell": ("💬", "Расскажи", "#6fd382"),         # своими словами
+    "ask": ("❓", "Спроси", "#e9a72c"),            # вопрос; строки «→ …» — ожидаемый ответ
+    "do": ("👉", "Делаешь", "#a6a6b2"),            # действие, вслух не читать
+    "important": ("⚠", "Важно", "#f2686c"),
+    "show": ("🖥", "Показываешь", "#b28cff"),      # что видят ученики
+    "trap": ("🪤", "Ловушки", "#f2686c"),          # на чём ошибаются, что режет проверка
+    "extra": ("⚡", "Для быстрых", "#b28cff"),     # дополнительное задание
 }
+STAGE_KINDS = {"": "Обычный", "break": "Перерыв", "exercise": "Зарядка"}
 
 
 @dataclass
@@ -285,12 +297,20 @@ class Block:
     steps: list[int] = field(default_factory=list)   # шаг каждой строки кода (режим «По шагам»); пусто — все 1
     print_as: str = "markdown"   # как печатать Markdown-блок: markdown | plain | comment (см. textprint)
     profile: str = ""            # окно для этого блока: plain | ide | terminal; пусто — как в настройках
+    # этап урока (type == stage): title — название, text — пометка («теория · на платформе»)
+    minutes: int = 0
+    stage_kind: str = ""         # "" — обычный, break — перерыв, exercise — зарядка (см. STAGE_KINDS)
+    part: str = ""               # раздел — группа этапов в плане урока («Тёмная тема»)
 
     def display_title(self, code_number: int = 0) -> str:
         if self.title.strip():
             return self.title.strip()
         if self.type == BLOCK_CODE:
             return f"Код {code_number}" if code_number else "Код"
+        if self.type == BLOCK_STAGE:
+            return "Этап"
+        if self.type == BLOCK_IMAGE:
+            return "Картинка"
         return ROLES.get(self.role, ROLES["text"])[1]
 
 
@@ -302,6 +322,8 @@ class Template:
     active_block: str = ""
     id: str = field(default_factory=new_id)
     updated: float = field(default_factory=time.time)
+    start: str = ""      # плановое начало урока «ЧЧ:ММ» (суфлёр урока); пусто — с момента «Начать урок»
+    preset: str = ""     # шаблон «Эфира», откуда брать фон, зарядки и перерыв; пусто — последний выбранный
 
     def find_block(self, block_id: str) -> Block | None:
         return next((b for b in self.blocks if b.id == block_id), None)
@@ -381,6 +403,12 @@ def _block_from(d: dict) -> Block:
         b.steps = [max(1, int(s)) for s in b.steps] if isinstance(b.steps, list) else []
     except (TypeError, ValueError):
         b.steps = []
+    try:
+        b.minutes = max(0, min(24 * 60, int(b.minutes)))
+    except (TypeError, ValueError):
+        b.minutes = 0
+    if b.stage_kind not in STAGE_KINDS:
+        b.stage_kind = ""
     return b
 
 
@@ -403,7 +431,8 @@ def _template_from(d: dict) -> Template:
     else:
         blocks = [_block_from(b) for b in d.get("blocks", [])]
     return Template(title=d.get("title", "Без названия"), blocks=blocks, active_block=d.get("active_block", ""),
-                    id=d.get("id") or new_id(), updated=d.get("updated", time.time()))
+                    id=d.get("id") or new_id(), updated=d.get("updated", time.time()),
+                    start=str(d.get("start") or ""), preset=str(d.get("preset") or ""))
 
 
 def _fresh_ids(t: Template) -> Template:

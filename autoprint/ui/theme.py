@@ -36,6 +36,10 @@ DARK = {
     "editor_mark": _c("#E9A72C", .45),
     "role_text": _c("#A6A6B2"), "role_task": _c("#E9A72C"), "role_explain": _c("#7FB4FF"),
     "role_hint": _c("#B28CFF"),
+    # суфлёр урока
+    "role_say": _c("#7FB4FF"), "role_tell": _c("#6FD382"), "role_ask": _c("#E9A72C"), "role_do": _c("#A6A6B2"),
+    "role_important": _c("#F2686C"), "role_show": _c("#B28CFF"), "role_trap": _c("#F2686C"),
+    "role_extra": _c("#B28CFF"), "role_stage": _c("#E9A72C"), "role_image": _c("#6FC3DF"),
     "shadow": _c("#000000", .45),
 }
 LIGHT = {
@@ -49,6 +53,9 @@ LIGHT = {
     "editor_mark": _c("#B87400", .35),
     "role_text": _c("#5A5A66"), "role_task": _c("#B87400"), "role_explain": _c("#1F5FBF"),
     "role_hint": _c("#7A3DB8"),
+    "role_say": _c("#1F5FBF"), "role_tell": _c("#237A32"), "role_ask": _c("#B87400"), "role_do": _c("#5A5A66"),
+    "role_important": _c("#C0272D"), "role_show": _c("#7A3DB8"), "role_trap": _c("#C0272D"),
+    "role_extra": _c("#7A3DB8"), "role_stage": _c("#B87400"), "role_image": _c("#0F7A99"),
     "shadow": _c("#1E2230", .18),
 }
 
