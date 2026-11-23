@@ -181,6 +181,7 @@ class Settings:
     efir_timer_geometry: str = ""      # окно таймера: место и размер
     efir_window_geometry: str = ""     # окно «Эфир» (шаблоны)
     efir_editor_geometry: str = ""     # редактор шаблона вебинара
+    lesson_preset: str = ""            # суфлёр урока: шаблон «Эфира» (оформление) — последний выбранный
     step_nav: str = "arrows"           # шаги: arrows — стрелками от курсора (код — продолжение файла)
                                        #       | home — от начала документа (Ctrl+Home)
 

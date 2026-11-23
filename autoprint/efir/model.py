@@ -101,6 +101,7 @@ class Webinar:
     font: str = DEFAULT_FONT         # шрифт надписей (перерыв, занавес): имя или "file:<путь>"
     text_color: str = "#FFFFFF"
     id: str = field(default_factory=new_id)
+    lesson_id: str = ""              # эфир урока из суфлёра (расписание — его этапы); в списке шаблонов не виден
 
     @property
     def total_min(self) -> int:
@@ -196,6 +197,7 @@ def webinar_from_dict(d: dict) -> Webinar:
     w.text_color = color if re.fullmatch(r"#[0-9A-Fa-f]{6}", color) else "#FFFFFF"
     if _str(d.get("id")) and re.fullmatch(r"[0-9a-zA-Z_-]{4,40}", d["id"]):
         w.id = d["id"]
+    w.lesson_id = _str(d.get("lesson_id"))
     return w
 
 

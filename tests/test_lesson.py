@@ -18,6 +18,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import quiet  # noqa: E402,F401  — до PySide6: offscreen, своя папка данных
 
+from PySide6.QtCore import QObject  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
 app = QApplication.instance() or QApplication([])
@@ -410,6 +411,102 @@ class LessonServerTest(unittest.TestCase):
         self.assertEqual(cm.exception.code, 403)
         r = self.post("/lesson/cmd", {"cmd": "stop"}, {"X-Suflor": "1", "Origin": self.base.rstrip("/")})
         self.assertEqual(r.status, 200)
+
+
+class FakeMain(QObject):
+    def __init__(self, port: int):
+        from autoprint.storage import Settings
+        super().__init__()
+        self.settings = Settings()
+        self.settings.efir_port = port
+
+
+class EfirLessonTest(unittest.TestCase):
+    def setUp(self):
+        from autoprint.efir import store as store_mod
+        from autoprint.ui import efir_control
+        self.data = TMP / f"efir-{time.time_ns()}"
+        self._efir_dir = store_mod.efir_dir
+        store_mod.efir_dir = lambda: self.data
+        self.ctl = efir_control.EfirController(FakeMain(PORT + 20))
+
+    def tearDown(self):
+        from autoprint.efir import store as store_mod
+        if self.ctl.timer_window is not None:
+            self.ctl.timer_window.close_silently()
+        if self.ctl.window is not None:
+            self.ctl.window.close()
+        self.ctl.server.stop()
+        store_mod.efir_dir = self._efir_dir
+
+    def lesson(self) -> Template:
+        t = dark_theme_lesson()
+        t.blocks.insert(1, stage("Отметка", 0))
+        t.blocks.append(stage("Гимнастика для глаз", 5, kind="exercise"))
+        return t
+
+    def test_webinar_for(self):
+        from autoprint.efir.model import KIND_BREAK, KIND_EXERCISE, KIND_NORMAL, Exercise, Webinar
+        preset = Webinar(title="1Т", background="anim:cube", exercises=[Exercise("Глаза", "C:/v.mp4")],
+                         break_min=15, break_title="ОТДЫХ")
+        t = self.lesson()
+        w = scenario.webinar_for(t, preset)
+        self.assertEqual((w.id, w.lesson_id, w.title), ("lesson-" + t.id, t.id, t.title))
+        self.assertEqual([(a.name, a.min, a.kind) for a in w.schedule],
+                         [("Вступление", 2, KIND_NORMAL), ("Зачем нужна тёмная тема", 8, KIND_NORMAL),
+                          ("Перерыв", 10, KIND_BREAK), ("Гимнастика для глаз", 5, KIND_EXERCISE)])
+        self.assertEqual((w.background, w.break_title, w.break_min), ("anim:cube", "ОТДЫХ", 10))
+        self.assertEqual([e.title for e in w.exercises], ["Глаза"])
+        self.assertEqual(preset.exercises[0].title, "Глаза")             # пресет не тронут
+        plain = scenario.webinar_for(t, None)
+        self.assertEqual(plain.background, "color:#000000")
+
+    def test_hidden_in_list(self):
+        from autoprint.efir.model import Webinar
+        from autoprint.efir.store import WebinarStore
+        from autoprint.efir.model import Activity
+        self.ctl.store.add([Webinar(title="1Т", schedule=[Activity("Теория", 20)])])
+        self.ctl.store.put(scenario.webinar_for(self.lesson(), None))
+        self.assertEqual([w.title for w in self.ctl.store.visible()], ["1Т"])
+        again = WebinarStore(self.ctl.store.path)
+        self.assertEqual(sorted(bool(w.lesson_id) for w in again.webinars), [False, True])
+
+    def test_launch_lesson(self):
+        from datetime import datetime
+        from autoprint.efir.model import anchor_for
+        t = self.lesson()
+        self.assertTrue(self.ctl.launch_lesson(t, show=False))
+        live = self.ctl.store.live
+        self.assertEqual(live.webinar_id, "lesson-" + t.id)
+        self.assertLess(abs((datetime.now() - live.anchor).total_seconds()), 5)
+        self.assertEqual(self.ctl.live_lesson_id(), t.id)
+        first = live.anchor
+        t.blocks.append(stage("Итоги", 5))
+        self.ctl.launch_lesson(t, show=False)                           # тот же урок — время не сбивается
+        self.assertEqual(self.ctl.store.live.anchor, first)
+        self.assertEqual(self.ctl.live_webinar().schedule[-1].name, "Итоги")
+        other = Template(title="Другой", blocks=[stage("А", 5)])
+        other.start = "09:30"
+        self.ctl.launch_lesson(other, start_now=False, show=False)
+        self.assertEqual(self.ctl.store.live.anchor, anchor_for("09:30"))
+        self.assertEqual([w.lesson_id for w in self.ctl.store.webinars if w.lesson_id], [other.id])   # старый убран
+        self.ctl.stop_live()
+        self.assertEqual(self.ctl.live_lesson_id(), "")
+
+    def test_launch_without_minutes_refused(self):
+        t = Template(title="Пусто", blocks=[stage("Ноль", 0), md("say", "Привет")])
+        self.assertFalse(self.ctl.launch_lesson(t, show=False))
+        self.assertIsNone(self.ctl.store.live)
+
+    def test_efir_window_hides_lessons(self):
+        from autoprint.efir.model import Webinar
+        self.ctl.store.add([Webinar(title="1Т")])
+        self.ctl.launch_lesson(self.lesson(), show=False)
+        self.ctl.show_window()
+        pump(50)
+        from autoprint.ui.efir_window import WebinarCard
+        cards = self.ctl.window.findChildren(WebinarCard)
+        self.assertEqual([c.w.title for c in cards], ["1Т"])
 
 
 if __name__ == "__main__":

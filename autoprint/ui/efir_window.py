@@ -188,7 +188,7 @@ class EfirWindow(FramelessWindow):
                 wd.setParent(None)               # сразу из окна; удалится потом
                 wd.deleteLater()
         live = self.ctl.store.live
-        items = self.ctl.store.webinars
+        items = self.ctl.store.visible()
         if not items:
             note = Note("Шаблонов пока нет. Нажмите «Новый» — задайте расписание, фон, зарядки и перерыв. "
                         "Или «Импорт»: JSON-файл, ответ нейросети, шаблоны «Таймера вебинара».", "info")
@@ -277,7 +277,7 @@ class EfirWindow(FramelessWindow):
         self.toast.show_message(f"Добавлено шаблонов: {len(added)} — " + ", ".join(w.title for w in added))
 
     def copy_ai(self, wid: str | None) -> None:
-        w = self.ctl.store.get(wid) if wid else (self.ctl.store.webinars[0] if self.ctl.store.webinars else None)
+        w = self.ctl.store.get(wid) if wid else (self.ctl.store.visible()[0] if self.ctl.store.visible() else None)
         QGuiApplication.clipboard().setText(ai_prompt(w))
         self.toast.show_message("Промпт скопирован. Вставьте его в чат нейросети и допишите своё расписание; "
                                 "ответ скопируйте и нажмите «Импорт → Из буфера обмена».", ms=9000)
@@ -300,7 +300,7 @@ class EfirWindow(FramelessWindow):
             "перерыв 10 мин, разбор заданий 25 мин, выводы 5 мин.")
         if not ok or not text.strip():
             return
-        example = self.ctl.store.webinars[0] if self.ctl.store.webinars else None
+        example = self.ctl.store.visible()[0] if self.ctl.store.visible() else None
         self._ai_busy = True
         self.toast.show_message("Нейросеть составляет расписание… это до минуты", ms=60000)
 

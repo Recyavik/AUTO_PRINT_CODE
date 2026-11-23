@@ -17,7 +17,7 @@ from PySide6.QtGui import QDesktopServices, QGuiApplication
 from PySide6.QtWidgets import QWidget
 
 from ..efir import legacy
-from ..efir.model import Webinar, agenda_at, anchor_for, anchor_to_start_at, segments
+from ..efir.model import Webinar, agenda_at, anchor_for, anchor_to_start_at, parse_hhmm, segments
 from ..efir.server import DEFAULT_PORT, BroadcastServer
 from ..efir.store import WebinarStore
 
@@ -210,6 +210,46 @@ class EfirController(QObject):
         self.live_changed.emit()
         self.show_timer()
 
+    def lesson_preset(self, t) -> Webinar | None:
+        """Оформление эфира урока: шаблон урока, иначе последний выбранный, иначе первый в списке."""
+        for wid in (t.preset, getattr(self.settings, "lesson_preset", "")):
+            w = self.store.get(wid) if wid else None
+            if w is not None and not w.lesson_id:
+                return w
+        visible = self.store.visible()
+        return visible[0] if visible else None
+
+    def launch_lesson(self, t, start_now: bool = True, show: bool = True) -> bool:
+        """Эфир по этапам урока из суфлёра. Тот же урок уже идёт — время не сбивается, расписание обновляется.
+        start_now=False — по плановому началу урока (t.start), если оно задано. False — нет этапов с минутами."""
+        from ..scenario import webinar_for
+        w = webinar_for(t, self.lesson_preset(t))
+        if not w.schedule:
+            self.message.emit("У урока нет этапов с минутами — эфир по нему не начать", True)
+            return False
+        live = self.store.live
+        if live and live.webinar_id == w.id:
+            anchor = live.anchor
+        elif not start_now and t.start and parse_hhmm(t.start):
+            anchor = anchor_for(t.start)
+        else:
+            anchor = datetime.now().replace(microsecond=0)
+        # служебные эфиры прошлых уроков больше не нужны
+        self.store.webinars = [x for x in self.store.webinars if not x.lesson_id or x.id == w.id]
+        self.store.put(w)
+        self.store.set_live(w.id, anchor)
+        self.webinar = w
+        self.ensure_server()
+        self.publish()
+        self.live_changed.emit()
+        if show:
+            self.show_timer()
+        return True
+
+    def live_lesson_id(self) -> str:
+        w = self.live_webinar()
+        return w.lesson_id if w else ""
+
     def refresh_live(self) -> None:
         """Шаблон идущего эфира поправили в редакторе — подхватить фон, зарядки, перерыв."""
         w = self.live_webinar()
@@ -397,7 +437,7 @@ class EfirController(QObject):
             if not quiet:
                 self.message.emit("В «Таймере вебинара» нет шаблонов", True)
             return 0
-        known = {w.title for w in self.store.webinars}
+        known = {w.title for w in self.store.visible()}
         fresh = [w for w in items if w.title not in known] if quiet else items
         self.store.imported_legacy = True
         added = self.store.add(fresh) if fresh else []
@@ -410,7 +450,7 @@ class EfirController(QObject):
 
     def auto_import_legacy(self) -> None:
         """Первое открытие «Эфира»: шаблонов нет, а «Таймер вебинара» есть — перенести его шаблоны сами."""
-        if self.store.webinars or self.store.imported_legacy:
+        if self.store.visible() or self.store.imported_legacy:
             return
         if legacy.find():
             self.import_legacy(quiet=True)

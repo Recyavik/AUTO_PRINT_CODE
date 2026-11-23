@@ -76,6 +76,10 @@ class WebinarStore:
     def get(self, wid: str) -> Webinar | None:
         return next((w for w in self.webinars if w.id == wid), None)
 
+    def visible(self) -> list[Webinar]:
+        """Шаблоны для списка «Эфира» — без служебных эфиров уроков из суфлёра."""
+        return [w for w in self.webinars if not w.lesson_id]
+
     def put(self, w: Webinar) -> None:
         for i, old in enumerate(self.webinars):
             if old.id == w.id:
