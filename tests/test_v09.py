@@ -598,6 +598,25 @@ class LessonStartTest(unittest.TestCase):
         self.assertEqual(self.win.efir.store.live.anchor, anchor_at("18:00", datetime.now()))
         self.assertEqual(self.t.start, "18:00")                 # запомнено — подставится в следующий раз
 
+    def test_stray_signal_does_not_delay_sync(self):
+        """Ревью №4: правка идущего урока доходит до таймера не позже ~0,3 с, даже если следом прилетает
+        посторонний сигнал (вкладка подключилась, экран сменился) — отложенная отправка не начинается заново."""
+        from autoprint.storage import BLOCK_STAGE, Block
+        self.win.lesson.command({"cmd": "start"})
+        pump(400)
+        t0 = time.time()
+        self.t.blocks.append(Block(BLOCK_STAGE, title="Итоги", minutes=5))
+        try:
+            self.win.views[self.t.id].changed.emit()
+            pump(250)
+            self.win.efir.tab_changed.emit()            # посторонний сигнал прямо перед отправкой
+            while time.time() - t0 < 0.45:
+                app.processEvents()
+                time.sleep(0.005)
+            self.assertEqual(self.win.efir.live_webinar().schedule[-1].name, "Итоги")
+        finally:
+            self.t.blocks.pop()
+
     def test_set_start_live(self):
         from datetime import datetime
         from autoprint.efir.model import anchor_at

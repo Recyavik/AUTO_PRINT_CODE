@@ -138,7 +138,11 @@ class LessonController(QObject):
         return v.template if v is not None else None
 
     def schedule_publish(self) -> None:
-        self._timer.start()
+        """Отправить состояние странице не позже чем через 300 мс после первого изменения. Уже ждём — не
+        начинать заново: иначе частые сигналы (вкладка, экран, правки) откладывали бы отправку без конца,
+        и правка идущего урока доходила бы до таймера с опозданием. Отправляется то, что есть к моменту отправки."""
+        if not self._timer.isActive():
+            self._timer.start()
 
     def publish(self) -> None:
         t = self.current()

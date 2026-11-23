@@ -672,12 +672,16 @@ class ControllerTest(unittest.TestCase):
     def test_live_edit_syncs_efir(self):
         self.win.lesson.command({"cmd": "start", "now": True})
         self.t.blocks.append(stage("Итоги", 5))
-        self.win.views[self.t.id].changed.emit()
-        pump(500)
-        self.assertEqual(self.win.efir.live_webinar().schedule[-1].name, "Итоги")
-        self.assertEqual(self.win.efir.server.snapshot("lesson")["lesson"]["total"], 25)
-        self.t.blocks.pop()
-        self.win.lesson.command({"cmd": "stop"})
+        try:
+            self.win.views[self.t.id].changed.emit()
+            end = time.time() + 3                     # ждём результата, а не фиксированные полсекунды
+            while time.time() < end and self.win.efir.live_webinar().schedule[-1].name != "Итоги":
+                pump(20)
+            self.assertEqual(self.win.efir.live_webinar().schedule[-1].name, "Итоги")
+            self.assertEqual(self.win.efir.server.snapshot("lesson")["lesson"]["total"], 25)
+        finally:                                      # провал не должен оставлять урок идущим для соседей
+            self.t.blocks.pop()
+            self.win.lesson.command({"cmd": "stop"})
 
     def test_break_without_live(self):
         self.win.lesson.command({"cmd": "break", "minutes": 7})
