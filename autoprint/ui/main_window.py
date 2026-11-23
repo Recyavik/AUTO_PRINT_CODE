@@ -63,15 +63,10 @@ def app_name(exe: str) -> str:
     return APP_NAMES.get(base.lower(), base or "окно")
 
 
-def apply_migrations(s: Settings) -> bool:
-    """Разовые переделки настроек при обновлении. True — что-то поменялось (настройки нужно сохранить)."""
-    changed = False
-    if "tray_v1" not in s.migrations:
-        # 0.9: «закрыть» прячет в трей — иначе вместе с окном пропадали суфлёр и экран эфира
-        s.close_to_tray = True
-        s.migrations.append("tray_v1")
-        changed = True
-    return changed
+def apply_migrations(s: Settings, store: TemplateStore | None = None) -> bool:
+    """Разовые переделки настроек и базы при обновлении (autoprint/migrations.py). True — что-то поменялось."""
+    from .. import migrations
+    return migrations.apply(s, store)
 
 
 def efir_token(phase: str, mode: str) -> str:
@@ -91,8 +86,8 @@ class MainWindow(FramelessWindow):
     def __init__(self, settings: Settings, store: TemplateStore) -> None:
         super().__init__(APP_NAME)
         self.settings = settings
-        self._migrated = apply_migrations(settings)
         self.store = store
+        self._migrated = apply_migrations(settings, store)
         self._zoom_filter = ZoomWheelFilter(self)
         QApplication.instance().installEventFilter(self._zoom_filter)
         install_wheel_guard(QApplication.instance())   # колесо не меняет счётчики и списки без щелчка по ним

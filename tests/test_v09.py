@@ -256,7 +256,7 @@ class ThemeTest(unittest.TestCase):
         act = next(a for a in m.actions() if a.text() == "Говоришь")
         act.trigger()
         self.assertEqual(got, ["say"])
-        self.assertEqual(w.kind.text(), "ТЕКСТ")
+        self.assertEqual(w.kind.text(), "ЗАМЕТКА")
 
     def test_views_lru(self):
         for t in self.ts:

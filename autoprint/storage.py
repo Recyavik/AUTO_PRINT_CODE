@@ -229,7 +229,10 @@ class Settings:
     efir_timer_geometry: str = ""      # окно таймера: место и размер
     efir_window_geometry: str = ""     # окно «Эфир» (шаблоны)
     efir_editor_geometry: str = ""     # редактор шаблона вебинара
-    lesson_preset: str = ""            # суфлёр урока: шаблон «Эфира» (оформление) — последний выбранный
+    lesson_preset: str = ""            # до 0.10: шаблон «Эфира» (оформление) — последний выбранный
+    lesson_look: str = ""              # оформление эфира урока — последнее выбранное (efir/looks.json)
+    page_open: bool = False            # экран урока был открыт при выходе — открыть снова при запуске
+    page_lesson: str = ""              # какой урок был на экране урока
     step_nav: str = "arrows"           # шаги: arrows — стрелками от курсора (код — продолжение файла)
                                        #       | home — от начала документа (Ctrl+Home)
 
@@ -317,11 +320,10 @@ BLOCK_CODE = "code"
 BLOCK_STAGE = "stage"     # этап урока: название, минуты, вид (обычный / перерыв / зарядка) — суфлёр урока
 BLOCK_IMAGE = "image"     # картинка: слайд, скриншот (text — путь к копии в data/media или адрес http(s))
 
-# Типы Markdown-блоков: ключ → (значок, название, цвет полоски). Первые четыре — подсказки ученику и
-# преподавателю у кода; остальные — суфлёр урока (что сказать, спросить, сделать, показать)
+# Роли заметок: ключ → (значок, название, цвет полоски). Заметки — для преподавателя: печатается только код
 ROLES = {
-    "text": ("📝", "Текст", "#8b949e"),
-    "task": ("📋", "Условие", "#3b82f6"),
+    "text": ("📝", "Заметка", "#8b949e"),
+    "task": ("📋", "Задание", "#3b82f6"),
     "explain": ("💡", "Пояснение", "#d29922"),
     "hint": ("🔎", "Подсказка", "#a855f7"),
     "say": ("🎙", "Говоришь", "#7fb4ff"),          # почти дословно
@@ -332,6 +334,19 @@ ROLES = {
     "show": ("🖥", "Показываешь", "#b28cff"),      # что видят ученики
     "trap": ("🪤", "Ловушки", "#f2686c"),          # на чём ошибаются, что режет проверка
     "extra": ("⚡", "Для быстрых", "#b28cff"),     # дополнительное задание
+    "term": ("📖", "Термин", "#5fc9b8"),           # обязательный термин: первая строка — термин, дальше определение
+    "output": ("✅", "Вывод", "#6fd382"),          # что выведет код после запуска
+}
+# порядок в меню ролей; «Ещё» — старые роли (показываются, новых с ними не создаём)
+ROLE_ORDER = ["say", "term", "tell", "ask", "do", "show", "output", "important", "trap", "extra", "task", "text"]
+ROLE_MORE = ["explain", "hint"]
+# одна строка в «Обозначениях»: как обращаться с заметкой этой роли
+ROLE_HINTS = {
+    "say": "обязательно, дословно", "term": "обязательный термин — дословно",
+    "tell": "своими словами, можно дополнять", "ask": "вопрос и ответы учеников", "do": "вслух не читать",
+    "show": "что видят ученики", "output": "что выведет код", "important": "нельзя пропустить",
+    "trap": "на чём ошибаются", "extra": "тем, кто закончил раньше", "task": "что делают ученики",
+    "text": "заметка", "explain": "пояснение", "hint": "подсказка",
 }
 STAGE_KINDS = {"": "Обычный", "break": "Перерыв", "exercise": "Зарядка"}
 
@@ -375,13 +390,21 @@ class Template:
     id: str = field(default_factory=new_id)
     updated: float = field(default_factory=time.time)
     start: str = ""      # плановое начало урока «ЧЧ:ММ» (суфлёр урока); пусто — с момента «Начать урок»
-    preset: str = ""     # шаблон «Эфира», откуда брать фон, зарядки и перерыв; пусто — последний выбранный
+    preset: str = ""     # до 0.10: шаблон «Эфира» с оформлением (остаётся для отката на 0.9)
+    look: str = ""       # оформление экрана эфира (efir/looks.json); пусто — последнее выбранное
 
     def find_block(self, block_id: str) -> Block | None:
         return next((b for b in self.blocks if b.id == block_id), None)
 
     def code_blocks(self) -> list[Block]:
         return [b for b in self.blocks if b.type == BLOCK_CODE]
+
+    def next_code(self, after_id: str = "", back: bool = False) -> "Block | None":
+        """Следующий (back — предыдущий) непустой блок кода после блока after_id; без него — первый."""
+        items = list(reversed(self.blocks)) if back else list(self.blocks)
+        ids = [b.id for b in items]
+        start = ids.index(after_id) + 1 if after_id in ids else (len(ids) if after_id else 0)
+        return next((b for b in items[start:] if is_printable(b)), None)
 
     def nav_blocks(self) -> list[Block]:
         """Переходы по хоткею «следующий блок»: блоки кода и активный текстовый блок, если печатается он —
@@ -400,6 +423,11 @@ class Template:
             if b.type == BLOCK_CODE:
                 return b.lang
         return "python"
+
+
+def is_printable(b: Block) -> bool:
+    """По Ctrl+F9 печатается только непустой код; заметки и картинки — для преподавателя."""
+    return b.type == BLOCK_CODE and bool(b.text.strip())
 
 
 def sample_template() -> Template:
@@ -484,7 +512,8 @@ def _template_from(d: dict) -> Template:
         blocks = [_block_from(b) for b in d.get("blocks", [])]
     return Template(title=d.get("title", "Без названия"), blocks=blocks, active_block=d.get("active_block", ""),
                     id=d.get("id") or new_id(), updated=d.get("updated", time.time()),
-                    start=str(d.get("start") or ""), preset=str(d.get("preset") or ""))
+                    start=str(d.get("start") or ""), preset=str(d.get("preset") or ""),
+                    look=str(d.get("look") or ""))
 
 
 def _fresh_ids(t: Template) -> Template:
@@ -558,8 +587,8 @@ class TemplateStore:
         return next((t for t in self.templates if t.id == tid), None)
 
     def add(self, title: str) -> Template:
-        t = Template(title=title, blocks=[Block(BLOCK_MARKDOWN, "## Задача 1\n\n", role="task"),
-                                          Block(BLOCK_CODE, "")])
+        t = Template(title=title, blocks=[Block(BLOCK_STAGE, "", title="Начало", minutes=5),
+                                          Block(BLOCK_MARKDOWN, "", role="say")])
         self.templates.append(t)
         return t
 

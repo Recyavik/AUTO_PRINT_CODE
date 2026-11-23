@@ -40,6 +40,7 @@ DARK = {
     "role_say": _c("#7FB4FF"), "role_tell": _c("#6FD382"), "role_ask": _c("#E9A72C"), "role_do": _c("#A6A6B2"),
     "role_important": _c("#F2686C"), "role_show": _c("#B28CFF"), "role_trap": _c("#F2686C"),
     "role_extra": _c("#B28CFF"), "role_stage": _c("#E9A72C"), "role_image": _c("#6FC3DF"),
+    "role_term": _c("#5FC9B8"), "role_output": _c("#6FD382"),
     "shadow": _c("#000000", .45),
 }
 LIGHT = {
@@ -56,6 +57,7 @@ LIGHT = {
     "role_say": _c("#1F5FBF"), "role_tell": _c("#237A32"), "role_ask": _c("#B87400"), "role_do": _c("#5A5A66"),
     "role_important": _c("#C0272D"), "role_show": _c("#7A3DB8"), "role_trap": _c("#C0272D"),
     "role_extra": _c("#7A3DB8"), "role_stage": _c("#B87400"), "role_image": _c("#0F7A99"),
+    "role_term": _c("#0E7C6E"), "role_output": _c("#237A32"),
     "shadow": _c("#1E2230", .18),
 }
 
@@ -196,7 +198,8 @@ class Theme(QObject):
     ROLE_CHIP_TOKENS = {"text": "role_text", "task": "role_task", "explain": "role_explain", "hint": "role_hint",
                         "say": "role_say", "tell": "role_tell", "ask": "role_ask", "do": "role_do",
                         "important": "role_important", "show": "role_show", "trap": "role_trap",
-                        "extra": "role_extra", "code": "accent", "stage": "role_stage", "image": "role_image"}
+                        "extra": "role_extra", "term": "role_term", "output": "role_output",
+                        "code": "accent", "stage": "role_stage", "image": "role_image"}
 
     def _role_chips(self) -> str:
         """Плашка типа блока в редакторе — цвет роли на лёгком фоне того же цвета (как на суфлёре)."""
