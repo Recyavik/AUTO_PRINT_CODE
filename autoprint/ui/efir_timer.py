@@ -633,7 +633,8 @@ QToolButton#pinBtn:checked {{ background: {t.css('accent_soft')}; }}
                         lambda: ctl.start_now(None))
         else:
             m.addAction(icons.icon("play"), "Начать эфир заново сейчас", lambda: ctl.start_now(0))
-        m.addAction(icons.icon("restart"), f"Время по плану (старт в {w.start if w else '—'})", ctl.reset_to_plan)
+        if w:
+            m.addAction(icons.icon("restart"), "Изменить начало…", self._change_start)
         m.addSeparator()
         if w:
             m.addAction(icons.icon("pencil"), "Изменить оформление урока…" if w.lesson_id else "Изменить шаблон…",
@@ -641,6 +642,15 @@ QToolButton#pinBtn:checked {{ background: {t.css('accent_soft')}; }}
         m.addAction(icons.icon("layers"), "Шаблоны вебинаров…", ctl.show_window)
         m.addSeparator()
         m.addAction(icons.icon("x"), "Завершить эфир…", self.close)
+
+    def _change_start(self) -> None:
+        from .efir_start import ask_start
+        w = self.ctl.live_webinar()
+        if w is None:
+            return
+        v = ask_start(self, self.mapToGlobal(QPoint(10, HEADER_H)), last=w.start, title="Начало эфира")
+        if v is not None:
+            self.ctl.set_start(v)
 
     def _start_from(self, index: int) -> None:
         segs = self.ctl.segments()

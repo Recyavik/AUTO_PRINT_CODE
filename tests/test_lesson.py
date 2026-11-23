@@ -494,7 +494,7 @@ class EfirLessonTest(unittest.TestCase):
 
     def test_launch_lesson(self):
         from datetime import datetime
-        from autoprint.efir.model import anchor_for
+        from autoprint.efir.model import anchor_at
         t = self.lesson()
         self.assertTrue(self.ctl.launch_lesson(t, show=False))
         live = self.ctl.store.live
@@ -507,15 +507,14 @@ class EfirLessonTest(unittest.TestCase):
         self.assertEqual(self.ctl.store.live.anchor, first)
         self.assertEqual(self.ctl.live_webinar().schedule[-1].name, "Итоги")
         other = Template(title="Другой", blocks=[stage("А", 5)])
-        other.start = "09:30"
-        self.ctl.launch_lesson(other, start_now=False, show=False)
-        self.assertEqual(self.ctl.store.live.anchor, anchor_for("09:30"))
+        self.ctl.launch_lesson(other, start="09:30", show=False)
+        self.assertEqual(self.ctl.store.live.anchor, anchor_at("09:30", datetime.now()))
         self.assertEqual([w.lesson_id for w in self.ctl.store.webinars if w.lesson_id], [other.id])   # старый убран
         self.ctl.stop_live()
         self.assertEqual(self.ctl.live_lesson_id(), "")
 
     def test_launch_start_is_lesson_time(self):
-        """Ревью №5: без планового начала урока «время по плану» — момент запуска, а не старт пресета."""
+        """Начало урока — момент запуска или выбранное время, а не старт из шаблона-оформления."""
         from autoprint.efir.model import Activity, Webinar
         preset = Webinar(title="1Т", start="11:00", schedule=[Activity("Пара", 90)])
         self.ctl.store.add([preset])
@@ -524,12 +523,7 @@ class EfirLessonTest(unittest.TestCase):
         self.ctl.launch_lesson(t, show=False)
         w = self.ctl.live_webinar()
         self.assertEqual(w.start, self.ctl.store.live.anchor.strftime("%H:%M"))
-        first = w.start
-        self.ctl.start_now(1)                                   # сдвиг — «по плану» остаётся прежним
-        self.ctl.launch_lesson(t, show=False)
-        self.assertEqual(self.ctl.live_webinar().start, first)
-        t.start = "16:30"
-        self.ctl.launch_lesson(t, show=False)
+        self.ctl.launch_lesson(t, start="16:30", show=False)
         self.assertEqual(self.ctl.live_webinar().start, "16:30")
 
     def test_launch_without_minutes_refused(self):
@@ -746,15 +740,16 @@ class ControllerTest(unittest.TestCase):
             self.win.lesson.command({"cmd": "stop"})
 
     def test_set_start_cmd(self):
-        from autoprint.efir.model import anchor_for
-        self.win.lesson.command({"cmd": "set_start", "start": "16:30"})
+        from datetime import datetime
+        from autoprint.efir.model import anchor_at
+        self.win.lesson.command({"cmd": "set_start", "start": "16:30"})        # урок не идёт — запоминается
         self.assertEqual(self.t.start, "16:30")
         self.win.lesson.command({"cmd": "set_start", "start": "25:99"})       # неверное — не меняет
         self.assertEqual(self.t.start, "16:30")
         self.assertEqual(self.snap()["lesson"]["start"], "16:30")
-        self.win.lesson.command({"cmd": "start", "now": False})
+        self.win.lesson.command({"cmd": "start", "at": "16:30"})
         try:
-            self.assertEqual(self.win.efir.store.live.anchor, anchor_for("16:30"))
+            self.assertEqual(self.win.efir.store.live.anchor, anchor_at("16:30", datetime.now()))
         finally:
             self.win.lesson.command({"cmd": "stop"})
             self.win.lesson.command({"cmd": "set_start", "start": ""})

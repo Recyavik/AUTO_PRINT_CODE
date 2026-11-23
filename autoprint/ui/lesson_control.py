@@ -18,6 +18,7 @@ from PySide6.QtCore import QObject, QTimer, QUrl, Signal
 from PySide6.QtGui import QDesktopServices
 
 from .. import scenario
+from ..efir.model import norm_hhmm, parse_hhmm
 from ..storage import Template
 from .theme import theme
 
@@ -187,7 +188,12 @@ class LessonController(QObject):
         t = self.current()
         try:
             if cmd == "start" and t is not None:
-                self.efir.launch_lesson(t, start_now=bool(d.get("now", True)))
+                at = str(d.get("at") or "").strip()
+                if not at or parse_hhmm(at):         # неверное время — ничего не делаем
+                    if at:
+                        t.start = norm_hhmm(at)          # запомнить — подставится в следующий раз
+                        self.main._save_timer.start()
+                    self.efir.launch_lesson(t, start=at)
             elif cmd == "stop":
                 if self.efir.live_lesson_id():
                     self.efir.stop_live()
@@ -249,15 +255,14 @@ class LessonController(QObject):
             self.efir.webinar = scenario.webinar_for(t, self.efir.lesson_preset(t))
 
     def _set_start(self, t: Template, start: str) -> None:
-        """Плановое начало урока «ЧЧ:ММ» (пусто — без плана: время от «Начать урок»)."""
-        from ..efir.model import parse_hhmm
+        """Начало урока «ЧЧ:ММ»: идёт урок — его время сдвигается; не идёт — запоминается для «Начать в…»."""
         if start and not parse_hhmm(start):
             return
-        if start:
-            h, m = parse_hhmm(start)
-            start = f"{h:02d}:{m:02d}"
+        start = norm_hhmm(start)
         t.start = start
         self.main._save_timer.start()
+        if self.efir.live_lesson_id() == t.id and start:
+            self.efir.set_start(start)
 
     def _set_preset(self, t: Template, wid: str) -> None:
         w = self.efir.store.get(wid)

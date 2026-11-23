@@ -347,5 +347,185 @@ class FaviconTest(unittest.TestCase):
         self.assertEqual(a, b)
 
 
+
+# ================================================================ Task 4: начало эфира — при запуске
+
+class FakeMain(QWidget):
+    def __init__(self):
+        super().__init__()
+        from autoprint.storage import Settings
+        self.settings = Settings()
+        self.settings.efir_port = PORT + 3
+
+
+def efir_ctl(tag: str):
+    from autoprint.efir import store as store_mod
+    from autoprint.ui import efir_control
+    data = TMP / f"efir-{tag}-{time.time_ns()}"
+    old = store_mod.efir_dir
+    store_mod.efir_dir = lambda: data
+    try:
+        ctl = efir_control.EfirController(FakeMain())
+    finally:
+        store_mod.efir_dir = old
+    return ctl
+
+
+class StartTest(unittest.TestCase):
+    def setUp(self):
+        from autoprint.efir.model import sample_webinar
+        self.ctl = efir_ctl("start")
+        self.w = sample_webinar()
+        self.w.title = "1Т"
+        self.ctl.store.add([self.w])
+
+    def tearDown(self):
+        if self.ctl.timer_window is not None:
+            self.ctl.timer_window.close_silently()
+        self.ctl.server.stop()
+
+    def test_anchor_at_future_today(self):
+        from datetime import datetime
+        from autoprint.efir.model import anchor_at
+        now = datetime(2026, 11, 23, 17, 12, 30)
+        self.assertEqual(anchor_at("18:00", now), datetime(2026, 11, 23, 18, 0))
+
+    def test_anchor_at_passed_today(self):
+        from datetime import datetime
+        from autoprint.efir.model import anchor_at
+        now = datetime(2026, 11, 23, 18, 20)
+        self.assertEqual(anchor_at("18:00", now), datetime(2026, 11, 23, 18, 0))      # опоздал — идёт 20 минут
+
+    def test_anchor_at_midnight(self):
+        from datetime import datetime
+        from autoprint.efir.model import anchor_at
+        self.assertEqual(anchor_at("00:10", datetime(2026, 11, 23, 23, 50)), datetime(2026, 11, 24, 0, 10))
+        self.assertEqual(anchor_at("23:50", datetime(2026, 11, 24, 0, 5)), datetime(2026, 11, 23, 23, 50))
+
+    def test_anchor_at_bad_is_now(self):
+        from datetime import datetime
+        from autoprint.efir.model import anchor_at
+        now = datetime(2026, 11, 23, 17, 12, 30)
+        self.assertEqual(anchor_at("", now), datetime(2026, 11, 23, 17, 12, 30))
+        self.assertEqual(anchor_at("25:99", now), datetime(2026, 11, 23, 17, 12, 30))
+
+    def test_quick_times(self):
+        from datetime import datetime
+        from autoprint.ui.efir_start import quick_times
+        self.assertEqual(quick_times(datetime(2026, 1, 1, 17, 12)), ["17:30", "18:00"])
+        self.assertEqual(quick_times(datetime(2026, 1, 1, 17, 30)), ["18:00", "18:30"])
+        self.assertEqual(quick_times(datetime(2026, 1, 1, 23, 40)), ["00:00", "00:30"])
+
+    def test_launch_now(self):
+        from datetime import datetime
+        self.ctl.launch(self.w.id, "")
+        self.assertLess(abs((datetime.now() - self.ctl.store.live.anchor).total_seconds()), 3)
+
+    def test_launch_at_remembers_start(self):
+        from datetime import datetime
+        from autoprint.efir.model import anchor_at
+        self.ctl.launch(self.w.id, "18:00")
+        self.assertEqual(self.ctl.store.live.anchor, anchor_at("18:00", datetime.now()))
+        self.assertEqual(self.ctl.store.get(self.w.id).start, "18:00")
+
+    def test_relaunch_keeps_anchor(self):
+        self.ctl.launch(self.w.id, "18:00")
+        a = self.ctl.store.live.anchor
+        self.ctl.launch(self.w.id)                  # «Открыть таймер» у идущего — время не сбивается
+        self.assertEqual(self.ctl.store.live.anchor, a)
+
+    def test_set_start_moves_anchor(self):
+        from datetime import datetime
+        from autoprint.efir.model import anchor_at
+        self.ctl.launch(self.w.id, "")
+        self.ctl.set_start("09:00")
+        self.assertEqual(self.ctl.store.live.anchor, anchor_at("09:00", datetime.now()))
+        self.ctl.set_start("")                      # «Сейчас» — с первого блока с этой минуты
+        self.assertLess(abs((datetime.now() - self.ctl.store.live.anchor).total_seconds()), 3)
+
+    def test_editor_has_no_start_field(self):
+        from PySide6.QtWidgets import QTimeEdit
+        from autoprint.ui.efir_editor import EditorWindow
+        ed = EditorWindow(self.ctl, self.w)
+        try:
+            self.assertEqual(ed.findChildren(QTimeEdit), [])
+            ed.w.start = "18:00"
+            self.assertEqual(ed.result().start, "18:00")          # прошлое время старта не теряется
+        finally:
+            ed._dirty = False
+            ed.close()
+
+    def test_row_times_relative(self):
+        from autoprint.ui.efir_editor import EditorWindow
+        ed = EditorWindow(self.ctl, self.w)
+        try:
+            self.assertEqual([r.time_lbl.text() for r in ed.rows[:4]], ["0:00", "0:01", "0:06", "0:20"])
+        finally:
+            ed._dirty = False
+            ed.close()
+
+    def test_start_picker(self):
+        from datetime import datetime
+        from autoprint.ui.efir_start import StartPicker
+        p = StartPicker(last="11:00", now=datetime(2026, 1, 1, 17, 12))
+        got = []
+        p.chosen.connect(got.append)
+        texts = [b.text() for b in p.quick_buttons]
+        self.assertEqual(texts, ["17:30", "18:00", "11:00"])
+        p.now_btn.click()
+        p.quick_buttons[1].click()
+        p.time_edit.setTime(p.time_edit.time().fromString("19:15", "HH:mm"))
+        p.at_btn.click()
+        self.assertEqual(got, ["", "18:00", "19:15"])
+
+
+class LessonStartTest(unittest.TestCase):
+    """Урок в суфлёре: «Начать сейчас» или «в ЧЧ:ММ»; начало идущего урока можно поправить."""
+
+    @classmethod
+    def setUpClass(cls):
+        from autoprint.efir import store as store_mod
+        from autoprint.storage import BLOCK_STAGE, Block, Template
+        cls.data = TMP / "lesson-start-efir"
+        cls._efir_dir = store_mod.efir_dir
+        store_mod.efir_dir = lambda: cls.data
+        cls.win, cls.store = make_main(PORT + 4)
+        cls.t = cls.store.insert(Template(title="Урок", blocks=[
+            Block(BLOCK_STAGE, title="Вступление", minutes=5), Block(BLOCK_STAGE, title="Теория", minutes=20)]))
+        cls.win.open_template(cls.t.id)
+
+    @classmethod
+    def tearDownClass(cls):
+        from autoprint.efir import store as store_mod
+        cls.win.efir.stop_live()
+        cls.win.efir.shutdown()
+        store_mod.efir_dir = cls._efir_dir
+
+    def tearDown(self):
+        self.win.lesson.command({"cmd": "stop"})
+
+    def test_start_now(self):
+        from datetime import datetime
+        self.win.lesson.command({"cmd": "start"})
+        self.assertEqual(self.win.efir.live_lesson_id(), self.t.id)
+        self.assertLess(abs((datetime.now() - self.win.efir.store.live.anchor).total_seconds()), 3)
+
+    def test_start_at(self):
+        from datetime import datetime
+        from autoprint.efir.model import anchor_at
+        self.win.lesson.command({"cmd": "start", "at": "18:00"})
+        self.assertEqual(self.win.efir.store.live.anchor, anchor_at("18:00", datetime.now()))
+        self.assertEqual(self.t.start, "18:00")                 # запомнено — подставится в следующий раз
+
+    def test_set_start_live(self):
+        from datetime import datetime
+        from autoprint.efir.model import anchor_at
+        self.win.lesson.command({"cmd": "start"})
+        self.win.lesson.command({"cmd": "set_start", "start": "07:45"})
+        self.assertEqual(self.win.efir.store.live.anchor, anchor_at("07:45", datetime.now()))
+        self.win.lesson.command({"cmd": "set_start", "start": "99:99"})     # неверное — без изменений
+        self.assertEqual(self.win.efir.store.live.anchor, anchor_at("07:45", datetime.now()))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -4,7 +4,7 @@ from __future__ import annotations
 import threading
 from pathlib import Path
 
-from PySide6.QtCore import QByteArray, QSize, Qt, Signal
+from PySide6.QtCore import QByteArray, QPoint, QSize, Qt, Signal
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import (QFileDialog, QFrame, QHBoxLayout, QInputDialog, QLabel, QMenu, QMessageBox,
                                QScrollArea,
@@ -48,7 +48,7 @@ class WebinarCard(QFrame):
         title.setStyleSheet("font-size: 15px; font-weight: 600;" + (f"color: {theme.css('ok')};" if live else ""))
         text.addWidget(title)
         ex = len(w.exercises)
-        meta = (f"Старт {w.start} · {fmt_minutes(w.total_min)} · блоков: {len(w.schedule)} · "
+        meta = (f"{fmt_minutes(w.total_min)} · блоков: {len(w.schedule)} · "
                 f"перерыв {w.break_min} мин · зарядок: {ex if ex else 'нет'} · фон: {bg_title(w.background)}")
         m = label(meta, "rowSub", wrap=True)
         text.addWidget(m)
@@ -59,7 +59,7 @@ class WebinarCard(QFrame):
         lay.addLayout(text, 1)
         go = accent_button(" Запустить" if not live else " Открыть таймер", "play")
         go.setFixedHeight(34)
-        go.clicked.connect(lambda: win.ctl.launch(w.id))
+        go.clicked.connect(lambda: win.ctl.launch(w.id) if live else win.ask_launch(w, go))
         edit = IconButton("pencil", "Изменить шаблон", 16, box=34, framed=True)
         edit.clicked.connect(lambda: win.ctl.edit(w.id))
         more = IconButton("more", "Ещё", 16, box=34, framed=True)
@@ -213,6 +213,14 @@ class EfirWindow(FramelessWindow):
             self.toast.show_message(text, warn=warn)
 
     # ------------------------------------------------------------ действия
+    def ask_launch(self, w: Webinar, anchor: QWidget) -> None:
+        """«Запустить»: начало — сейчас или в выбранное время (в шаблоне его нет)."""
+        from .efir_start import ask_start
+        v = ask_start(self, anchor.mapToGlobal(QPoint(0, anchor.height())), last=w.start,
+                      title=f"Начало: {w.title}")
+        if v is not None:
+            self.ctl.launch(w.id, v)
+
     def duplicate(self, wid: str) -> None:
         w = self.ctl.store.get(wid)
         if w:

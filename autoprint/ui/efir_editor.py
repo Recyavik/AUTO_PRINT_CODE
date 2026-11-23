@@ -1,13 +1,12 @@
 """Редактор шаблона вебинара: расписание и всё для экрана эфира (фон, зарядки, перерыв) — на одной странице."""
 from __future__ import annotations
 
-from datetime import datetime, timedelta
 from pathlib import Path
 
-from PySide6.QtCore import QByteArray, Qt, QTime, QTimer
+from PySide6.QtCore import QByteArray, Qt, QTimer
 from PySide6.QtGui import QColor, QGuiApplication
 from PySide6.QtWidgets import (QColorDialog, QComboBox, QFileDialog, QFrame, QHBoxLayout, QLabel, QLineEdit,
-                               QMessageBox, QPushButton, QScrollArea, QSpinBox, QTimeEdit, QVBoxLayout, QWidget)
+                               QMessageBox, QPushButton, QScrollArea, QSpinBox, QVBoxLayout, QWidget)
 
 from ..efir.model import (ANIMATIONS, BG_BLACK, DEMOS, FONTS, KINDS, Activity, Exercise, Webinar, ai_prompt,
                           export_json, fmt_minutes, guess_kind, sample_webinar)
@@ -260,16 +259,9 @@ class EditorWindow(FramelessWindow):
         self.title.textEdited.connect(self._touch)
         row.addWidget(label("Название", "rowTitle"))
         row.addWidget(self.title, 1)
-        row.addSpacing(12)
-        row.addWidget(label("Старт", "rowTitle"))
-        self.start = QTimeEdit()
-        self.start.setDisplayFormat("HH:mm")
-        h, m = (self.w.start.split(":") + ["0"])[:2]
-        self.start.setTime(QTime(int(h), int(m)))
-        self.start.setFixedWidth(90)
-        self.start.timeChanged.connect(self.update_times)
-        row.addWidget(self.start)
         lay.addLayout(row)
+        lay.addWidget(label("Время начала в шаблоне не хранится — его выбирают при запуске («Сейчас» или «в 18:00»).",
+                            "dim", wrap=True))
         self.total = label("", "dim")
         lay.addWidget(self.total)
 
@@ -466,14 +458,12 @@ QFrame#efirBottom {{ background: {t.css('panel')}; border-top: 1px solid {t.css(
         self.update_times()
 
     def update_times(self, *_a) -> None:
-        t0 = self.start.time()
-        t = datetime(2000, 1, 1, t0.hour(), t0.minute())
+        """Время блоков — от начала эфира («0:00», «0:05»…): само начало выбирают при запуске."""
         total = 0
         for r in self.rows:
-            r.time_lbl.setText(f"{t:%H:%M}")
-            t += timedelta(minutes=r.minutes.value())
+            r.time_lbl.setText(f"{total // 60}:{total % 60:02d}")
             total += r.minutes.value()
-        self.total.setText(f"Всего {fmt_minutes(total)} · конец в {t:%H:%M} · блоков: {len(self.rows)}")
+        self.total.setText(f"Всего {fmt_minutes(total)} · блоков: {len(self.rows)}")
 
     # ------------------------------------------------------------ зарядки
     def _add_exercise_row(self, ex: Exercise) -> ExerciseRow:
@@ -543,7 +533,7 @@ QFrame#efirBottom {{ background: {t.css('panel')}; border-top: 1px solid {t.css(
     def result(self) -> Webinar:
         w = Webinar(id=self.w.id, lesson_id=self.w.lesson_id)   # эфир урока из суфлёра остаётся эфиром урока
         w.title = self.title.text().strip() or "Вебинар"
-        w.start = self.start.time().toString("HH:mm")
+        w.start = self.w.start                  # прошлое время старта — подставится при следующем запуске
         w.schedule = [r.activity() for r in self.rows]
         w.background = self.bg.value() or BG_BLACK
         w.caption = self.caption.text().strip()

@@ -335,6 +335,21 @@ def anchor_for(start: str, day: date | None = None) -> datetime:
     return datetime(d.year, d.month, d.day, hm[0], hm[1])
 
 
+def anchor_at(hhmm: str, now: datetime) -> datetime:
+    """Начало эфира «в ЧЧ:ММ»: из вчера, сегодня и завтра — ближайшее к now. Опоздали на 20 минут — сегодня
+    (эфир уже идёт); 23:50 → «00:10» — завтра; 00:05 → «23:50» — вчера. Пусто или неверно — now."""
+    hm = parse_hhmm(hhmm)
+    if not hm:
+        return now
+    base = now.replace(hour=hm[0], minute=hm[1], second=0, microsecond=0)
+    return min((base + timedelta(days=d) for d in (-1, 0, 1)), key=lambda t: abs((t - now).total_seconds()))
+
+
+def norm_hhmm(hhmm: str) -> str:
+    hm = parse_hhmm(hhmm)
+    return f"{hm[0]:02d}:{hm[1]:02d}" if hm else ""
+
+
 def segments(w: Webinar, anchor: datetime) -> list[Segment]:
     out, t = [], anchor
     for i, a in enumerate(w.schedule):

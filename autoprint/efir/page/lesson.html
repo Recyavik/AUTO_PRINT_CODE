@@ -259,6 +259,15 @@ function mmss(sec) {
   return h ? h + ":" + String(m).padStart(2, "0") + ":" + String(s).padStart(2, "0") : m + ":" + String(s).padStart(2, "0");
 }
 function hm(min) { min = Math.round(min); return Math.floor(min / 60) + ":" + String(min % 60).padStart(2, "0"); }
+function hhmm(ms) { const d = new Date(ms); return String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0"); }
+function nextHalfHour() { const d = new Date(now()); d.setSeconds(0, 0); d.setMinutes(d.getMinutes() + 30 - d.getMinutes() % 30); return hhmm(d.getTime()); }
+function timeInput(value) {
+  const tm = el("input");
+  tm.type = "time";
+  tm.value = value || "";
+  tm.style.cssText = "font: inherit; color: var(--text); background: transparent; border: none; width: 6.2em;";
+  return tm;
+}
 function clockAt(ms) { const d = new Date(ms); return d.getHours() + ":" + String(d.getMinutes()).padStart(2, "0"); }
 function now() { return Date.now() + offset; }
 
@@ -306,27 +315,27 @@ function renderTools() {
         sel.onchange = () => cmd({ cmd: "preset", id: sel.value });
         t.appendChild(sel);
       }
+      const go = el("button", "primary", "Начать сейчас");
+      go.title = "Урок начинается с этой минуты: этапы пойдут по часам, таймер — в окне «Эфира»";
+      go.onclick = () => cmd({ cmd: "start" });
+      t.appendChild(go);
+      const atBox = el("label", "chip");
+      atBox.title = "Начать урок в это время: до начала таймер считает «до начала»";
+      atBox.appendChild(document.createTextNode("или в"));
+      const tm = timeInput(L.start || nextHalfHour());
+      atBox.appendChild(tm);
+      t.appendChild(atBox);
+      const at = el("button", "", "Начать в это время");
+      at.onclick = () => { if (tm.value) cmd({ cmd: "start", at: tm.value }); };
+      t.appendChild(at);
+    } else {
       const startBox = el("label", "chip");
-      startBox.title = "Плановое начало урока: время этапов — от него («По плану»). Пусто — от «Начать урок»";
+      startBox.title = "Начало идущего урока — поправьте, и время этапов сдвинется";
       startBox.appendChild(document.createTextNode("Начало"));
-      const tm = el("input");
-      tm.type = "time";
-      tm.value = L.start || "";
-      tm.style.cssText = "font: inherit; color: var(--text); background: transparent; border: none; width: 6.2em;";
-      tm.onchange = () => cmd({ cmd: "set_start", start: tm.value });
+      const tm = timeInput(hhmm(S.live.anchor));
+      tm.onchange = () => { if (tm.value) cmd({ cmd: "set_start", start: tm.value }); };
       startBox.appendChild(tm);
       t.appendChild(startBox);
-      if (L.start) {
-        const plan = el("button", "", "По плану · " + L.start);
-        plan.title = "Время этапов — от планового начала урока";
-        plan.onclick = () => cmd({ cmd: "start", now: false });
-        t.appendChild(plan);
-      }
-      const go = el("button", "primary", "Начать урок");
-      go.title = "Урок начинается сейчас: этапы пойдут по часам, таймер — в окне «Эфира»";
-      go.onclick = () => cmd({ cmd: "start", now: true });
-      t.appendChild(go);
-    } else {
       const shift = el("button", "", "Сдвинуть на сейчас");
       shift.title = "Текущий этап начинается заново с этой минуты, остальные сдвигаются";
       shift.onclick = () => cmd({ cmd: "shift_now" });

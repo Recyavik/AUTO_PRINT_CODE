@@ -17,7 +17,7 @@ from PySide6.QtGui import QDesktopServices, QGuiApplication
 from PySide6.QtWidgets import QWidget
 
 from ..efir import legacy
-from ..efir.model import Webinar, agenda_at, anchor_for, anchor_to_start_at, parse_hhmm, segments
+from ..efir.model import Webinar, agenda_at, anchor_at, anchor_to_start_at, norm_hhmm, parse_hhmm, segments
 from ..efir.server import DEFAULT_PORT, BroadcastServer
 from ..efir.store import WebinarStore
 
@@ -194,15 +194,22 @@ class EfirController(QObject):
     def agenda(self, now: datetime | None = None):
         return agenda_at(self.segments(), now or datetime.now())
 
-    def launch(self, wid: str) -> None:
+    def launch(self, wid: str, start: str | None = None) -> None:
+        """Запустить эфир по шаблону. start: "" — сейчас, "ЧЧ:ММ" — в это время (запоминается в шаблоне как
+        прошлое время старта), None — идущий эфир не трогать (иначе — сейчас)."""
         w = self.store.get(wid)
         if not w:
             return
         live = self.store.live
-        if live and live.webinar_id == wid:
+        now = datetime.now().replace(microsecond=0)
+        if start is None and live and live.webinar_id == wid:
             anchor = live.anchor                                  # тот же эфир — не сбиваем «сдвинуть на сейчас»
+        elif start and parse_hhmm(start):
+            anchor = anchor_at(start, now)
+            w.start = norm_hhmm(start)
+            self.store.put(w)
         else:
-            anchor = anchor_for(w.start)
+            anchor = now
         self.store.set_live(wid, anchor)
         self.webinar = w
         self.ensure_server()
@@ -219,25 +226,23 @@ class EfirController(QObject):
         visible = self.store.visible()
         return visible[0] if visible else None
 
-    def launch_lesson(self, t, start_now: bool = True, show: bool = True) -> bool:
-        """Эфир по этапам урока из суфлёра. Тот же урок уже идёт — время не сбивается, расписание обновляется.
-        start_now=False — по плановому началу урока (t.start), если оно задано. False — нет этапов с минутами."""
+    def launch_lesson(self, t, start: str | None = None, show: bool = True) -> bool:
+        """Эфир по этапам урока из суфлёра. start: "" — сейчас, "ЧЧ:ММ" — в это время, None — тот же урок уже
+        идёт — время не сбивается, только расписание обновляется (иначе — сейчас). False — нет этапов с минутами."""
         from ..scenario import webinar_for
         w = webinar_for(t, self.lesson_preset(t))
         if not w.schedule:
             self.message.emit("У урока нет этапов с минутами — эфир по нему не начать", True)
             return False
         live = self.store.live
-        if live and live.webinar_id == w.id:
+        now = datetime.now().replace(microsecond=0)
+        if start is None and live and live.webinar_id == w.id:
             anchor = live.anchor
-        elif not start_now and t.start and parse_hhmm(t.start):
-            anchor = anchor_for(t.start)
+        elif start and parse_hhmm(start):
+            anchor = anchor_at(start, now)
         else:
-            anchor = datetime.now().replace(microsecond=0)
-        if not parse_hhmm(t.start or ""):
-            # плана нет: «время по плану» — когда урок начали (после «Сдвинуть на сейчас» — то же, что было)
-            old = self.store.get(w.id) if live and live.webinar_id == w.id else None
-            w.start = old.start if old is not None and parse_hhmm(old.start) else anchor.strftime("%H:%M")
+            anchor = now
+        w.start = anchor.strftime("%H:%M")
         # служебные эфиры прошлых уроков больше не нужны
         self.store.webinars = [x for x in self.store.webinars if not x.lesson_id or x.id == w.id]
         self.store.put(w)
@@ -304,11 +309,18 @@ class EfirController(QObject):
         self.store.set_live(self.store.live.webinar_id, anchor_to_start_at(segs, index, now).replace(microsecond=0))
         self.live_changed.emit()
 
-    def reset_to_plan(self) -> None:
+    def set_start(self, hhmm: str) -> None:
+        """«Изменить начало…» идущего эфира: "" — с первого блока с этой минуты, "ЧЧ:ММ" — с этого времени."""
         w = self.live_webinar()
-        if w:
-            self.store.set_live(w.id, anchor_for(w.start))
-            self.live_changed.emit()
+        if w is None or (hhmm and not parse_hhmm(hhmm)):
+            return
+        now = datetime.now().replace(microsecond=0)
+        anchor = anchor_at(hhmm, now) if hhmm else now
+        if hhmm:
+            w.start = norm_hhmm(hhmm)
+            self.store.put(w)
+        self.store.set_live(w.id, anchor)
+        self.live_changed.emit()
 
     def restore(self) -> None:
         """При запуске программы: эфир шёл (программу перезапустили) — вернуть таймер."""

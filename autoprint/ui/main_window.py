@@ -1556,7 +1556,7 @@ class MainWindow(FramelessWindow):
                 from ..efir.model import fmt_left
                 text = f" Эфир · {ag.current.activity.name} · {fmt_left(ag.left_s)}"
             elif ag.phase == "before":
-                text = f" Эфир · {w.title} · в {w.start}"
+                text = f" Эфир · {w.title} · в {ag.start:%H:%M}"
             else:
                 text = f" Эфир · {w.title}"
         if b.text() != text:
