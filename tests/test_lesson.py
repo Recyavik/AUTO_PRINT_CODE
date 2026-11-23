@@ -570,5 +570,109 @@ class StateTest(unittest.TestCase):
             "<script>alert(1)</script>", ""))
 
 
+class ControllerTest(unittest.TestCase):
+    """Главное окно (offscreen) + контроллер суфлёра: что уходит на страницу и что делают её команды."""
+
+    @classmethod
+    def setUpClass(cls):
+        from autoprint.efir import store as store_mod
+        from autoprint.storage import Settings, TemplateStore
+        from autoprint.ui import lesson_control
+        from autoprint.ui.main_window import MainWindow
+        cls.data = TMP / "ctl-efir"
+        cls._efir_dir = store_mod.efir_dir
+        store_mod.efir_dir = lambda: cls.data
+        cls.opened = []
+        cls._launch = lesson_control.launch_app_window
+        lesson_control.launch_app_window = lambda url: cls.opened.append(url) or True
+        s = Settings()
+        s.efir_port = PORT + 40
+        cls.store = TemplateStore()
+        cls.t = dark_theme_lesson()
+        cls.store.insert(cls.t)
+        cls.win = MainWindow(s, cls.store)
+        cls.win.open_template(cls.t.id)
+        pump(50)
+
+    @classmethod
+    def tearDownClass(cls):
+        from autoprint.efir import store as store_mod
+        from autoprint.ui import lesson_control
+        cls.win.efir.stop_live()
+        cls.win.efir.shutdown()
+        cls.win.hotkeys.stop() if hasattr(cls.win.hotkeys, "stop") else None
+        cls.win.close()
+        lesson_control.launch_app_window = cls._launch
+        store_mod.efir_dir = cls._efir_dir
+
+    def snap(self):
+        self.win.lesson.publish()
+        return self.win.efir.server.snapshot("lesson")
+
+    def test_publish_current(self):
+        st = self.snap()
+        self.assertEqual(st["lesson"]["title"], "Урок 3. Тёмная тема")
+        self.assertEqual(st["hotkey"], self.win.settings.hotkey_toggle)
+        self.assertIsNone(st["live"])
+
+    def test_cmd_arm(self):
+        code = self.t.code_blocks()[0]
+        self.t.active_block = ""
+        self.win.lesson.command({"cmd": "arm", "block": code.id})
+        self.assertEqual(self.t.active_block, code.id)
+        self.assertEqual(self.snap()["armed"], code.id)
+
+    def test_cmd_start_at_and_stop(self):
+        from datetime import datetime
+        self.win.lesson.command({"cmd": "start", "now": True})
+        self.assertEqual(self.win.efir.live_lesson_id(), self.t.id)
+        self.assertIsNotNone(self.snap()["live"])
+        self.win.lesson.command({"cmd": "start_at", "index": 2})             # этап «Перерыв» — с 10-й минуты
+        anchor = self.win.efir.store.live.anchor
+        self.assertLess(abs((datetime.now() - anchor).total_seconds() - 600), 5)
+        self.win.lesson.command({"cmd": "shift_now"})                       # текущий — тот же этап
+        self.assertLess(abs((datetime.now() - self.win.efir.store.live.anchor).total_seconds() - 600), 5)
+        self.win.lesson.command({"cmd": "stop"})
+        self.assertEqual(self.win.efir.live_lesson_id(), "")
+        self.assertIsNone(self.snap()["live"])
+
+    def test_live_edit_syncs_efir(self):
+        self.win.lesson.command({"cmd": "start", "now": True})
+        self.t.blocks.append(stage("Итоги", 5))
+        self.win.views[self.t.id].changed.emit()
+        pump(500)
+        self.assertEqual(self.win.efir.live_webinar().schedule[-1].name, "Итоги")
+        self.assertEqual(self.win.efir.server.snapshot("lesson")["lesson"]["total"], 25)
+        self.t.blocks.pop()
+        self.win.lesson.command({"cmd": "stop"})
+
+    def test_break_without_live(self):
+        self.win.lesson.command({"cmd": "break", "minutes": 7})
+        self.assertEqual(self.win.efir.mode, "break")
+        self.assertAlmostEqual(self.win.efir.brk_total, 420)
+        self.win.lesson.command({"cmd": "background"})
+        self.assertEqual(self.win.efir.mode, "idle")
+
+    def test_open_page(self):
+        self.opened.clear()
+        self.win.lesson.open_page()
+        self.assertTrue(self.opened and self.opened[-1].endswith("/lesson"))
+        self.assertTrue(self.win.efir.server.running)
+
+    def test_preset_saved(self):
+        from autoprint.efir.model import Activity, Webinar
+        w = Webinar(title="ФУ", schedule=[Activity("Пара", 90)], background="anim:stars")
+        self.win.efir.store.add([w])
+        self.win.lesson.command({"cmd": "preset", "id": w.id})
+        self.assertEqual((self.t.preset, self.win.settings.lesson_preset), (w.id, w.id))
+        self.assertEqual(self.snap()["lesson"]["preset"], w.id)
+
+    def test_unknown_cmd_ignored(self):
+        self.win.lesson.command({"cmd": "rm -rf"})
+        self.win.lesson.command({"nothing": 1})
+        self.win.lesson.command({"cmd": "arm", "block": "нет-такого"})
+        self.win.lesson.command({"cmd": "start_at", "index": "x"})
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

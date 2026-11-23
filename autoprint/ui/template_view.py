@@ -51,6 +51,7 @@ class TemplateView(QWidget):
     zoom_changed = Signal(int)    # масштаб какого-то блока изменился, %
     steps_changed = Signal(str)   # разметка шагов блока (id) поменялась
     step_pointer_requested = Signal(str, int)   # (id блока, шаг) — печатать дальше с этого шага
+    suflor_requested = Signal()   # «Суфлёр урока» — открыть страницу суфлёра
 
     def __init__(self, template: Template) -> None:
         super().__init__()
@@ -72,8 +73,10 @@ class TemplateView(QWidget):
         self.page_lay.setSpacing(10)
 
         head = QWidget()
-        hl = QVBoxLayout(head)
-        hl.setContentsMargins(0, 0, 0, 6)
+        hrow = QHBoxLayout(head)
+        hrow.setContentsMargins(0, 0, 0, 6)
+        hrow.setSpacing(12)
+        hl = QVBoxLayout()
         hl.setSpacing(2)
         self.title_lbl = QLabel()
         self.title_lbl.setObjectName("pageTitle")
@@ -81,6 +84,12 @@ class TemplateView(QWidget):
         self.lede.setObjectName("lede")
         hl.addWidget(self.title_lbl)
         hl.addWidget(self.lede)
+        hrow.addLayout(hl, 1)
+        self.suflor_btn = button("Суфлёр урока", "presentation")
+        self.suflor_btn.setToolTip("Страница суфлёра в отдельном окне браузера: этапы по времени, что сказать, "
+                                   "спросить и показать. Ученики её не видят — они видят только захваченную вкладку")
+        self.suflor_btn.clicked.connect(self.suflor_requested)
+        hrow.addWidget(self.suflor_btn, 0, Qt.AlignmentFlag.AlignTop)
         self.page_lay.addWidget(head)
 
         add_row = QHBoxLayout()

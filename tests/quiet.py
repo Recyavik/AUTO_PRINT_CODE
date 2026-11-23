@@ -34,6 +34,8 @@ def patch() -> None:
 
     from autoprint import recorder
     recorder.AudioRecorder.start = lambda self, *a, **k: False
+    from autoprint.ui import lesson_control      # суфлёр урока: окно Edge не открывать (ссылка — заглушка выше)
+    lesson_control.launch_app_window = lambda url: False
 
     class FakeGuard(QObject):
         tripped = Signal(str)

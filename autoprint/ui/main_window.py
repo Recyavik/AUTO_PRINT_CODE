@@ -28,6 +28,7 @@ from .blocks import BlockWidget, typing_slice
 from .control_strip import STATE_TEXT, ControlStrip
 from .efir_control import EfirController
 from .frameless import FramelessWindow
+from .lesson_control import LessonController
 from .library import ROLE_COUNT, ROLE_ID, LibraryPanel
 from .prompter import Prompter
 from .prompter_control import PrompterController
@@ -122,6 +123,7 @@ class MainWindow(FramelessWindow):
 
         self.efir = EfirController(self)    # «Эфир»: шаблоны вебинаров, таймер, вкладка эфира
         self.efir.message.connect(lambda t, warn: self._notify(t, warn=warn))
+        self.lesson = LessonController(self)   # суфлёр урока: страница в браузере, время — от «Эфира»
         self._build_ui()
         self._build_tray()
         theme.changed.connect(self._on_theme)
@@ -260,6 +262,7 @@ class MainWindow(FramelessWindow):
         m.addSeparator()
         m.addAction(icons.icon("file-code"), "Добавить пример занятия (все возможности)", self._add_tour_sample)
         m.addAction(icons.icon("file-code"), "Добавить пример пошагового урока", self._add_steps_sample)
+        m.addAction(icons.icon("presentation"), "Суфлёр урока (окно браузера)", self.lesson.open_page)
         m.addAction(icons.icon("radio"), "Эфир — шаблоны вебинаров…", self.efir.show_window)
         m.addAction(icons.icon("external"), ("Закрыть окно суфлёра" if self.prompter_ctl.visible()
                                              else "Суфлёр в отдельном окне"), lambda: self.prompter_ctl.toggle())
@@ -280,6 +283,7 @@ class MainWindow(FramelessWindow):
         menu.addAction("Стоп", self.cmd_stop)
         menu.addAction("Суфлёр в отдельном окне", lambda: self.prompter_ctl.toggle())
         menu.addAction("Эфир…", self._efir_clicked)
+        menu.addAction("Суфлёр урока", self.lesson.open_page)
         menu.addSeparator()
         self.tray_update = menu.addAction("Обновление…", self.open_update_dialog)
         self.tray_update.setVisible(False)
@@ -590,7 +594,10 @@ class MainWindow(FramelessWindow):
             v.step_pointer = self._step_pointer
             v.zoom_changed.connect(lambda z: self._notify(f"Масштаб блока: {z} %"))
             v.changed.connect(self._touch)
+            v.changed.connect(self.lesson.schedule_publish)
             v.armed_changed.connect(lambda _bid: self._update_armed_label())
+            v.armed_changed.connect(lambda _bid: self.lesson.schedule_publish())
+            v.suflor_requested.connect(self.lesson.open_page)
             v.steps_changed.connect(self._on_steps_changed)
             v.step_pointer_requested.connect(self._set_step_pointer)
             v.apply_step_mode(self.settings.print_mode == MODE_STEPS)
@@ -602,6 +609,7 @@ class MainWindow(FramelessWindow):
                 self.stack.setCurrentWidget(v)
             self._select_in_library(tid)
             self._update_armed_label()
+            self.lesson.schedule_publish()      # страница суфлёра показывает открытое занятие
         return v
 
     def _close_view(self, tid: str) -> None:
