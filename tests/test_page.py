@@ -1,0 +1,365 @@
+"""Экран урока в Edge без окна (CDP): правка на месте, «+», перенос, удаление, картинки, «Урок», печать, скорость.
+Окон на экране нет; программа — offscreen, своя папка данных и порт.
+
+    python tests/test_page.py
+"""
+from __future__ import annotations
+
+import sys
+import time
+import unittest
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+import quiet  # noqa: E402,F401  — до PySide6: offscreen, своя папка данных
+
+from PySide6.QtWidgets import QApplication  # noqa: E402
+
+app = QApplication.instance() or QApplication([])
+quiet.patch()
+from autoprint.ui.theme import theme  # noqa: E402
+theme.setup(app, "dark")
+
+from autoprint import storage  # noqa: E402
+from autoprint.storage import BLOCK_CODE, BLOCK_IMAGE, BLOCK_MARKDOWN, BLOCK_STAGE, Block, Settings, Template, TemplateStore  # noqa: E402
+from cdp import Edge  # noqa: E402
+
+PORT = 18990
+
+
+def pump(ms: int = 30) -> None:
+    end = time.time() + ms / 1000
+    while time.time() < end:
+        app.processEvents()
+        time.sleep(0.003)
+
+
+def note(text, role="say", **kw):
+    return Block(BLOCK_MARKDOWN, text, role=role, **kw)
+
+
+def code(text, **kw):
+    return Block(BLOCK_CODE, text, **kw)
+
+
+def stage(title, minutes=5, **kw):
+    return Block(BLOCK_STAGE, "", title=title, minutes=minutes, **kw)
+
+
+def lesson() -> Template:
+    return Template("Проверка экрана", [
+        note("Цель: научиться писать функции.", role="task", id="intro1"),
+        stage("Приветствие", 5, id="s1"),
+        note("Добрый день! Сегодня — функции.", id="n1"),
+        note("Что такое функция?\n→ кусок кода с именем", role="ask", id="n2"),
+        stage("Разбор", 10, id="s2", part="Первая половина"),
+        note("Функция\nименованный блок кода", role="term", id="n3"),
+        code("def hello(name):\n    return 'Привет, ' + name\n\nprint(hello('мир'))", id="c1"),
+        note("Привет, мир", role="output", id="o1"),
+        stage("Итоги", 5, id="s3"),
+        note("Вопросы?", role="tell", id="n4"),
+    ], id="L1")
+
+
+class Page(unittest.TestCase):
+    """Программа (offscreen) + экран урока в Edge без окна — одна на все тесты класса."""
+    templates = None
+
+    @classmethod
+    def setUpClass(cls):
+        from autoprint.ui.main_window import MainWindow
+        storage.TEMPLATES_FILE.unlink(missing_ok=True)
+        storage.TEMPLATES_FILE.with_suffix(".json.bak").unlink(missing_ok=True)
+        store = TemplateStore()
+        store.templates = cls.templates() if cls.templates else [lesson()]
+        store.save()
+        s = Settings()
+        s.efir_port = PORT
+        s.update_auto_check = False
+        s.sound_enabled = False
+        s.samples_seen = ["steps_v1", "tour_v1", "lesson_v1", "lesson_v2"]
+        s.migrations = ["tray_v1", "window_v10"]
+        cls.win = MainWindow(s, store)
+        cls.win.tray.showMessage = lambda *a, **k: None
+        cls.store = store
+        cls.t = store.templates[0]
+        cls.win.printer.set_focus(cls.t.id)
+        cls.win.efir.ensure_server()
+        cls.win.lesson.publish()
+        cls.port = cls.win.efir.server.port
+        cls.edge = Edge.start(f"http://127.0.0.1:{cls.port}/lesson", pump=lambda: app.processEvents())
+        ok = cls.edge.wait("window.__ready === true", 15)
+        assert ok, "страница не получила состояние: " + "; ".join(cls.edge.errors())
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.edge.close()
+        cls.win.efir.shutdown()
+        cls.win._quitting = True
+        cls.win.close()
+        pump()
+
+    def js(self, code_):
+        return self.edge.eval(code_)
+
+    def wait_py(self, pred, timeout: float = 5) -> bool:
+        end = time.time() + timeout
+        while time.time() < end:
+            pump(20)
+            if pred():
+                return True
+        return False
+
+    def mode(self, m):
+        self.js(f"document.querySelector('.seg.modes button:{'first' if m == 'prep' else 'last'}-child').click()")
+        self.assertTrue(self.edge.wait(f"document.body.classList.contains('mode-{m}')"))
+
+    def tearDown(self):
+        errs = self.edge.errors()
+        self.edge.events.clear()
+        self.assertEqual(errs, [], "ошибки JavaScript на странице")
+
+
+class SmokeTest(Page):
+    def test_renders(self):
+        self.assertEqual(self.js("document.querySelectorAll('.blk[data-id]').length"), 7)
+        self.assertEqual(self.js("document.querySelectorAll('.stage').length"), 3)
+        self.assertEqual(self.js("document.querySelectorAll('#plan .prow').length"), 3)
+        self.assertIn("Проверка экрана", self.js("document.title"))
+        self.assertTrue(self.js("document.title.endsWith(' — AutoPrintCode')"))
+        self.assertEqual(self.js("document.querySelector('[data-id=n3] .term').textContent"), "Функция")
+        self.assertIn("hello", self.js("document.querySelector('[data-id=c1] pre').textContent"))
+
+
+PNG_1x1 = ("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==")
+
+
+class PageEditTest(Page):
+    """Task 9: «Подготовка» — правка на месте."""
+
+    def setUp(self):
+        self.mode("prep")
+
+    def block(self, bid):
+        return self.t.find_block(bid)
+
+    def test_click_edit_same_height(self):
+        h0 = self.js("document.querySelector('[data-id=n1] .row > .c').getBoundingClientRect().height")
+        self.js("document.querySelector('[data-id=n1] .row > .c').click()")
+        self.assertTrue(self.edge.wait("document.activeElement && document.activeElement.tagName === 'TEXTAREA'"))
+        h1 = self.js("document.activeElement.getBoundingClientRect().height")
+        self.assertLessEqual(abs(h1 - h0), 2, f"было {h0}, в правке {h1}")
+        self.js("document.activeElement.blur()")
+
+    def test_type_saves(self):
+        self.js("document.querySelector('[data-id=n4] .row > .c').click()")
+        self.assertTrue(self.edge.wait("document.activeElement && document.activeElement.tagName === 'TEXTAREA'"))
+        self.edge.text(" Привет!")
+        self.assertTrue(self.wait_py(lambda: self.block("n4").text.endswith(" Привет!")), self.block("n4").text)
+        self.js("document.activeElement.blur()")
+        self.assertTrue(self.edge.wait("!document.querySelector('[data-id=n4] textarea') && "
+                                       "document.querySelector('[data-id=n4] .c').textContent.includes('Привет!')"))
+
+    def test_echo_keeps_caret(self):
+        self.js("document.querySelector('[data-id=n2] .row > .c').click()")
+        self.assertTrue(self.edge.wait("document.activeElement && document.activeElement.tagName === 'TEXTAREA'"))
+        self.js("{ const t = document.activeElement; t.__mark = 1; t.setSelectionRange(3, 3); }")
+        self.block("intro1").text = "Цель: научиться писать функции (обновлено)."
+        self.win.lesson.publish()
+        self.assertTrue(self.edge.wait("document.querySelector('[data-id=intro1] .c').textContent.includes('обновлено')"))
+        self.assertTrue(self.js("document.activeElement.__mark === 1 && document.activeElement.selectionStart === 3"))
+        self.js("document.activeElement.blur()")
+
+    def test_other_nodes_kept(self):
+        self.js("document.querySelectorAll('.blk[data-id]').forEach(n => n.__keep = 1)")
+        self.block("n3").text = "Функция\nименованный кусок кода"
+        self.win.lesson.publish()
+        self.assertTrue(self.edge.wait("document.querySelector('[data-id=n3] .def').textContent.includes('кусок')"))
+        self.assertTrue(self.js("[...document.querySelectorAll('.blk[data-id]')].filter(n => n.dataset.id !== 'n3')"
+                                ".every(n => n.__keep === 1)"))
+        self.assertFalse(self.js("document.querySelector('[data-id=n3]').__keep === 1"))
+
+    def test_plus_inserts_role(self):
+        n0 = len(self.t.blocks)
+        self.js("document.querySelector('.ins[data-after=n1] .insbtn').click()")
+        self.assertTrue(self.edge.wait("!!document.querySelector('.menu')"))
+        self.js("[...document.querySelectorAll('.menu .mi')].find(b => b.querySelector('.ml').textContent === 'Спроси').click()")
+        self.assertTrue(self.wait_py(lambda: len(self.t.blocks) == n0 + 1))
+        ids = [b.id for b in self.t.blocks]
+        new = self.t.blocks[ids.index("n1") + 1]
+        self.assertEqual((new.type, new.role), (BLOCK_MARKDOWN, "ask"))
+        self.assertTrue(self.edge.wait("document.activeElement && document.activeElement.tagName === 'TEXTAREA'"))
+        self.edge.text("Новый вопрос?")
+        self.js("document.activeElement.blur()")
+        self.assertTrue(self.wait_py(lambda: self.block(new.id).text == "Новый вопрос?"))   # правка заменяет объекты блоков
+
+    def test_minutes_in_plan(self):
+        self.js("{ const i = document.querySelector('#pr-s3 .pmin'); i.dispatchEvent(new WheelEvent('wheel', {deltaY: -100, bubbles: true})); }")
+        self.assertEqual(self.js("document.querySelector('#pr-s3 .pmin').value"), "5")
+        self.js("{ const i = document.querySelector('#pr-s3 .pmin'); i.focus(); i.select(); }")
+        self.edge.text("12")
+        self.edge.key("Enter", "Enter", 13)
+        self.assertTrue(self.wait_py(lambda: self.block("s3").minutes == 12))
+        self.assertTrue(self.edge.wait("document.querySelector('#plan .ptotal').textContent === '27 мин'"))
+
+    def test_move_keys(self):
+        ids = lambda: [b.id for b in self.t.blocks]
+        self.js("document.querySelector('[data-id=n4] .lbl').click()")          # выделить блок, не правя текст
+        self.edge.key("ArrowUp", "ArrowUp", 38, modifiers=1)                     # Alt+↑ — выше этапа «Итоги»
+        self.assertTrue(self.wait_py(lambda: ids().index("n4") == ids().index("s3") - 1), ids())
+        self.edge.key("ArrowDown", "ArrowDown", 40, modifiers=1)
+        self.assertTrue(self.wait_py(lambda: ids().index("n4") == ids().index("s3") + 1), ids())
+        self.js("window.__moveStage('s3', '')")                                  # «Итоги» — первым этапом
+        self.assertTrue(self.wait_py(lambda: [i for i in ids() if i.startswith("s")][0] == "s3"), ids())
+        self.js("window.__moveStage('s3', 's2')")
+        self.assertTrue(self.wait_py(lambda: [i for i in ids() if i.startswith("s")] == ["s1", "s2", "s3"]), ids())
+
+    def test_paste_image(self):
+        n0 = sum(b.type == BLOCK_IMAGE for b in self.t.blocks)
+        self.js("document.querySelector('[data-id=o1] .lbl').click()")
+        self.js(f"""(() => {{
+            const bin = atob('{PNG_1x1}'); const a = new Uint8Array(bin.length);
+            for (let i = 0; i < bin.length; i++) a[i] = bin.charCodeAt(i);
+            const dt = new DataTransfer(); dt.items.add(new File([a], 'p.png', {{type: 'image/png'}}));
+            document.dispatchEvent(new ClipboardEvent('paste', {{clipboardData: dt, bubbles: true}}));
+        }})()""")
+        self.assertTrue(self.wait_py(lambda: sum(b.type == BLOCK_IMAGE for b in self.t.blocks) == n0 + 1))
+        ids = [b.id for b in self.t.blocks]
+        self.assertEqual(self.t.blocks[ids.index("o1") + 1].type, BLOCK_IMAGE)
+        self.assertTrue(self.edge.wait("!!document.querySelector('.blk[data-type=image] figure img')"))
+
+    def test_z_delete_undo(self):
+        ids = lambda: [b.id for b in self.t.blocks]
+        before = ids()[ids().index("n2") - 1]
+        self.js("document.querySelector('[data-id=n2] .lbl').click()")
+        self.edge.key("Delete", "Delete", 46)
+        self.assertTrue(self.wait_py(lambda: "n2" not in ids()))
+        self.assertTrue(self.edge.wait("!document.querySelector('[data-id=n2]')"))
+        self.js("document.querySelector('#toast button').click()")
+        self.assertTrue(self.wait_py(lambda: "n2" in ids()))
+        self.assertEqual(ids()[ids().index("n2") - 1], before)
+        self.assertIn("→ кусок кода с именем", self.block("n2").text)
+
+    def test_zz_offline_queue(self):
+        n0 = len(self.t.blocks)
+        self.win.efir.server.stop()
+        pump(200)
+        self.js("document.querySelector('[data-id=n1] .row > .c').click()")
+        self.assertTrue(self.edge.wait("document.activeElement && document.activeElement.tagName === 'TEXTAREA'"))
+        self.edge.text(" (без связи)")
+        self.js("document.activeElement.blur()")
+        self.js("document.querySelector('.ins[data-after=n1] .insbtn').click()")
+        self.assertTrue(self.edge.wait("!!document.querySelector('.menu')"))
+        self.js("[...document.querySelectorAll('.menu .mi')].find(b => b.querySelector('.ml').textContent === 'Делаешь').click()")
+        self.js("document.activeElement.blur()")
+        self.assertTrue(self.edge.wait("document.getElementById('saveChip').textContent.includes('Нет связи')", 8))
+        self.assertTrue(self.js("!!localStorage.getItem('suflor.pending.' + 'L1')"))
+        self.win.efir.ensure_server()
+        self.assertTrue(self.wait_py(lambda: self.block("n1").text.endswith(" (без связи)") and len(self.t.blocks) == n0 + 1, 25))
+        pump(1500)
+        self.assertEqual(len(self.t.blocks), n0 + 1)
+        self.assertEqual(self.block("n1").text.count("(без связи)"), 1)
+        self.assertTrue(self.edge.wait("document.getElementById('saveChip').textContent.includes('Сохранено')", 8))
+
+
+def two_codes() -> list[Template]:
+    return [Template("Код и зарядка", [
+        stage("Разбор", 10, id="s1"),
+        note("Смотрим код", id="n1"),
+        code("a = 1\nprint(a)", id="c1"),
+        code("b = 2\nprint(b)", id="c2"),
+        stage("Зарядка", 5, id="s2", stage_kind="exercise"),
+    ], id="L2")]
+
+
+class PageLessonTest(Page):
+    """Task 10: «Урок», «Печать ⚙», редактор кода."""
+    templates = staticmethod(two_codes)
+
+    def test_arm_code_only(self):
+        self.mode("lesson")
+        self.t.active_block = ""
+        self.js("document.querySelector('[data-id=n1] .c').click()")
+        pump(300)
+        self.assertEqual(self.t.active_block, "")
+        self.win.lesson.publish()
+        self.assertTrue(self.edge.wait("!!document.querySelector('[data-id=c2] .armbtn')"))
+        self.js("document.querySelector('[data-id=c2] .armbtn').click()")
+        self.assertTrue(self.wait_py(lambda: self.t.active_block == "c2"))
+        self.assertTrue(self.edge.wait("!!document.querySelector('[data-id=c2] .armed-chip') && "
+                                       "document.querySelector('[data-id=c2] .armed-chip').textContent.includes('Следующим')"))
+
+    def test_print_popover(self):
+        self.js("[...document.querySelectorAll('#tools .iconbtn')].find(b => b.textContent.includes('Печать')).click()")
+        self.assertTrue(self.edge.wait("!!document.querySelector('.pmenu')"))
+        self.js("[...document.querySelectorAll('.pmenu .seg button')].find(b => b.textContent === 'По шагам').click()")
+        self.assertTrue(self.wait_py(lambda: self.win.settings.print_mode == "steps"))
+        self.js("[...document.querySelectorAll('.pmenu .seg button')].find(b => b.textContent === 'Целиком').click()")
+        self.assertTrue(self.wait_py(lambda: self.win.settings.print_mode == "block"))
+        self.js("document.body.dispatchEvent(new MouseEvent('mousedown', {bubbles: true}))")
+
+    def test_code_edit(self):
+        self.mode("prep")
+        self.js("document.querySelector('[data-id=c1] .codebox pre').click()")
+        self.assertTrue(self.edge.wait("!!document.querySelector('[data-id=c1] .cm-editor')", 10))
+        self.assertTrue(self.edge.wait("!!(document.activeElement && document.activeElement.closest('.cm-editor'))"))
+        self.edge.text("x=1\n")
+        self.assertTrue(self.wait_py(lambda: "x=1" in self.t.find_block("c1").text), self.t.find_block("c1").text)
+        self.js("document.querySelector('[data-id=c2] .codebox pre').click()")
+        self.assertTrue(self.edge.wait("!!document.querySelector('[data-id=c2] .cm-editor')", 10))
+        self.assertTrue(self.edge.wait("document.querySelectorAll('.cm-editor').length === 1", 5))
+        self.assertTrue(self.edge.wait("document.querySelector('[data-id=c1] pre').textContent.includes('x=1')", 5))
+        self.js("document.activeElement.blur()")
+
+    def test_code_steps_keys(self):
+        self.mode("prep")
+        self.js("document.querySelector('[data-id=c2] .codebox pre').click()")
+        self.assertTrue(self.edge.wait("!!(document.activeElement && document.activeElement.closest('[data-id=c2] .cm-editor'))", 10))
+        self.edge.key("End", "End", 35, modifiers=2)                              # Ctrl+End — последняя строка
+        self.edge.key("2", "Digit2", 50, modifiers=1)                             # Alt+2 — шаг 2
+        self.assertTrue(self.wait_py(lambda: self.t.find_block("c2").steps[-1:] == [2]), self.t.find_block("c2").steps)
+        self.js("document.activeElement.blur()")
+
+    def test_no_exercise_button_without_video(self):
+        self.mode("lesson")
+        self.assertFalse(self.js("!!document.querySelector('[data-act=exercise]')"))
+        self.assertIn("нет видео", self.js("document.querySelector('#st-s2 .efirnote').textContent"))
+
+
+def big_lesson() -> list[Template]:
+    blocks = []
+    for k in range(10):
+        blocks.append(stage(f"Этап {k + 1}", 9))
+        for j in range(8):
+            if j % 3 == 2:
+                blocks.append(code("\n".join(f"value_{k}_{j}_{i} = compute({i}, 'text')" for i in range(15))))
+            else:
+                blocks.append(note(f"Текст заметки **{k}.{j}** — что сказать ученикам на этом шаге урока.",
+                                   role=["say", "tell", "ask", "do", "important"][j % 5]))
+    return [Template("Большой урок", blocks[:90], id="BIG")]
+
+
+class PagePerfTest(Page):
+    """Task 11: большой урок — быстро, ввод не перерисовывает ленту."""
+    templates = staticmethod(big_lesson)
+
+    def test_big_lesson(self):
+        self.assertGreaterEqual(self.js("document.querySelectorAll('.blk[data-id]').length"), 70)
+        ms = self.js("window.__applyMs")
+        self.assertLess(ms, 300, f"{ms:.0f} мс")
+
+    def test_typing_no_rerender(self):
+        self.mode("prep")
+        before = self.js("window.__renders()")
+        self.js("document.querySelectorAll('.blk[data-type=markdown] .row > .c')[3].click()")
+        self.assertTrue(self.edge.wait("document.activeElement && document.activeElement.tagName === 'TEXTAREA'"))
+        for ch in "двадцать букв подряд":
+            self.edge.text(ch)
+        pump(1200)
+        self.assertEqual(self.js("window.__renders()"), before)
+        self.js("document.activeElement.blur()")
+
+
+if __name__ == "__main__":
+    unittest.main(verbosity=2)

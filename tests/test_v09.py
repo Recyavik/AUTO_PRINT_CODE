@@ -700,20 +700,20 @@ class PageTest(unittest.TestCase):
     def test_block_state_has_label_title(self):
         from autoprint import scenario
         from autoprint.storage import BLOCK_MARKDOWN, Block
-        st = scenario._block_state(Block(BLOCK_MARKDOWN, "Здравствуйте!", role="say", title="Повторение"),
-                                   lambda p: "")
-        self.assertEqual((st["label"], st["title"]), ("Говоришь", "Повторение"))
-        st = scenario._block_state(Block(BLOCK_MARKDOWN, "Вопрос?\n→ ответ", role="ask"), lambda p: "")
-        self.assertEqual((st["label"], st["title"]), ("Спроси", ""))
+        st = scenario.item_state(Block(BLOCK_MARKDOWN, "Здравствуйте!", role="say", title="Повторение"),
+                                 lambda p: "")
+        self.assertEqual((st["role"], st["title"]), ("say", "Повторение"))
+        st = scenario.item_state(Block(BLOCK_MARKDOWN, "Вопрос?\n→ ответ", role="ask"), lambda p: "")
+        self.assertEqual((st["role"], st["title"], st["answers"]), ("ask", "", ["ответ"]))
 
     def test_page_role_styles(self):
         from autoprint.efir.server import PAGE_DIR
         css = (PAGE_DIR / "lesson.html").read_text(encoding="utf-8")
-        for role in ("say", "tell", "ask", "do", "important", "show", "trap", "extra"):
+        for role in ("say", "tell", "ask", "do", "important", "show", "trap", "extra", "term", "output"):
             self.assertIn(f".r-{role} {{ --rc:", css, role)
         self.assertIn("border-left: 4px solid var(--rc)", css)
         self.assertIn("color-mix(in srgb, var(--rc)", css)
-        self.assertIn('el("div", "lbl")', css)
+        self.assertIn('el("div", "lbl")', (PAGE_DIR / "lesson" / "render.js").read_text(encoding="utf-8"))
 
 
 
@@ -779,7 +779,7 @@ class SampleTest(unittest.TestCase):
         t = lesson_sample()
         st = scenario.lesson_state(t, live_anchor_ms=None, armed="", media_url=lambda p: "/media/x/" + Path(p).name,
                                    presets=[], preset="", dark=True, efir_mode="idle", tab="", hotkey="Ctrl+F9")
-        imgs = [b for s in st["lesson"]["stages"] for b in s["blocks"] if b["role"] == "image"]
+        imgs = [b for b in st["lesson"]["items"] if b["type"] == "image"]
         self.assertTrue(imgs and all(b["url"] and not b["missing"] for b in imgs))
 
 
@@ -960,10 +960,10 @@ class ImageArmTest(unittest.TestCase):
         а по Enter/уходу из поля; шапка не перерисовывается, пока в ней печатают. Поведение в Edge проверено
         отдельно (CDP: «1» → нет команды, фокус на месте; «1830» Enter → одна команда 18:30)."""
         from autoprint.efir.server import PAGE_DIR
-        html = (PAGE_DIR / "lesson.html").read_text(encoding="utf-8")
-        self.assertNotIn('tm.onchange = () => { if (tm.value) cmd({ cmd: "set_start"', html)
-        self.assertIn('tm.addEventListener("blur", commit)', html)
-        self.assertIn("if (toolsBusy()) toolsStale = true;", html)
+        js = (PAGE_DIR / "lesson" / "app.js").read_text(encoding="utf-8")
+        self.assertNotIn('tm.onchange = () => { if (tm.value) cmd({ cmd: "set_start"', js)
+        self.assertIn('tm.addEventListener("blur", commit)', js)
+        self.assertIn("if (toolsBusy()) { headerStale = true; return; }", js)
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

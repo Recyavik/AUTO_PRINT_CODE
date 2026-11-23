@@ -516,8 +516,9 @@ class MainWindow(FramelessWindow):
             t.title = title
             self.touch(t)
 
-    def open_lesson(self, tid: str) -> bool:
-        """Открыть урок на экране урока. Идёт другой урок — сначала спросить, завершить ли его."""
+    def open_lesson(self, tid: str, ask: bool = True) -> bool:
+        """Открыть урок на экране урока. Идёт другой урок — сначала спросить, завершить ли его (ask=False —
+        уже спросили на странице)."""
         t = self.store.get(tid)
         if t is None:
             return False
@@ -525,7 +526,7 @@ class MainWindow(FramelessWindow):
         if live and live != tid:
             cur = self.store.get(live)
             name = cur.title if cur else "урок"
-            if QMessageBox.question(self, "Идёт урок", f"Идёт урок «{name}». Завершить его и открыть «{t.title}»?") \
+            if ask and QMessageBox.question(self, "Идёт урок", f"Идёт урок «{name}». Завершить его и открыть «{t.title}»?") \
                     != QMessageBox.StandardButton.Yes:
                 return False
             self.efir.stop_live()

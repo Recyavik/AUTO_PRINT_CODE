@@ -401,7 +401,7 @@ class LessonServerTest(unittest.TestCase):
 
     def test_lesson_page(self):
         html = self.get("/lesson").read().decode("utf-8")
-        self.assertIn("Суфлёр", html)
+        self.assertIn("Экран урока", html)
 
     def test_static_lang(self):
         import urllib.error
@@ -546,6 +546,23 @@ def media(path) -> str:
     return "/media/0123456789abcdef/" + Path(path).name
 
 
+def groups(les):
+    """Блоки урока по этапам из плоского списка items (0.10): (до первого этапа, [блоки этапа 0, 1, …])."""
+    intro, stages = [], []
+    for it in les["items"]:
+        if it["type"] == "stage":
+            stages.append([])
+        elif stages:
+            stages[-1].append(it)
+        else:
+            intro.append(it)
+    return intro, stages
+
+
+def kind(it):
+    return it.get("role") or it["type"]
+
+
 class StateTest(unittest.TestCase):
     def state(self, t, **kw):
         args = dict(live_anchor_ms=None, armed="", media_url=media, presets=[], preset="", dark=True,
@@ -559,16 +576,16 @@ class StateTest(unittest.TestCase):
         st = self.state(t, live_anchor_ms=1_700_000_000_000, armed=code.id, presets=[("p1", "1Т")], preset="p1")
         les = st["lesson"]
         self.assertEqual((les["title"], les["total"], les["has_stages"]), ("Урок 3. Тёмная тема", 20, True))
-        self.assertEqual([b["role"] for b in les["intro"]], ["task"])
+        intro, blocks = groups(les)
+        self.assertEqual([kind(b) for b in intro], ["task"])
         self.assertEqual([(s["start"], s["end"], s["kind"]) for s in les["stages"]],
                          [(0, 2, ""), (2, 10, ""), (10, 20, "break")])
         s1 = les["stages"][1]
         self.assertEqual((s1["title"], s1["part"], s1["note"]), ("Зачем нужна тёмная тема", "Тёмная тема", "теория"))
-        roles = [b["role"] for b in s1["blocks"]]
-        self.assertEqual(roles, ["ask", "important", "code"])
-        ask = s1["blocks"][0]
+        self.assertEqual([kind(b) for b in blocks[1]], ["ask", "important", "code"])
+        ask = blocks[1][0]
         self.assertEqual((ask["html"], ask["answers"]), ("<p>Какие темы вы предпочитаете?</p>", ["пишут в чат"]))
-        cb = s1["blocks"][2]
+        cb = blocks[1][2]
         self.assertEqual((cb["id"], cb["label"], cb["icon"]), (code.id, "CSS", "css.svg"))
         self.assertIn("t-", cb["html"])
         self.assertEqual((st["armed"], st["hotkey"], st["live"]), (code.id, "Ctrl+F9", {"anchor": 1_700_000_000_000}))
@@ -578,7 +595,7 @@ class StateTest(unittest.TestCase):
         t = Template(title="Старое", blocks=[md("task", "## Задача"), Block(BLOCK_CODE, "print(1)")])
         les = self.state(t)["lesson"]
         self.assertFalse(les["has_stages"])
-        self.assertEqual([b["role"] for b in les["intro"]], ["task", "code"])
+        self.assertEqual([kind(b) for b in groups(les)[0]], ["task", "code"])
         self.assertEqual(les["stages"], [])
 
     def test_state_missing_image(self):
@@ -588,17 +605,17 @@ class StateTest(unittest.TestCase):
                                         Block(BLOCK_IMAGE, str(TMP / "нет.png"), title="Нет"),
                                         Block(BLOCK_IMAGE, "https://x.y/a.png"),
                                         Block(BLOCK_IMAGE, "javascript:alert(1)")])
-        imgs = self.state(t)["lesson"]["intro"]
+        imgs = self.state(t)["lesson"]["items"]
         self.assertEqual([(b["url"], b["missing"]) for b in imgs],
                          [(media(f), False), ("", True), ("https://x.y/a.png", False), ("", True)])
-        self.assertEqual(imgs[0]["caption"], "Есть")
+        self.assertEqual(imgs[0]["title"], "Есть")
 
     def test_state_escapes(self):
         t = Template(title="<b>Урок</b>", blocks=[stage("<i>Этап</i>", 5),
                                                   md("say", "<script>alert(1)</script>")])
         les = self.state(t)["lesson"]
         self.assertEqual(les["stages"][0]["title"], "<i>Этап</i>")          # простой текст: страница — textContent
-        self.assertIn("&lt;script&gt;", les["stages"][0]["blocks"][0]["html"])
+        self.assertIn("&lt;script&gt;", groups(les)[1][0][0]["html"])
         self.assertNotIn("<script>", json.dumps(les, ensure_ascii=False).replace('\\u003c', '<').replace(
             "<script>alert(1)</script>", ""))
 
@@ -813,7 +830,7 @@ class EditorTest(unittest.TestCase):
             st = scenario.lesson_state(Template(title="К", blocks=[Block(BLOCK_IMAGE, ref)]), live_anchor_ms=None,
                                        armed="", media_url=media, presets=[], preset="", dark=True,
                                        efir_mode="idle", tab="", hotkey="")
-            self.assertFalse(st["lesson"]["intro"][0]["missing"])
+            self.assertFalse(st["lesson"]["items"][0]["missing"])
             self.assertIsNone(storage.media_path("media/нет-такого.png"))
             self.assertIsNone(storage.media_path("https://x.y/a.png"))
         finally:

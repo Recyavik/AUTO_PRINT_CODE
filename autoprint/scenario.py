@@ -261,39 +261,6 @@ def lang_info(lang: str) -> tuple[str, str]:
 
 # ---------------------------------------------------------------- состояние страницы суфлёра
 
-def _block_state(b: Block, media_url) -> dict | None:
-    from pathlib import Path
-    from .storage import BLOCK_CODE, BLOCK_IMAGE
-    if b.type == BLOCK_CODE:
-        if not b.text.strip():
-            return None
-        label, icon = lang_info(b.lang)
-        return {"id": b.id, "role": "code", "lang": b.lang, "label": label, "icon": icon, "title": b.title,
-                "html": code_html(b.text, b.lang)}
-    if b.type == BLOCK_IMAGE:
-        from .storage import media_path
-        src = (b.text or "").strip()
-        url, missing = "", True
-        local = media_path(src)
-        if re.match(r"https?://", src, re.I):
-            url, missing = src, False
-        elif local is not None:
-            url, missing = media_url(str(local)), False
-        return {"id": b.id, "role": "image", "url": url, "missing": missing, "caption": b.title,
-                "name": Path(src).name if src and not url.startswith("http") else ""}
-    if not b.text.strip():
-        return None
-    from .storage import ROLES
-    role = b.role if b.role else "text"
-    # подпись плашки на суфлёре: «ГОВОРИШЬ · ПОВТОРЕНИЕ» — роль и заголовок блока (обычным текстом)
-    head = {"label": ROLES[role][1] if role in ROLES else "", "title": b.title or ""}
-    if role == "ask":
-        question, answers = ask_parts(b.text)
-        return {"id": b.id, "role": role, "html": md_html(question), "answers": [_inline(a) for a in answers],
-                **head}
-    return {"id": b.id, "role": role, "html": md_html(b.text), **head}
-
-
 def block_version(b: Block) -> int:
     """Версия блока для страницы: меняется при любом изменении блока — страница перерисовывает только такие."""
     import json
@@ -360,7 +327,7 @@ def lessons_state(templates) -> list[dict]:
 
 def lesson_state(t: Template | None, *, live_anchor_ms: int | None, media_url, presets, preset: str, dark: bool,
                  efir_mode: str, tab: str, hotkey: str, armed: str = "", printer: dict | None = None,
-                 lessons: list | None = None, exercises: bool = False) -> dict:
+                 lessons: list | None = None, exercises: bool = False, edits: int = 0) -> dict:
     """Всё, что нужно экрану урока: урок (все блоки с версиями и готовым HTML; этапы с минутами), идёт ли урок
     (якорь времени — мс; минуты этапов страница отсчитывает сама), печать (что следующим, ход), список уроков.
     Простые поля (названия, подписи) — обычным текстом: страница вставляет их как текст, не как HTML."""
@@ -369,23 +336,18 @@ def lesson_state(t: Template | None, *, live_anchor_ms: int | None, media_url, p
         armed = printer["block"]
     base = {"live": {"anchor": live_anchor_ms} if live_anchor_ms else None, "armed": armed, "dark": dark,
             "efir": {"mode": efir_mode, "tab": tab}, "hotkey": hotkey, "print": printer,
-            "lessons": lessons or [], "roles": roles_state(), "exercises": exercises}
+            "lessons": lessons or [], "roles": roles_state(), "exercises": exercises, "edits": edits}
     if t is None:
         return {"lesson": None, **base}
-    intro, st = stages(t)
-
-    def blocks(items):
-        return [x for x in (_block_state(b, media_url) for b in items) if x]
-
+    _intro, st = stages(t)
     items = [item_state(b, media_url) for b in t.blocks]
     lesson = {
         "id": t.id, "title": t.title, "total": total_minutes(t), "start": t.start, "has_stages": bool(st),
         "rev": lesson_rev(t),
         "items": items,
-        "intro": blocks(intro),
         "stages": [{"i": s.index, "id": s.block.id, "title": s.block.title or "Этап", "minutes": s.end_min - s.start_min,
                     "kind": s.block.stage_kind, "part": s.block.part, "note": s.block.text.strip(),
-                    "start": s.start_min, "end": s.end_min, "blocks": blocks(s.blocks)} for s in st],
+                    "start": s.start_min, "end": s.end_min} for s in st],
         "presets": [{"id": pid, "title": title} for pid, title in presets], "preset": preset,
     }
     return {"lesson": lesson, **base}

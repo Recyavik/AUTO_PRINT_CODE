@@ -111,7 +111,7 @@ class _Handler(BaseHTTPRequestHandler):
         origin = (self.headers.get("Origin") or "").rstrip("/")
         if not origin:
             return True
-        port = self.server.owner.port
+        port = self.server.server_address[1]        # порт этого сервера (у остановленного owner.port уже 0)
         return origin in (f"http://127.0.0.1:{port}", f"http://localhost:{port}")
 
     def _send(self, code: int, body: bytes, ctype: str, extra: dict | None = None) -> None:
@@ -271,6 +271,10 @@ class _Handler(BaseHTTPRequestHandler):
             return self._send(403, b"forbidden", "text/plain")
         path, _, query = self.path.partition("?")
         owner = self.server.owner
+        if owner.stopping:
+            # сервер останавливается (выход, перезапуск): правку не терять — страница повторит её позже
+            self.close_connection = True
+            return self._json({"ok": False, "retry": True}, 503)
         if path.startswith("/lesson/") and (self.headers.get("X-Suflor") != "1" or not self._origin_ok()):
             self.close_connection = True
             return self._json({"ok": False}, 403)

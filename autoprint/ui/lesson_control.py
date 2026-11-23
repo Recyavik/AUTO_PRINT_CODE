@@ -117,6 +117,7 @@ class LessonController(QObject):
         self.efir.server.on_upload = self._upload_from_server
         self._cmd.connect(self.command)
         self._call.connect(self._do_call)
+        self.edits = 0           # сколько правок со страницы применено — страница знает, какие уже в состоянии
         self._timer = QTimer(self, singleShot=True, interval=300, timeout=self.publish)
         self._last = ""          # что ушло на страницу в последний раз: то же самое второй раз не шлём
         for sig in (self.efir.live_changed, self.efir.screen_changed, self.efir.tab_changed,
@@ -164,7 +165,7 @@ class LessonController(QObject):
             preset=preset.id if preset is not None else "", dark=theme.dark, efir_mode=self.efir.mode,
             tab=self.efir.tab_status()[0], hotkey=self.main.settings.hotkey_toggle,
             printer=self.main.printer.snapshot(), lessons=scenario.lessons_state(self.main.store.templates),
-            exercises=bool(preset is not None and preset.exercises))
+            exercises=bool(preset is not None and preset.exercises), edits=self.edits)
         # во время зарядки экран эфира шлёт ход видео раз в секунду: странице суфлёра от этого ничего не
         # меняется — не перерисовывать её (иначе пересоздаются кнопки и теряются щелчки)
         key = json.dumps(state, ensure_ascii=False, sort_keys=True)
@@ -220,6 +221,7 @@ class LessonController(QObject):
         return t
 
     def _after_edit(self, t: Template, ids: list[str]) -> dict:
+        self.edits += 1
         self.main.printer.on_store_changed()
         self.main.touch(t)
         self.schedule_publish()
@@ -228,7 +230,7 @@ class LessonController(QObject):
         for bid in ids:
             b = t.find_block(bid)
             items[bid] = scenario.item_state(b, media) if b is not None else None
-        return {"ok": True, "rev": scenario.lesson_rev(t), "items": items, "title": t.title}
+        return {"ok": True, "rev": scenario.lesson_rev(t), "items": items, "title": t.title, "edits": self.edits}
 
     def apply_edit(self, data: dict) -> dict:
         """Правка со страницы (поток интерфейса): действия над уроком → новые версии и HTML затронутых блоков."""
@@ -294,6 +296,16 @@ class LessonController(QObject):
             elif cmd == "break" and t is not None:
                 self._ensure_screen(t)
                 self.efir.start_break(int(d.get("minutes") or 10))
+            elif cmd == "print_settings":
+                self.main.printer.set_option(str(d.get("key") or ""), d.get("value"))
+            elif cmd == "new_lesson":
+                self._new_lesson(bool(d.get("force")))
+            elif cmd == "delete_lesson" and t is not None:
+                self.main.delete_lesson(t, ask=False)
+            elif cmd == "export" and t is not None and d.get("fmt") in ("md", "ipynb", "students", "json"):
+                self.main.export_template(t, str(d["fmt"]))
+            elif cmd == "settings":
+                self.main.open_settings(str(d.get("page") or ""))
             elif cmd == "exercise" and t is not None:
                 self._ensure_screen(t)
                 self.efir.start_exercise(int(d.get("index") or 0))
@@ -304,10 +316,21 @@ class LessonController(QObject):
             elif cmd == "set_start" and t is not None:
                 self._set_start(t, str(d.get("start") or "").strip())
             elif cmd == "open":
-                self.main.open_lesson(str(d.get("lesson") or ""))
+                self.main.open_lesson(str(d.get("lesson") or ""), ask=not d.get("force"))
         except (TypeError, ValueError) as e:
             log.warning("Команда суфлёра %r не выполнена: %s", d, e)
         self.schedule_publish()
+
+    def _new_lesson(self, force: bool) -> None:
+        """«Новый урок» со страницы: идёт урок — его завершают (страница уже спросила)."""
+        if self.efir.live_lesson_id():
+            if not force:
+                return
+            self.efir.stop_live()
+        nt = self.main.store.add("Новый урок")
+        self.main.touch(nt)
+        self.main._fill_library(nt.id)
+        self.main.open_lesson(nt.id, ask=False)
 
     def _current_stage(self, t: Template) -> int:
         """Номер этапа, который идёт сейчас (до начала — первый, после конца — последний)."""
