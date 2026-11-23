@@ -527,5 +527,93 @@ class LessonStartTest(unittest.TestCase):
         self.assertEqual(self.win.efir.store.live.anchor, anchor_at("07:45", datetime.now()))
 
 
+
+# ================================================================ Task 5: редактор шаблона «Эфира»
+
+class EfirEditorTest(unittest.TestCase):
+    def setUp(self):
+        from autoprint.efir.model import sample_webinar
+        from autoprint.ui.efir_editor import EditorWindow
+        self.ctl = efir_ctl("editor")
+        self.w = sample_webinar()
+        self.ctl.store.add([self.w])
+        self.ed = EditorWindow(self.ctl, self.w)
+        self.ed.show()
+        pump(30)
+
+    def tearDown(self):
+        self.ed._dirty = False
+        self.ed.close()
+        self.ctl.server.stop()
+
+    def test_total_on_top(self):
+        self.assertEqual(self.ed.total.text(), "Всего 1 ч 40 мин · блоков: 12")
+        y_total = self.ed.total.mapTo(self.ed, QPoint(0, 0)).y()
+        y_row = self.ed.rows[0].mapTo(self.ed, QPoint(0, 0)).y()
+        self.assertLess(y_total, y_row)
+
+    def test_kind_button_sets_kind(self):
+        r = self.ed.rows[0]
+        next(a for a in r.kind_btn.build_menu().actions() if a.text() == "Перерыв").trigger()
+        self.assertEqual(r.activity().kind, "break")
+        self.assertIn("Перерыв", r.kind_btn.text())
+        self.assertTrue(self.ed._dirty)
+
+    def test_demo_button_sets_demo(self):
+        r = self.ed.rows[0]
+        next(a for a in r.demo_btn.build_menu().actions() if a.text() == "Демонстрация ВЫКЛ").trigger()
+        self.assertEqual(r.activity().demo, "off")
+
+    def test_name_guesses_kind_until_touched(self):
+        r = self.ed.rows[1]
+        r.name.setText("Зарядка для глаз")
+        r._name_edited("Зарядка для глаз")
+        self.assertEqual(r.activity().kind, "exercise")
+
+    def test_add_several_exercises(self):
+        from PySide6.QtWidgets import QFileDialog
+        a, b = TMP / "Гимнастика.mp4", TMP / "Шея.mp4"
+        for f in (a, b):
+            f.write_bytes(b"0" * 10)
+        old, old1 = QFileDialog.getOpenFileNames, QFileDialog.getOpenFileName
+        QFileDialog.getOpenFileNames = staticmethod(lambda *x, **k: ([str(a), str(b)], ""))
+        QFileDialog.getOpenFileName = staticmethod(lambda *x, **k: ("", ""))    # одиночный выбор — не диалог
+        try:
+            n = len(self.ed.ex_rows)
+            self.ed.add_exercise()
+        finally:
+            QFileDialog.getOpenFileNames, QFileDialog.getOpenFileName = old, old1
+        self.assertEqual([r.exercise().title for r in self.ed.ex_rows[n:]], ["Гимнастика", "Шея"])
+
+    def test_break_show_title_roundtrip(self):
+        from autoprint.efir.model import webinar_from_dict
+        self.ed.show_title.setChecked(False)
+        w = self.ed.result()
+        self.assertFalse(w.break_show_title)
+        self.assertFalse(webinar_from_dict(w.to_dict()).break_show_title)
+        self.assertTrue(webinar_from_dict({"schedule": [{"name": "А", "min": 5}]}).break_show_title)
+
+    def test_state_hides_title(self):
+        self.w.break_show_title = False
+        self.ctl.webinar = self.w
+        self.ctl.start_break(5)
+        self.assertEqual(self.ctl.state()["brk"]["title"], "")
+        self.ctl.show_background()
+
+    def test_preview_published(self):
+        self.ed.break_title.setText("ОТДЫХАЕМ")
+        url = self.ed.preview_break()
+        self.assertIn("ch=preview", url)
+        st = self.ctl.server.snapshot("preview")
+        self.assertEqual((st["mode"], st["brk"]["title"]), ("break", "ОТДЫХАЕМ"))
+        self.assertEqual(self.ctl.mode, "idle")              # на настоящий экран эфира ничего не ушло
+
+    def test_screen_page_reads_channel(self):
+        from autoprint.efir.server import PAGE_DIR
+        html = (PAGE_DIR / "screen.html").read_text(encoding="utf-8")
+        self.assertIn("PREVIEW", html)
+        self.assertIn("'/events' + (CH ?", html)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

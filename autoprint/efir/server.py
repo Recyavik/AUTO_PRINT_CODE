@@ -50,7 +50,8 @@ mimetypes.add_type("font/woff", ".woff")
 mimetypes.add_type("image/webp", ".webp")
 mimetypes.add_type("image/svg+xml", ".svg")
 
-CHANNELS = ("screen", "lesson")      # screen — экран эфира для учеников, lesson — страница суфлёра урока
+# screen — экран эфира для учеников, lesson — страница суфлёра урока, preview — предпросмотр из редактора шаблона
+CHANNELS = ("screen", "lesson", "preview")
 _LANG_ICON = re.compile(r"/static/lang/([a-z0-9+#-]+\.svg)")
 
 
@@ -354,7 +355,7 @@ class BroadcastServer:
         with self._cond:
             self._counts[channel] = max(0, self._counts[channel] + d)
             n = self._counts[channel]
-        if self.on_report:
+        if self.on_report and channel != "preview":
             self.on_report({"type": "clients" if channel == "screen" else "lesson_clients", "count": n})
 
     # ------------------------------------------------------------ файлы

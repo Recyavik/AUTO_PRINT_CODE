@@ -174,8 +174,26 @@ class EfirController(QObject):
             st["brk"] = {"seq": self.brk_seq, "ends_at": int(self.brk_ends * 1000),
                          "paused_left": None if self.brk_left_paused is None else int(self.brk_left_paused * 1000),
                          "total": int(self.brk_total * 1000), "countdown": w.break_countdown,
-                         "title": w.break_title, "done": w.break_done, "bg": self._bg(w.break_background)}
+                         "title": w.break_title if w.break_show_title else "", "done": w.break_done,
+                         "bg": self._bg(w.break_background)}
         return st
+
+    def preview_break(self, w: Webinar) -> str:
+        """Предпросмотр перерыва с настройками из редактора (ещё не сохранёнными) — отдельной вкладкой, на канале
+        preview: настоящий экран эфира у учеников не меняется. Возвращает адрес вкладки."""
+        if not self.ensure_server():
+            return ""
+        total = max(1, int(w.break_min)) * 60.0
+        st = {"mode": MODE_BREAK, "bg": self._bg(w.background), "caption": "", "font": self._font(w),
+              "color": w.text_color,
+              "brk": {"seq": int(time.time()), "ends_at": int((time.time() + total) * 1000), "paused_left": None,
+                      "total": int(total * 1000), "countdown": w.break_countdown,
+                      "title": w.break_title if w.break_show_title else "", "done": w.break_done,
+                      "bg": self._bg(w.break_background)}}
+        self.server.publish(st, channel="preview")
+        url = self.server.url + "?ch=preview"
+        QDesktopServices.openUrl(QUrl(url))
+        return url
 
     def publish(self) -> None:
         if self.server.running:

@@ -396,8 +396,11 @@ function startScreen() {
   let S = { mode: 'idle' }, offset = 0, unlocked = false, blocked = false, exSeq = -1, exRestart = -1, brkTimer = 0;
   const fontsLoaded = new Set();
 
-  const report = (data) => fetch('/report', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(data) }).catch(() => {});
+  // ?ch=preview — предпросмотр из редактора шаблона: своё состояние, в программу ничего не сообщает
+  const CH = new URLSearchParams(location.search).get('ch') || '';
+  const PREVIEW = CH === 'preview';
+  const report = (data) => PREVIEW ? Promise.resolve() : fetch('/report', { method: 'POST',
+    headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }).catch(() => {});
 
   let bgGen = 0;
   function setBackground(bg) {
@@ -520,7 +523,7 @@ function startScreen() {
 
   let offTimer = 0;
   function connect() {
-    const es = new EventSource('/events');
+    const es = new EventSource('/events' + (CH ? '?ch=' + encodeURIComponent(CH) : ''));
     es.onopen = () => { clearTimeout(offTimer); dot.classList.remove('on');
       report({ type: 'hello', unlocked, w: innerWidth, h: innerHeight }); };
     es.onmessage = (e) => { try { apply(JSON.parse(e.data)); } catch (err) { console.error(err); } };

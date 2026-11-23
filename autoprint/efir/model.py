@@ -97,6 +97,7 @@ class Webinar:
     break_countdown: bool = True     # показывать обратный отсчёт
     break_background: str = ""       # "" — как основной фон
     break_title: str = "ПЕРЕРЫВ"
+    break_show_title: bool = True    # показывать надпись перерыва (выкл — только фон и, если включён, отсчёт)
     break_done: str = "ПРОДОЛЖАЕМ"   # когда время перерыва вышло
     font: str = DEFAULT_FONT         # шрифт надписей (перерыв, занавес): имя или "file:<путь>"
     text_color: str = "#FFFFFF"
@@ -190,6 +191,7 @@ def webinar_from_dict(d: dict) -> Webinar:
     w.break_countdown = d.get("break_countdown") if isinstance(d.get("break_countdown"), bool) else True
     w.break_background = _bg(d.get("break_background"), "")
     w.break_title = _str(d.get("break_title"), "ПЕРЕРЫВ") or "ПЕРЕРЫВ"
+    w.break_show_title = d.get("break_show_title") if isinstance(d.get("break_show_title"), bool) else True
     w.break_done = _str(d.get("break_done"), "ПРОДОЛЖАЕМ")
     font = _str(d.get("font"))
     w.font = font if font in dict(FONTS) or font.startswith("file:") else DEFAULT_FONT

@@ -8,11 +8,13 @@ from PySide6.QtGui import QColor, QGuiApplication
 from PySide6.QtWidgets import (QColorDialog, QComboBox, QFileDialog, QFrame, QHBoxLayout, QLabel, QLineEdit,
                                QMessageBox, QPushButton, QScrollArea, QSpinBox, QVBoxLayout, QWidget)
 
-from ..efir.model import (ANIMATIONS, BG_BLACK, DEMOS, FONTS, KINDS, Activity, Exercise, Webinar, ai_prompt,
-                          export_json, fmt_minutes, guess_kind, sample_webinar)
+from ..efir.model import (ANIMATIONS, BG_BLACK, DEMO_NONE, DEMO_OFF, DEMO_ON, DEMOS, FONTS, KIND_BREAK,
+                          KIND_EXERCISE, KIND_NORMAL, Activity, Exercise, Webinar, ai_prompt, export_json,
+                          fmt_minutes, guess_kind, sample_webinar)
 from . import icons
 from .frameless import FramelessWindow
 from .theme import theme
+from .blocks import MenuButton
 from .widgets import IconButton, Note, Switch, Toast, accent_button, button, group_title, label
 
 VIDEO_FILTER = "Видео и картинки (*.mp4 *.webm *.mov *.m4v *.png *.jpg *.jpeg *.gif *.webp);;Все файлы (*.*)"
@@ -44,7 +46,7 @@ class BackgroundPicker(QWidget):
         self.swatch = QLabel()
         self.swatch.setFixedSize(26, 26)
         lay.addWidget(self.swatch)
-        self.live = button(" Посмотреть вживую", "external")
+        self.live = button(" Галерея фонов", "external")
         self.live.setToolTip("Откроется страница со всеми фонами в браузере — щёлкните по нужному, "
                              "и он подставится сюда")
         self.live.clicked.connect(lambda: editor.open_gallery(self))
@@ -107,7 +109,16 @@ class BackgroundPicker(QWidget):
             self.set_value(str(data))
 
 
+KIND_LOOK = {KIND_NORMAL: ("Обычный", "text", "dim"), KIND_BREAK: ("Перерыв", "coffee", "accent"),
+             KIND_EXERCISE: ("Зарядка", "eye", "role_explain")}
+DEMO_LOOK = {DEMO_ON: ("Экран вкл", "monitor", "ok"), DEMO_OFF: ("Экран выкл", "monitor", "faint"),
+             DEMO_NONE: ("Экран —", "minus", "faint")}
+
+
 class ActivityRow(QFrame):
+    """Строка расписания: время от начала, название, минуты, вид и демонстрация — маленькими кнопками с меню
+    (не выпадающими списками: их легко «прокрутить» колесом, не заметив)."""
+
     def __init__(self, editor: "EditorWindow", a: Activity) -> None:
         super().__init__()
         self.editor = editor
@@ -122,6 +133,7 @@ class ActivityRow(QFrame):
         self.name = QLineEdit(a.name)
         self.name.setPlaceholderText("Название блока")
         self.name.textEdited.connect(self._name_edited)
+        self.name.textEdited.connect(editor._touch)
         lay.addWidget(self.name, 1)
         self.minutes = QSpinBox()
         self.minutes.setRange(1, 600)
@@ -130,23 +142,20 @@ class ActivityRow(QFrame):
         self.minutes.setFixedWidth(106)
         self.minutes.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         self.minutes.valueChanged.connect(editor.update_times)
+        self.minutes.valueChanged.connect(editor._touch)
         lay.addWidget(self.minutes)
-        self.kind = QComboBox()
-        for k, t in KINDS:
-            self.kind.addItem(t, k)
-        self.kind.setCurrentIndex(max(0, self.kind.findData(a.kind)))
-        self.kind.setFixedWidth(132)
-        self.kind.setToolTip("Перерыв и зарядка подсвечиваются в повестке")
+        self._kind = a.kind if a.kind in KIND_LOOK else KIND_NORMAL
+        self._demo = a.demo if a.demo in DEMO_LOOK else DEMO_ON
         self._kind_touched = False
-        self.kind.activated.connect(lambda _i: setattr(self, "_kind_touched", True))
-        lay.addWidget(self.kind)
-        self.demo = QComboBox()
-        for k, t in DEMOS:
-            self.demo.addItem(t, k)
-        self.demo.setCurrentIndex(max(0, self.demo.findData(a.demo)))
-        self.demo.setFixedWidth(206)
-        self.demo.setToolTip("Подсказка вам: в этом блоке демонстрация экрана включена или выключена")
-        lay.addWidget(self.demo)
+        self.kind_btn = MenuButton(self._fill_kind)
+        self.kind_btn.setFixedWidth(104)
+        self.kind_btn.setToolTip("Вид блока: перерыв и зарядка подсвечиваются в повестке таймера")
+        self.demo_btn = MenuButton(self._fill_demo)
+        self.demo_btn.setFixedWidth(112)
+        self.demo_btn.setToolTip("Подсказка вам: в этом блоке демонстрация экрана включена или выключена")
+        lay.addWidget(self.kind_btn)
+        lay.addWidget(self.demo_btn)
+        self._paint()
         for name, tip, fn in (("arrow-up", "Выше", lambda: editor.move_row(self, -1)),
                               ("arrow-down", "Ниже", lambda: editor.move_row(self, +1)),
                               ("insert-below", "Добавить блок ниже", lambda: editor.add_row(after=self)),
@@ -155,13 +164,48 @@ class ActivityRow(QFrame):
             b.clicked.connect(fn)
             lay.addWidget(b)
 
+    def _fill_kind(self, m) -> None:
+        for key, (text, ic, tok) in KIND_LOOK.items():
+            a = m.addAction(icons.icon(ic, tok, 14), text, lambda k=key: self._set_kind(k, touched=True))
+            a.setCheckable(True)
+            a.setChecked(key == self._kind)
+
+    def _fill_demo(self, m) -> None:
+        for key, title in DEMOS:
+            a = m.addAction(icons.icon(DEMO_LOOK[key][1], DEMO_LOOK[key][2], 14),
+                            "Демонстрация: не важно" if key == DEMO_NONE else title, lambda k=key: self._set_demo(k))
+            a.setCheckable(True)
+            a.setChecked(key == self._demo)
+
+    def _set_kind(self, key: str, touched: bool = False) -> None:
+        if touched:
+            self._kind_touched = True
+        if key != self._kind:
+            self._kind = key
+            self._paint()
+            self.editor._touch()
+
+    def _set_demo(self, key: str) -> None:
+        if key != self._demo:
+            self._demo = key
+            self._paint()
+            self.editor._touch()
+
+    def _paint(self) -> None:
+        text, ic, tok = KIND_LOOK[self._kind]
+        self.kind_btn.setText(text)
+        self.kind_btn.setIcon(icons.icon(ic, tok, 13))
+        self.kind_btn.setStyleSheet("" if self._kind == KIND_NORMAL else f"color: {theme.css(tok)};")
+        text, ic, tok = DEMO_LOOK[self._demo]
+        self.demo_btn.setText(text)
+        self.demo_btn.setIcon(icons.icon(ic, tok, 13))
+
     def _name_edited(self, text: str) -> None:
-        if not self._kind_touched:           # «Перерыв», «Зарядка для глаз» — тип по названию, пока не меняли вручную
-            self.kind.setCurrentIndex(max(0, self.kind.findData(guess_kind(text))))
+        if not self._kind_touched:           # «Перерыв», «Зарядка для глаз» — вид по названию, пока не меняли вручную
+            self._set_kind(guess_kind(text))
 
     def activity(self) -> Activity:
-        return Activity(self.name.text().strip() or "Блок", self.minutes.value(), self.kind.currentData(),
-                        self.demo.currentData())
+        return Activity(self.name.text().strip() or "Блок", self.minutes.value(), self._kind, self._demo)
 
 
 class ExerciseRow(QFrame):
@@ -262,11 +306,14 @@ class EditorWindow(FramelessWindow):
         lay.addLayout(row)
         lay.addWidget(label("Время начала в шаблоне не хранится — его выбирают при запуске («Сейчас» или «в 18:00»).",
                             "dim", wrap=True))
-        self.total = label("", "dim")
-        lay.addWidget(self.total)
 
-        # ---- расписание
-        lay.addWidget(group_title("Расписание"))
+        # ---- расписание: итог — сразу в заголовке
+        sh = QHBoxLayout()
+        sh.addWidget(group_title("Расписание"))
+        sh.addStretch(1)
+        self.total = label("", "rowTitle")
+        sh.addWidget(self.total, 0, Qt.AlignmentFlag.AlignBottom)
+        lay.addLayout(sh)
         self.rows_host = QVBoxLayout()
         self.rows_host.setSpacing(4)
         lay.addLayout(self.rows_host)
@@ -304,7 +351,7 @@ class EditorWindow(FramelessWindow):
         for ex in self.w.exercises:
             self._add_exercise_row(ex)
         er = QHBoxLayout()
-        b = button(" Добавить видео…", "video")
+        b = button(" Добавить видео (можно несколько)…", "video")
         b.clicked.connect(self.add_exercise)
         er.addWidget(b)
         er.addStretch(1)
@@ -314,40 +361,52 @@ class EditorWindow(FramelessWindow):
         lay.addWidget(group_title("Перерыв"))
         br = QHBoxLayout()
         br.setSpacing(10)
-        br.addWidget(label("Длительность", "rowTitle"))
+        br.addWidget(label("По умолчанию", "rowTitle"))
         self.break_min = QSpinBox()
         self.break_min.setRange(1, 180)
         self.break_min.setValue(self.w.break_min)
         self.break_min.setSuffix(" мин")
         self.break_min.setFixedWidth(96)
         br.addWidget(self.break_min)
-        br.addSpacing(16)
-        self.countdown = Switch("Обратный отсчёт")
-        self.countdown.setChecked(self.w.break_countdown)
-        br.addWidget(self.countdown)
-        br.addStretch(1)
+        br.addWidget(label("— подставится в «Перерыв» таймера; поменять можно и при запуске, и во время (±1 мин).",
+                           "dim"), 1)
         lay.addLayout(br)
-        lay.addWidget(label("Минуты можно поправить и при запуске перерыва, и во время него (±1 мин).", "dim"))
         bb = QHBoxLayout()
         bb.addWidget(label("Фон перерыва", "rowTitle"))
         lay.addLayout(bb)
         self.break_bg = BackgroundPicker(self, self.w.break_background, allow_same=True)
         lay.addWidget(self.break_bg)
+
+        # ---- надпись на экране перерыва
+        lay.addWidget(group_title("Надпись на экране перерыва"))
         tr = QHBoxLayout()
         tr.setSpacing(10)
-        tr.addWidget(label("Надпись", "rowTitle"))
+        self.show_title = Switch("Показывать надпись")
+        self.show_title.setChecked(self.w.break_show_title)
+        tr.addWidget(self.show_title)
         self.break_title = QLineEdit(self.w.break_title)
         self.break_title.setFixedWidth(200)
+        self.show_title.toggled.connect(self.break_title.setEnabled)
+        self.break_title.setEnabled(self.w.break_show_title)
         tr.addWidget(self.break_title)
-        tr.addWidget(label("Когда время вышло", "rowTitle"))
-        self.break_done = QLineEdit(self.w.break_done)
-        self.break_done.setFixedWidth(200)
-        tr.addWidget(self.break_done)
+        tr.addSpacing(16)
+        self.countdown = Switch("Обратный отсчёт")
+        self.countdown.setChecked(self.w.break_countdown)
+        tr.addWidget(self.countdown)
         tr.addStretch(1)
         lay.addLayout(tr)
+        dr = QHBoxLayout()
+        dr.setSpacing(10)
+        dr.addWidget(label("Когда время вышло", "rowTitle"))
+        self.break_done = QLineEdit(self.w.break_done)
+        self.break_done.setFixedWidth(200)
+        self.break_done.setPlaceholderText("Пусто — снова надпись")
+        dr.addWidget(self.break_done)
+        dr.addStretch(1)
+        lay.addLayout(dr)
         fr = QHBoxLayout()
         fr.setSpacing(10)
-        fr.addWidget(label("Шрифт надписей", "rowTitle"))
+        fr.addWidget(label("Шрифт", "rowTitle"))
         self.font = QComboBox()
         for key, title in FONTS:
             self.font.addItem(title, key)
@@ -367,6 +426,10 @@ class EditorWindow(FramelessWindow):
         self._paint_color()
         fr.addWidget(self.color_btn)
         fr.addStretch(1)
+        prev = button(" Предпросмотр перерыва", "eye")
+        prev.setToolTip("Экран перерыва с этими настройками — в новой вкладке браузера (ученики его не видят)")
+        prev.clicked.connect(self.preview_break)
+        fr.addWidget(prev)
         lay.addLayout(fr)
         lay.addSpacing(10)
         lay.addWidget(Note("Совет: перед эфиром откройте вкладку эфира (окно «Эфир» → «Открыть вкладку»), "
@@ -427,9 +490,6 @@ QFrame#efirBottom {{ background: {t.css('panel')}; border-top: 1px solid {t.css(
         idx = self.rows.index(after) + 1 if after in self.rows else len(self.rows)
         self.rows.insert(idx, r)
         self.rows_host.insertWidget(idx, r)
-        for w in (r.name, r.minutes, r.kind, r.demo):
-            sig = getattr(w, "textEdited", None) or getattr(w, "valueChanged", None) or w.currentIndexChanged
-            sig.connect(self._touch)
         self.update_times()
         if focus:
             self._dirty = True
@@ -473,9 +533,12 @@ QFrame#efirBottom {{ background: {t.css('panel')}; border-top: 1px solid {t.css(
         return r
 
     def add_exercise(self) -> None:
-        path, _ = QFileDialog.getOpenFileName(self, "Видео зарядки", str(Path.home() / "Videos"), VIDEO_FILTER)
-        if path:
+        """Можно выбрать сразу несколько видео — каждое станет своей зарядкой."""
+        paths, _ = QFileDialog.getOpenFileNames(self, "Видео зарядки (можно несколько)", str(Path.home() / "Videos"),
+                                                VIDEO_FILTER)
+        for path in paths:
             self._add_exercise_row(Exercise(Path(path).stem, path))
+        if paths:
             self._dirty = True
 
     def remove_exercise(self, r: ExerciseRow) -> None:
@@ -517,6 +580,12 @@ QFrame#efirBottom {{ background: {t.css('panel')}; border-top: 1px solid {t.css(
                                      "border-radius: 6px;")
         self.color_btn.setToolTip(self._color)
 
+    def preview_break(self) -> str:
+        url = self.ctl.preview_break(self.result())
+        if url:
+            self.toast.show_message("Предпросмотр перерыва открыт в браузере — ученики его не видят", ms=5000)
+        return url
+
     def open_gallery(self, picker: BackgroundPicker) -> None:
         self._pick_target = picker
         self.ctl.open_gallery(picker.value())
@@ -542,6 +611,7 @@ QFrame#efirBottom {{ background: {t.css('panel')}; border-top: 1px solid {t.css(
         w.break_countdown = self.countdown.isChecked()
         w.break_background = self.break_bg.value()
         w.break_title = self.break_title.text().strip() or "ПЕРЕРЫВ"
+        w.break_show_title = self.show_title.isChecked()
         w.break_done = self.break_done.text().strip()
         w.font = self._font_value or "Montserrat"
         w.text_color = self._color
