@@ -5,11 +5,11 @@ import hashlib
 import shutil
 from pathlib import Path
 
-from PySide6.QtCore import QRectF, QSize, Qt, QTimer, Signal
-from PySide6.QtGui import QGuiApplication, QIcon, QImage, QPainter, QPixmap, QTextCursor
+from PySide6.QtCore import QPoint, QRectF, QSize, Qt, QTimer, Signal
+from PySide6.QtGui import QGuiApplication, QImage, QPainter, QPixmap, QTextCursor
 from PySide6.QtWidgets import (QApplication, QComboBox, QFileDialog, QFrame, QHBoxLayout, QLabel, QLineEdit, QMenu,
-                               QPlainTextEdit, QSizePolicy, QSpinBox, QStackedWidget, QStyle, QStyleOptionComboBox,
-                               QStylePainter, QTextBrowser, QToolButton, QVBoxLayout)
+                               QPlainTextEdit, QSizePolicy, QSpinBox, QStackedWidget, QTextBrowser, QToolButton,
+                               QVBoxLayout)
 
 from .. import storage
 from ..highlighter import LANGUAGES
@@ -73,30 +73,47 @@ def store_qimage(img: QImage) -> Path | None:
         tmp.unlink(missing_ok=True)
 
 
-class IconCombo(QComboBox):
-    """Тип блока: в шапке — только значок, в раскрытом списке — значок и название."""
+class MenuButton(QToolButton):
+    """Кнопка, меню которой строится только по щелчку. В ленте десятки блоков: постоянные QMenu и QComboBox
+    в каждой шапке — это тысячи виджетов, а их оформление Qt пересчитывает при смене темы по одному."""
 
-    def paintEvent(self, e) -> None:
-        p = QStylePainter(self)
-        opt = QStyleOptionComboBox()
-        self.initStyleOption(opt)
-        opt.currentText = ""
-        opt.currentIcon = QIcon()
-        p.drawComplexControl(QStyle.ComplexControl.CC_ComboBox, opt)
-        ic = self.itemIcon(self.currentIndex())
-        if not ic.isNull():
-            s = self.iconSize()
-            p.drawPixmap(8, (self.height() - s.height()) // 2, ic.pixmap(s))
+    def __init__(self, fill, object_name: str = "pickBtn") -> None:
+        super().__init__()
+        self._fill = fill
+        self.setObjectName(object_name)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        self.setIconSize(QSize(13, 13))
+        self.clicked.connect(self.popup)
 
-    def sizeHint(self) -> QSize:
-        return QSize(50, 26)
+    def build_menu(self) -> QMenu:
+        m = QMenu(self)
+        self._fill(m)
+        return m
 
-    def minimumSizeHint(self) -> QSize:
-        return QSize(50, 26)
+    def popup(self) -> None:
+        m = self.build_menu()
+        m.exec(self.mapToGlobal(QPoint(0, self.height())))
+        m.deleteLater()
 
-    def showPopup(self) -> None:
-        self.view().setMinimumWidth(180)
-        super().showPopup()
+
+class RoleChip(MenuButton):
+    """Тип блока цветной плашкой: «ГОВОРИШЬ», «СПРОСИ», «КОД»… — цвет роли, как на суфлёре.
+    Щелчок — меню смены типа."""
+
+    def __init__(self, fill) -> None:
+        super().__init__(fill, "roleChip")
+        self.setIconSize(QSize(12, 12))
+        self._key = ""
+
+    def set_role(self, key: str) -> None:
+        name, ic, tok = next(((n, i, t) for n, k, i, t in TYPE_ITEMS if k == key), ("Текст", "text", "role_text"))
+        self._key = key
+        self.setText(name.upper())
+        self.setIcon(icons.icon(ic, tok, 12))
+        if self.property("role") != key:
+            self.setProperty("role", key)
+            repolish(self)
 
 
 class BlockWidget(QFrame):
@@ -121,15 +138,10 @@ class BlockWidget(QFrame):
         # шапка: [тип][заголовок][доп. слева] … [доп. справа][＋↑][＋↓][↑][↓][✕]
         self.header = QHBoxLayout()
         self.header.setSpacing(4)
-        self.kind = IconCombo()
-        self.kind.setObjectName("kindCombo")
-        self.kind.setIconSize(QSize(15, 15))
+        self.kind = RoleChip(self._fill_type_menu)
         self.kind.setToolTip("Тип блока: текст и подсказки суфлёра (говоришь, спроси, делаешь…), код, этап урока "
-                             "или картинка")
-        for text, key, _ic, _tok in TYPE_ITEMS:
-            self.kind.addItem(text, key)
-        self.kind.setCurrentIndex(max(0, self.kind.findData(type_key(block))))
-        self.kind.activated.connect(self._on_kind)
+                             "или картинка — щёлкните, чтобы сменить")
+        self.kind.set_role(type_key(block))
         self.header.addWidget(self.kind)
 
         self.title = QLineEdit(block.title)
@@ -159,31 +171,18 @@ class BlockWidget(QFrame):
         self.right_slot.setSpacing(4)
         self.header.addLayout(self.right_slot)
         # окно для этого блока: терминал на сайте (git в браузере) Windows не отличит от редактора — выбирают здесь
-        self.window = QComboBox()
-        self.window.setObjectName("langCombo")
-        self.window.setFixedWidth(172)
-        self.window.addItem("Как на пульте", "")
-        for key, name in PROFILE_SHORT.items():
-            self.window.addItem(name, key)
-        self.window.setCurrentIndex(max(0, self.window.findData(block.profile)))
+        self.window = MenuButton(self._fill_window_menu)
         self.window.setToolTip("Куда печатается этот блок:\n"
                                + "\n".join(f"• {PROFILE_SHORT[k]} — {v}" for k, v in PROFILES.items())
                                + "\nКак на пульте — как выбрано в «Куда печатаем» на пульте.\n"
                                  "Терминал на сайте (git в браузере) — выберите «Терминал»: иначе в строке появятся «F».")
-        self.window.activated.connect(self._on_window)
         self.right_slot.addWidget(self.window)
-        self._refresh_window_icons()
+        self._update_window_btn()
         self.header.addSpacing(4)
 
-        self._insert_actions = []
         for name, tip, after in (("insert-above", "Вставить блок выше", 0), ("insert-below", "Вставить блок ниже", 1)):
             b = IconButton(name, tip, 15, box=26)
-            m = QMenu(b)
-            for text, kind, ic in INSERT_KINDS:
-                act = m.addAction(text, lambda a=after, k=kind: self.insert_requested.emit(self, a, k))
-                self._insert_actions.append((act, ic))
-            b.setMenu(m)
-            b.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+            b.clicked.connect(lambda _=False, b=b, a=after: self._insert_popup(b, a))
             self.header.addWidget(b)
 
         for name, tip, slot in (("arrow-up", "Блок выше", lambda: self.move_requested.emit(self, -1)),
@@ -199,17 +198,37 @@ class BlockWidget(QFrame):
         self._refresh_kind_icons()
         theme.changed.connect(self._refresh_kind_icons)
 
-    def _refresh_window_icons(self) -> None:
-        for i in range(self.window.count()):   # своё окно у блока — значок цветом акцента
-            self.window.setItemIcon(i, icons.icon("monitor", "dim" if i == 0 else "accent", 13))
+    # ---- меню шапки (строятся по щелчку)
+    def _fill_type_menu(self, m: QMenu) -> None:
+        cur = type_key(self.block)
+        for text, key, ic, tok in TYPE_ITEMS:
+            a = m.addAction(icons.icon(ic, tok, 14), text, lambda k=key: self._on_kind(k))
+            a.setCheckable(True)
+            a.setChecked(key == cur)
+
+    def _fill_window_menu(self, m: QMenu) -> None:
+        cur = self.block.profile if self.block.profile in PROFILES else ""
+        for key, name in [("", "Как на пульте")] + list(PROFILE_SHORT.items()):
+            a = m.addAction(icons.icon("monitor", "dim" if not key else "accent", 13), name,
+                            lambda k=key: self._on_window(k))
+            a.setCheckable(True)
+            a.setChecked(key == cur)
+
+    def _update_window_btn(self) -> None:
+        key = self.block.profile if self.block.profile in PROFILES else ""
+        self.window.setText((PROFILE_SHORT.get(key) or "Как на пульте") + " ▾")
+        self.window.setIcon(icons.icon("monitor", "accent" if key else "dim", 13))
+
+    def _insert_popup(self, btn: QToolButton, after: int) -> None:
+        m = QMenu(btn)
+        for text, kind, ic in INSERT_KINDS:
+            m.addAction(icons.icon(ic), text, lambda k=kind: self.insert_requested.emit(self, after, k))
+        m.exec(btn.mapToGlobal(QPoint(0, btn.height())))
+        m.deleteLater()
 
     def _refresh_kind_icons(self) -> None:
-        if hasattr(self, "window"):
-            self._refresh_window_icons()
-        for i, (_t, _k, ic, tok) in enumerate(TYPE_ITEMS):
-            self.kind.setItemIcon(i, icons.icon(ic, tok, 14))
-        for action, ic in self._insert_actions:
-            action.setIcon(icons.icon(ic))
+        self.kind.set_role(type_key(self.block))
+        self._update_window_btn()
         self.update()
 
     def role_token(self) -> str:
@@ -254,8 +273,7 @@ class BlockWidget(QFrame):
         self.block.title = text
         self.changed.emit()
 
-    def _on_kind(self, _i: int) -> None:
-        key = self.kind.currentData()
+    def _on_kind(self, key: str) -> None:
         if key != type_key(self.block):
             self.type_requested.emit(self, key)
 
@@ -263,9 +281,11 @@ class BlockWidget(QFrame):
         """Этап и картинка — для суфлёра: печатать их нечего, «активный» и выбор окна не нужны."""
         self.arm_btn.hide()
         self.window.hide()
+        self.kind.hide()           # картинка — это картинка, этап — этап: выбор роли им не нужен
 
-    def _on_window(self, _i: int) -> None:
-        self.block.profile = self.window.currentData()
+    def _on_window(self, key: str) -> None:
+        self.block.profile = key
+        self._update_window_btn()
         self.changed.emit()
         self.arm_requested.emit(self)
 
@@ -319,17 +339,12 @@ class MarkdownBlockWidget(BlockWidget):
     def __init__(self, block: Block) -> None:
         super().__init__(block)
         self._rendering = False   # setMarkdown сбрасывает курсор просмотра — это не выбор пользователя
-        self.print_as = QComboBox()
-        self.print_as.setObjectName("langCombo")
-        self.print_as.setFixedWidth(176)
-        for key, name in PRINT_MODES.items():
-            self.print_as.addItem(name[0].upper() + name[1:], key)   # «Как Markdown», «Простым текстом»…
-        self.print_as.setCurrentIndex(max(0, self.print_as.findData(block.print_as)))
+        self.print_as = MenuButton(self._fill_print_menu)
         self.print_as.setToolTip("Как печатать этот блок:\n"
                                  "• как Markdown — исходник с ## и `…` (markdown-ячейка Jupyter, .md-файл);\n"
                                  "• простым текстом — без разметки (Блокнот, Word, чат);\n"
                                  "• комментарием в коде — каждая строка с # или // по языку блока кода рядом")
-        self.print_as.activated.connect(self._on_print_as)
+        self._update_print_btn()
         self.left_slot.addWidget(self.print_as)
         self.info = QLabel()
         self.info.setObjectName("dim")
@@ -346,16 +361,9 @@ class MarkdownBlockWidget(BlockWidget):
         self.stack = QStackedWidget()
         self.view = _AutoBrowser()
         self.view.viewport().installEventFilter(self)
-        self.edit = QPlainTextEdit(block.text)
-        self.edit.setObjectName("mdEdit")
-        self.edit.installEventFilter(self)
-        self.edit.setFont(code_font(10))
-        self.edit.setPlaceholderText("Текст в формате Markdown: условие, пояснение к коду, подсказка…")
-        self.edit.textChanged.connect(self._on_text)
+        self._edit: QPlainTextEdit | None = None     # редактор Markdown создаётся при первой правке
         self.view.selectionChanged.connect(self._on_view_selection)
-        self.edit.selectionChanged.connect(self._on_edit_selection)
         self.stack.addWidget(self.view)
-        self.stack.addWidget(self.edit)
         self.body.addWidget(self.stack)
         self.body.setContentsMargins(6, 0, 0, 0)
         theme.changed.connect(self._on_theme)
@@ -363,6 +371,25 @@ class MarkdownBlockWidget(BlockWidget):
         self.set_editing(not block.text.strip(), focus=False)
         self._update_info()
         self.set_armed(False)
+
+    @property
+    def edit(self) -> QPlainTextEdit:
+        """Поле правки Markdown. В ленте его почти никто не открывает — создаём по первому обращению:
+        каждый лишний редактор — это ещё полдюжины виджетов на блок."""
+        if self._edit is None:
+            e = QPlainTextEdit(self.block.text)
+            e.setObjectName("mdEdit")
+            e.installEventFilter(self)
+            e.setFont(code_font(max(5, round(10 * self.block.zoom / 100))))
+            e.setPlaceholderText("Текст в формате Markdown: условие, пояснение к коду, подсказка…")
+            e.textChanged.connect(self._on_text)
+            e.selectionChanged.connect(self._on_edit_selection)
+            self._edit = e
+            self.stack.addWidget(e)
+        return self._edit
+
+    def _editing(self) -> bool:
+        return self._edit is not None and self.stack.currentWidget() is self._edit
 
     def _on_theme(self) -> None:
         self._render()
@@ -381,7 +408,7 @@ class MarkdownBlockWidget(BlockWidget):
         self._set_sel(sel)
 
     def _on_edit_selection(self) -> None:
-        if self.stack.currentWidget() is self.edit:
+        if self._editing():
             self._sel_from_edit()
 
     def _sel_from_edit(self) -> None:
@@ -414,7 +441,7 @@ class MarkdownBlockWidget(BlockWidget):
         self.info.setVisible(bool(self.block.sel))
 
     def clear_selection(self) -> None:
-        for w in (self.view, self.edit):
+        for w in (self.view,) + ((self._edit,) if self._edit is not None else ()):
             c = w.textCursor()
             c.clearSelection()
             w.setTextCursor(c)
@@ -422,7 +449,7 @@ class MarkdownBlockWidget(BlockWidget):
 
     def eventFilter(self, obj, ev) -> bool:
         t = ev.type()
-        if obj is self.edit:
+        if obj is self._edit:
             if t == ev.Type.FocusIn:
                 self.arm_requested.emit(self)   # правка блока — блок активный, как у блока кода
             return False
@@ -436,8 +463,19 @@ class MarkdownBlockWidget(BlockWidget):
             self._set_sel([])                   # щелчок без выделения — печатать весь блок
         return False
 
-    def _on_print_as(self, _i: int) -> None:
-        self.block.print_as = self.print_as.currentData()
+    def _fill_print_menu(self, m: QMenu) -> None:
+        for key, name in PRINT_MODES.items():
+            a = m.addAction(name[0].upper() + name[1:], lambda k=key: self._on_print_as(k))
+            a.setCheckable(True)
+            a.setChecked(key == self.block.print_as)
+
+    def _update_print_btn(self) -> None:
+        name = PRINT_MODES.get(self.block.print_as) or next(iter(PRINT_MODES.values()))
+        self.print_as.setText(name[0].upper() + name[1:] + " ▾")
+
+    def _on_print_as(self, key: str) -> None:
+        self.block.print_as = key
+        self._update_print_btn()
         self.changed.emit()
         self.arm_requested.emit(self)
 
@@ -464,14 +502,14 @@ class MarkdownBlockWidget(BlockWidget):
             self._fit_edit()
 
     def _fit_edit(self) -> None:
-        if self.stack.currentWidget() is self.edit:
+        if self._editing():
             lines = max(4, min(25, self.edit.document().blockCount() + 1))
             h = lines * self.edit.fontMetrics().lineSpacing() + 18
             self.edit.setFixedHeight(h)
             self.stack.setFixedHeight(h)
 
     def _update_toggle(self) -> None:
-        editing = self.stack.currentWidget() is self.edit
+        editing = self._editing()
         self.toggle.setText("Готово" if editing else "Править")
         self.toggle.setIcon(icons.icon("check" if editing else "pencil", "accent" if editing else "dim", 14))
 
@@ -496,7 +534,8 @@ class MarkdownBlockWidget(BlockWidget):
         base = f.pixelSize() if f.pixelSize() > 0 else 13
         f.setPixelSize(max(6, round(base * zoom / 100)))
         self.view.setFont(f)
-        self.edit.setFont(code_font(max(5, round(10 * zoom / 100))))
+        if self._edit is not None:
+            self._edit.setFont(code_font(max(5, round(10 * zoom / 100))))
         self._render()
         self._fit()
 
@@ -519,26 +558,14 @@ class CodeBlockWidget(BlockWidget):
         self.info = QLabel()
         self.info.setObjectName("dim")
         self.left_slot.addWidget(self.info)
-        self.steps_btn = QToolButton()
-        self.steps_btn.setObjectName("armBtn")
-        self.steps_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.steps_btn.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
-        self.steps_btn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        self.steps_btn = MenuButton(self._fill_steps_menu, "armBtn")
         self.steps_btn.setIconSize(QSize(12, 12))
         self.steps_btn.setToolTip("Печать по шагам: шаг строки — правый щелчок по строке, Alt+1…9 "
                                   "или щелчок по цветному номеру слева")
-        self.steps_menu = QMenu(self.steps_btn)
-        self.steps_menu.aboutToShow.connect(self._fill_steps_menu)
-        self.steps_btn.setMenu(self.steps_menu)
         self.left_slot.addWidget(self.steps_btn)
-        self.lang = QComboBox()
-        self.lang.setObjectName("langCombo")
-        self.lang.setEditable(True)
-        self.lang.addItems(LANGUAGES)
-        self.lang.setCurrentText(block.lang)
-        self.lang.setFixedWidth(118)
+        self.lang = MenuButton(self._fill_lang_menu)
         self.lang.setToolTip("Язык подсветки (на печать не влияет)")
-        self.lang.currentTextChanged.connect(self._on_lang)
+        self.lang.setText(block.lang + " ▾")
         self.right_slot.addWidget(self.lang)
 
         self.frame = QFrame()
@@ -614,9 +641,22 @@ class CodeBlockWidget(BlockWidget):
         self.steps_btn.setText(text)
         self.steps_btn.setIcon(icons.icon("layers", "accent" if self.step_mode else "dim", 12))
 
-    def _fill_steps_menu(self) -> None:
-        m = self.steps_menu
-        m.clear()
+    def _fill_lang_menu(self, m: QMenu) -> None:
+        for lang in LANGUAGES:
+            a = m.addAction(lang, lambda x=lang: self._on_lang(x))
+            a.setCheckable(True)
+            a.setChecked(lang == self.block.lang)
+        m.addSeparator()
+        m.addAction("Другой язык…", self._ask_lang)
+
+    def _ask_lang(self) -> None:
+        from PySide6.QtWidgets import QInputDialog
+        text, ok = QInputDialog.getText(self, "Язык подсветки", "Язык (например, kotlin, lua):",
+                                        text=self.block.lang)
+        if ok and text.strip():
+            self._on_lang(text)
+
+    def _fill_steps_menu(self, m: QMenu) -> None:
         nums = self.step_numbers()
         head = m.addAction("Печатать дальше с шага:")
         head.setEnabled(False)
@@ -653,6 +693,7 @@ class CodeBlockWidget(BlockWidget):
 
     def _on_lang(self, lang: str) -> None:
         self.block.lang = lang.strip().lower() or "text"
+        self.lang.setText(self.block.lang + " ▾")
         self.editor.highlighter.set_language(self.block.lang)
         self.changed.emit()
 

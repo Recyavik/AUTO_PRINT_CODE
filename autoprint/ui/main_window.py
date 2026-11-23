@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import logging
+
+import shiboken6
 import time
 from pathlib import Path
 
@@ -121,6 +123,7 @@ class MainWindow(FramelessWindow):
         self._auto_checked_once = False
         self.settings_win: SettingsWindow | None = None
         self.views: dict[str, TemplateView] = {}
+        self._view_scroll: dict[str, int] = {}    # где была прокрутка у выгруженного из памяти занятия
 
         self.efir = EfirController(self)    # «Эфир»: шаблоны вебинаров, таймер, вкладка эфира
         self.efir.message.connect(lambda t, warn: self._notify(t, warn=warn))
@@ -128,6 +131,7 @@ class MainWindow(FramelessWindow):
         self._build_ui()
         self._build_tray()
         theme.changed.connect(self._on_theme)
+        theme.about_to_change.connect(self._drop_views_for_theme)
         self._on_theme()
         self._apply_settings()
         self._apply_hotkeys()
@@ -305,13 +309,39 @@ class MainWindow(FramelessWindow):
         if self.settings.autostart:      # путь программы мог измениться — обновить запись автозапуска
             system.set_autostart(True)
 
+    def _drop_views_for_theme(self) -> None:
+        """Перед сменой темы: открытые занятия убрать совсем, после — собрать заново. Qt пересчитывает оформление
+        каждого виджета по одному (~1 мс), и большое занятие «висело» секундами; собрать заново — в разы быстрее.
+        Вкладку, из которой сейчас идёт печать, не трогаем."""
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)   # занятие собирается заново — секунду-две
+        self._theme_cursor = True
+        cur = self.current_view()
+        self._theme_restore = cur.template.id if cur is not None else ""
+        for tid in list(self.views):
+            if self._view_busy(tid):
+                continue
+            v = self.views.pop(tid)
+            self._view_scroll[tid] = v.scroll.verticalScrollBar().value()
+            self.stack.removeWidget(v)
+            shiboken6.delete(v)             # сразу, а не deleteLater: иначе Qt успеет перекрасить и его
+
+    def _restore_views_after_theme(self) -> None:
+        tid = getattr(self, "_theme_restore", "")
+        self._theme_restore = ""
+        if tid and self.store.get(tid):
+            self.open_template(tid)
+
     def _on_theme(self) -> None:
+        self._restore_views_after_theme()
         highlighter.set_palette("dark" if theme.dark else "light")
         self.logo_btn.setIcon(logo.make_icon(logo.IDLE, theme.c("accent")))
         self.restyle_frame()
         self._update_efir_pill()
         self._on_state(self.engine.state)
         self.library.list.viewport().update()
+        if getattr(self, "_theme_cursor", False):
+            self._theme_cursor = False
+            QApplication.restoreOverrideCursor()
 
     # ================================================================ настройки
     def _apply_settings(self) -> None:
@@ -605,8 +635,13 @@ class MainWindow(FramelessWindow):
             v.steps_changed.connect(self._on_steps_changed)
             v.step_pointer_requested.connect(self._set_step_pointer)
             v.apply_step_mode(self.settings.print_mode == MODE_STEPS)
+            if activate:
+                self._evict_views(keep=tid)
             self.views[tid] = v
             self.stack.addWidget(v)
+            pos = self._view_scroll.pop(tid, None)
+            if pos:
+                self._restore_scroll(v, pos)
         if activate:
             # первый виджет в пустом стеке становится текущим сам — поэтому выделение и пульт обновляем всегда
             if self.stack.currentWidget() is not v:
@@ -616,6 +651,29 @@ class MainWindow(FramelessWindow):
             self.lesson.schedule_publish()      # страница суфлёра показывает открытое занятие
         return v
 
+    def _view_busy(self, tid: str) -> bool:
+        return bool(self.job and self.job.get("tid") == tid and self.engine.state in BUSY)
+
+    def _evict_views(self, keep: str) -> None:
+        """В памяти — открываемое занятие и предыдущее (и то, из которого идёт печать). Остальные — выгрузить:
+        каждый блок — десятки виджетов, а их число и делает медленными открытие, прокрутку и смену темы."""
+        cur = self.current_view()
+        keep_ids = {keep} | ({cur.template.id} if cur is not None else set())
+        for tid in list(self.views):
+            if tid in keep_ids or self._view_busy(tid):
+                continue
+            v = self.views.get(tid)
+            if v is not None:
+                self._view_scroll[tid] = v.scroll.verticalScrollBar().value()
+            self._close_view(tid)
+
+    @staticmethod
+    def _restore_scroll(v: TemplateView, pos: int) -> None:
+        """Высоты блоков досчитываются после первого показа — ставим прокрутку дважды."""
+        bar = v.scroll.verticalScrollBar()
+        for ms in (0, 60):
+            QTimer.singleShot(ms, v, lambda: bar.setValue(pos))
+
     def _close_view(self, tid: str) -> None:
         v = self.views.pop(tid, None)
         if v is None:
@@ -623,7 +681,9 @@ class MainWindow(FramelessWindow):
         if self.job and self.job["tid"] == tid and self.engine.state in BUSY:   # и «ждёт Enter»
             self.cmd_stop()
         self.stack.removeWidget(v)
-        v.deleteLater()
+        # сразу, а не deleteLater: «отложенное» занятие ещё живо до возврата в цикл событий, и смена темы
+        # успела бы перекрасить все его виджеты (на этом и «висло»)
+        shiboken6.delete(v)
 
     # ---- масштаб блока (у каждого блока свой)
     def _target_block(self) -> BlockWidget | None:

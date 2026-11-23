@@ -105,6 +105,7 @@ def step(name: str, fn) -> None:
 
 def main() -> int:
     from autoprint.storage import Settings, TemplateStore
+    from autoprint.ui.blocks import MenuButton
     from autoprint.ui.main_window import MainWindow
     from autoprint.ui.settings_window import PAGES
     from autoprint.ui.theme import theme
@@ -126,6 +127,8 @@ def main() -> int:
             for b in w.findChildren(QToolButton):
                 if b.menu() is not None and b.isVisibleTo(w):
                     step(f"меню блока «{b.objectName() or b.text()}»", b.showMenu)
+                elif isinstance(b, MenuButton) and b.isVisibleTo(w):     # меню строится по щелчку
+                    step(f"меню блока «{b.objectName() or b.text()}»", b.popup)
             ed = getattr(w, "editor", None)
             if ed is not None:
                 step("контекстное меню кода", lambda ed=ed: QApplication.sendEvent(

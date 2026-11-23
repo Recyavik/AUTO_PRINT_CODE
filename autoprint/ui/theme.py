@@ -85,6 +85,7 @@ def _family(candidates: tuple[str, ...], fallback: str) -> str:
 
 class Theme(QObject):
     changed = Signal()
+    about_to_change = Signal()     # перед сменой таблицы стилей: тяжёлые виджеты можно убрать и собрать заново
 
     def __init__(self) -> None:
         super().__init__()
@@ -154,6 +155,7 @@ class Theme(QObject):
         app = self._app
         if app is None:
             return
+        self.about_to_change.emit()
         app.setPalette(self._palette())
         app.setStyleSheet(self._qss())
         self.changed.emit()
@@ -191,6 +193,21 @@ class Theme(QObject):
                                  f'stroke-linecap="round" stroke-linejoin="round"><path d="{d}"/></svg>')
 
     # ------------------------------------------------------------ таблица стилей
+    ROLE_CHIP_TOKENS = {"text": "role_text", "task": "role_task", "explain": "role_explain", "hint": "role_hint",
+                        "say": "role_say", "tell": "role_tell", "ask": "role_ask", "do": "role_do",
+                        "important": "role_important", "show": "role_show", "trap": "role_trap",
+                        "extra": "role_extra", "code": "accent", "stage": "role_stage", "image": "role_image"}
+
+    def _role_chips(self) -> str:
+        """Плашка типа блока в редакторе — цвет роли на лёгком фоне того же цвета (как на суфлёре)."""
+        out = []
+        for key, tok in self.ROLE_CHIP_TOKENS.items():
+            c = self.c(tok)
+            bg = QColor(c)
+            bg.setAlphaF(0.16 if self.dark else 0.11)
+            out.append(f'QToolButton#roleChip[role="{key}"] {{ color: {css(c)}; background: {css(bg)}; }}')
+        return "\n".join(out)
+
     def _qss(self) -> str:
         t = {k: css(v) for k, v in self.tokens.items()}
         down = self._chevron("chevron-down", "m6 9 6 6 6-6", self.c("dim"))
@@ -310,6 +327,14 @@ QToolButton#armBtn:checked {{ border-color: {t['accent']}; color: {t['accent']};
 QToolButton#textBtn {{ background: transparent; border: none; border-radius: 4px; padding: 2px 8px;
                        color: {t['dim']}; font-size: 12px; }}
 QToolButton#textBtn:hover {{ background: {t['stroke']}; color: {t['text']}; }}
+QToolButton#pickBtn {{ background: transparent; border: 1px solid transparent; border-radius: 4px; padding: 1px 8px;
+                       color: {t['dim']}; font-size: 12px; min-height: 22px; }}
+QToolButton#pickBtn:hover {{ border-color: {t['stroke_strong']}; color: {t['text']}; }}
+QToolButton#pickBtn::menu-indicator, QToolButton#roleChip::menu-indicator {{ image: none; width: 0; }}
+QToolButton#roleChip {{ border: 1px solid transparent; border-radius: 10px; padding: 1px 9px 1px 7px;
+                        font-size: 11px; font-weight: 700; min-height: 20px; }}
+QToolButton#roleChip:hover {{ border-color: {t['stroke_strong']}; }}
+{self._role_chips()}
 
 /* ---------- поля ввода ---------- */
 QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox, QPlainTextEdit#mdEdit, QKeySequenceEdit QLineEdit {{
