@@ -212,5 +212,59 @@ class PlansTest(unittest.TestCase):
         self.assertEqual([b.link for b in stages_of(c)], ["p1", "p2", "p3", "p4"])
 
 
+# ================================================================ Task 2: формат урока
+
+class FormatTest(unittest.TestCase):
+    def test_exercise_tail(self):
+        from autoprint import lesson_md
+        t = lesson_md.parse("## Зарядка · 3 мин · зарядка: Гимнастика для глаз\n\n## Перерыв · 10 мин · перерыв\n\n"
+                            "## Разбор (10 мин)\n", None, "x")
+        st = stages_of(t)
+        self.assertEqual([(b.title, b.minutes, b.stage_kind, b.exercise) for b in st],
+                         [("Зарядка", 3, "exercise", "Гимнастика для глаз"), ("Перерыв", 10, "break", ""),
+                          ("Разбор", 10, "", "")])
+        self.assertEqual(lesson_md.stage_line(st[0]), "## Зарядка · 3 мин · зарядка: Гимнастика для глаз")
+        self.assertEqual(lesson_md.stage_line(st[1]), "## Перерыв · 10 мин · перерыв")
+
+    def test_photo_and_slide_placeholders(self):
+        from autoprint import lesson_md
+        t = lesson_md.parse("## Э · 5 мин\n\n![Кот у ноутбука](фото)\n\n![Слайд 4](slide:4)\n\n![x](?)\n\n"
+                            "![Схема](slide:5)\n\n![пусто]()\n", None, "x")
+        imgs = [(b.text, b.title, b.slide) for b in t.blocks if b.type == BLOCK_IMAGE]
+        self.assertEqual(imgs, [("", "Кот у ноутбука", 0), ("", "", 4), ("", "x", 0), ("", "Схема", 5), ("", "пусто", 0)])
+
+    def test_export_roundtrip_placeholders(self):
+        from autoprint import lesson_md
+        t = Template("У", [stage("Зарядка", 3, stage_kind="exercise", exercise="Глаза"), Block(BLOCK_IMAGE, "", title="Кот"),
+                           Block(BLOCK_IMAGE, "", slide=2)])
+        md = lesson_md.to_md(t, "x_files")
+        self.assertIn("## Зарядка · 3 мин · зарядка: Глаза", md)
+        self.assertIn("![Кот](фото)", md)
+        self.assertIn("![Слайд 2](slide:2)", md)
+        back = lesson_md.parse(md, None, "x")
+        self.assertEqual([(b.text, b.title, b.slide) for b in back.blocks if b.type == BLOCK_IMAGE],
+                         [("", "Кот", 0), ("", "", 2)])
+        self.assertEqual(stages_of(back)[0].exercise, "Глаза")
+
+    def test_plan_kind_in_md(self):
+        from autoprint import lesson_md
+        p = Template("Онлайн 90", [stage("А", 5)], kind="plan")
+        md = lesson_md.to_md(p, "x_files")
+        self.assertIn("kind: plan", md.split("---")[1])
+        self.assertEqual(lesson_md.parse(md, None, "x").kind, "plan")
+        self.assertEqual(lesson_md.parse("---\ntitle: У\n---\n## А · 5 мин\n", None, "x").kind, "")
+        self.assertNotIn("kind:", lesson_md.to_md(Template("У", [stage("А", 5)]), "x_files"))
+
+    def test_chat_answer_keeps_slide_places(self):
+        from autoprint import lesson_ai as L
+        p = L.parse_lesson("~~~markdown\n## Э · 5 мин\n\n![Слайд 3](slide:3)\n\n![Кот](фото)\n\n> [!say]\n> Т\n~~~",
+                           slide=lambda n: None)
+        imgs = [(b.text, b.slide, b.title) for b in p.template.blocks if b.type == BLOCK_IMAGE]
+        self.assertEqual(imgs, [("", 3, ""), ("", 0, "Кот")])
+        self.assertTrue(any("Слайд 3" in w and "подставьте слайды" in w for w in p.warnings), p.warnings)
+        filled = L.parse_lesson("~~~markdown\n## Э · 5 мин\n\n![Слайд 3](slide:3)\n~~~", slide=lambda n: "media/s3.png")
+        self.assertEqual([(b.text, b.slide) for b in filled.template.blocks if b.type == BLOCK_IMAGE], [("media/s3.png", 3)])
+
+
 if __name__ == "__main__":
     unittest.main()

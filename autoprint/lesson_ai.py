@@ -963,19 +963,25 @@ def _parse_md_answer(md: str, title: str, slide) -> Parsed:
     t = lesson_md.parse(md, None, title or "Урок от нейросети", local_images=False)
     warnings: list[str] = []
     keep = []
+    no_pic: list[int] = []
     for b in t.blocks:
-        m = re.fullmatch(r"slide:(\d+)", (b.text or "").strip()) if b.type == BLOCK_IMAGE else None
-        if b.type == BLOCK_IMAGE and not m and not re.match(r"https?://", (b.text or "").strip(), re.I):
+        if b.type == BLOCK_IMAGE and not (b.text or "").strip():
+            if b.slide:                   # место слайда: есть PDF материала — картинка страницы, нет — место остаётся
+                path = slide(b.slide) if slide else None
+                if path:
+                    b.text = path
+                else:
+                    no_pic.append(b.slide)
+            keep.append(b)                # «Нужна картинка: …» — место, учитель вставит сам
+            continue
+        if b.type == BLOCK_IMAGE and not re.match(r"https?://", (b.text or "").strip(), re.I):
             warnings.append("Картинка с путём к файлу пропущена — вставьте её сами.")
             continue
-        if m:
-            n = int(m.group(1))
-            path = slide(n) if slide else None
-            if not path:
-                warnings.append(f"Слайд {n}: картинки нет — материал не PDF; блок пропущен.")
-                continue
-            b.text, b.slide = path, n
         keep.append(b)
+    if no_pic:
+        nums = ", ".join(str(n) for n in dict.fromkeys(no_pic))
+        warnings.append(f"Слайд {nums}: картинки пока нет — подставьте слайды из презентации." if len(no_pic) == 1 else
+                        f"Слайды {nums}: картинок пока нет — подставьте слайды из презентации.")
     t.blocks = keep
     if not t.blocks:
         raise LessonError("В ответе нет ни этапов, ни плашек — попросите нейросеть ответить по формату из промпта.")

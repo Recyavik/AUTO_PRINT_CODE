@@ -42,12 +42,16 @@ _ROLE_BY_NAME = {**{k: k for k in ROLES}, **{v[1].lower(): k for k, v in ROLES.i
                  "ловушки": "trap", "вывод": "output", "подсказка": "hint", "домашка": "homework", "цель": "goal"}
 
 _STAGE = re.compile(r"^##\s+(.+?)\s*$")
-_STAGE_TAIL = re.compile(r"\s*(?:[·—–-]\s*|\()(\d+)\s*мин(?:ут[аы]?|\.)?\)?(?:\s*·\s*(\S+))?\s*$", re.I)
+# «· 10 мин», «(10 мин)», «— 10 минут» [«· перерыв» | «· зарядка» | «· зарядка: Гимнастика для глаз»]
+_STAGE_TAIL = re.compile(r"\s*(?:[·—–-]\s*|\()(\d+)\s*мин(?:ут[аы]?|\.)?\)?(?:\s*·\s*([^\s:·]+)(?:\s*:\s*([^·]+?))?)?\s*$",
+                         re.I)
+PHOTO_SRC = {"фото", "photo", "?", ""}      # ![что на картинке](фото) — место: «Нужна картинка: …»
+_SLIDE_SRC = re.compile(r"^slide:\s*(\d{1,4})$", re.I)
 _PART = re.compile(r"^#\s+(.+?)\s*$")
 _CALLOUT = re.compile(r"^\[!([^\]]+)\]\s*(.*)$")
 _FENCE = re.compile(r"^(`{3,}|~{3,})\s*([^\s`]*)\s*(.*)$")
 _SLIDE_CAP = re.compile(r"^Слайд\s+(\d{1,4})(?:\s*[·—:-]\s*(.*))?$", re.I)
-_IMAGE = re.compile(r"^!\[((?:[^\]\\]|\\.)*)\]\((<[^>]+>|[^)\s]+)\)\s*$")
+_IMAGE = re.compile(r"^!\[((?:[^\]\\]|\\.)*)\]\((<[^>]+>|[^)\s]*)\)\s*$")
 _NOTE = re.compile(r"^(\*|_)([^*_].*?)\1\s*$")
 _ATTR = re.compile(r'(\w+)="([^"]*)"')
 
@@ -67,9 +71,21 @@ def _image_path(rel: str) -> str:
     return f"<{rel}>" if re.search(r"[\s()<>]", rel) else rel
 
 
+def stage_line(b: Block) -> str:
+    """Строка этапа: «## Зарядка · 3 мин · зарядка: Гимнастика для глаз» (тот же вид — в промпте нейросети)."""
+    head = f"## {(b.title or 'Этап').strip()} · {b.minutes} мин"
+    if b.stage_kind in KIND_WORDS:
+        head += f" · {KIND_WORDS[b.stage_kind]}"
+        if b.stage_kind == "exercise" and b.exercise.strip():
+            head += f": {b.exercise.strip()}"
+    return head
+
+
 def to_md(t: Template, media_prefix: str, copy_image=None) -> str:
     """Урок → текст .md. copy_image(block) → путь картинки для файла (None — оставить как есть)."""
     out = ["---", f"title: {t.title}"]
+    if t.kind == storage.KIND_PLAN:
+        out.append(f"kind: {storage.KIND_PLAN}")
     if t.start:
         out.append(f"start: {t.start}")
     out += ["---", ""]
@@ -79,10 +95,7 @@ def to_md(t: Template, media_prefix: str, copy_image=None) -> str:
             if b.part and b.part != part:
                 out += [f"# {b.part}", ""]
                 part = b.part
-            head = f"## {(b.title or 'Этап').strip()} · {b.minutes} мин"
-            if b.stage_kind in KIND_WORDS:
-                head += f" · {KIND_WORDS[b.stage_kind]}"
-            out.append(head)
+            out.append(stage_line(b))
             if b.text.strip():
                 out.append(f"*{b.text.strip()}*")
             out.append("")
@@ -96,12 +109,13 @@ def to_md(t: Template, media_prefix: str, copy_image=None) -> str:
             out += [f"{fence}{b.lang or 'text'}" + (" " + " ".join(attrs) if attrs else ""), b.text, fence, ""]
         elif b.type == BLOCK_IMAGE:
             src = (b.text or "").strip()
-            if not src:
-                continue
-            rel = copy_image(b) if copy_image else None
             cap = (b.title or "").replace("]", "\\]")
             if b.slide:                     # слайд презентации: номер — в подписи («Слайд 3 · План»)
                 cap = f"Слайд {b.slide}" + (f" · {cap}" if cap else "")
+            if not src:                     # место: слайда ещё нет — slide:N, картинки нет — «фото»
+                out += [f"![{cap}](slide:{b.slide})" if b.slide else f"![{cap}](фото)", ""]
+                continue
+            rel = copy_image(b) if copy_image else None
             out += [f"![{cap}]({_image_path(rel or src)})", ""]
         else:
             role = b.role if b.role in ROLES else "text"
@@ -189,6 +203,8 @@ def parse(text: str, base: Path | None, title: str, local_images: bool = True) -
                         t.title = v.strip()
                     elif k.strip() == "start":
                         t.start = v.strip()
+                    elif k.strip() == "kind" and v.strip() == storage.KIND_PLAN:
+                        t.kind = storage.KIND_PLAN
                 i = j + 1
                 break
     blocks: list[Block] = []
@@ -246,11 +262,12 @@ def parse(text: str, base: Path | None, title: str, local_images: bool = True) -
         if sm:
             flush()
             head = sm.group(1)
-            minutes, kind = 0, ""
+            minutes, kind, video = 0, "", ""
             tail = _STAGE_TAIL.search(head)
             if tail:
                 minutes = int(tail.group(1))
                 kind = _KIND_BY_WORD.get((tail.group(2) or "").lower(), "")
+                video = (tail.group(3) or "").strip() if kind == "exercise" else ""
                 head = head[:tail.start()]
             note = ""
             j = i + 1
@@ -259,7 +276,7 @@ def parse(text: str, base: Path | None, title: str, local_images: bool = True) -
                 j += 1
             heading = None
             blocks.append(Block(BLOCK_STAGE, note, title=head.strip(), minutes=min(minutes, 1440),
-                                stage_kind=kind, part=part))
+                                stage_kind=kind, part=part, exercise=video[:200]))
             i = j
             continue
         pm = _PART.match(ln)
@@ -278,7 +295,16 @@ def parse(text: str, base: Path | None, title: str, local_images: bool = True) -
             slide_no = int(sm.group(1)) if sm else 0
             if sm:
                 cap = sm.group(2) or ""
-            blocks.append(Block(BLOCK_IMAGE, _resolve_image(im.group(2), base, local_images), title=cap, slide=slide_no))
+            src = im.group(2)
+            src = src[1:-1] if src.startswith("<") and src.endswith(">") else src
+            ss = _SLIDE_SRC.match(src.strip())
+            if ss:                              # ![Слайд 4](slide:4) — место слайда: картинку подставят из презентации
+                blocks.append(Block(BLOCK_IMAGE, "", title=cap, slide=int(ss.group(1))))
+            elif src.strip().casefold() in PHOTO_SRC:     # ![Кот у ноутбука](фото) — место: «Нужна картинка»
+                blocks.append(Block(BLOCK_IMAGE, "", title=cap, slide=slide_no))
+            else:
+                blocks.append(Block(BLOCK_IMAGE, _resolve_image(im.group(2), base, local_images), title=cap,
+                                    slide=slide_no))
             i += 1
             continue
         para.append(ln)

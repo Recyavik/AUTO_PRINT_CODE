@@ -338,18 +338,18 @@ def apply_chat_answer(t: Template, text: str) -> tuple[Template, list[str]]:
     foreign = 0
     for b in new.blocks:
         if b.type == BLOCK_IMAGE:
-            m = re.fullmatch(r"slide:(\d+)", (b.text or "").strip())
-            n = int(m.group(1)) if m else b.slide
-            if not n and not re.match(r"https?://", (b.text or "").strip(), re.I):
+            src_text = (b.text or "").strip()
+            n = b.slide
+            if src_text and not re.match(r"https?://", src_text, re.I):
                 foreign += 1               # путь к файлу из ответа чата — не открываем
                 continue
-            if n:
+            if n and not src_text:         # место «Слайд N» — картинка слайда N этого урока
                 src = have.get(n)
                 if src is None:
-                    missing.append(n)
-                    continue
-                b.text, b.slide, b.title = src.text, n, b.title if b.title and not b.title.startswith("Слайд") else src.title
-                used.append(n)
+                    missing.append(n)      # такого слайда нет — место остаётся
+                else:
+                    b.text, b.title = src.text, b.title or src.title
+                    used.append(n)
         keep.append(b)
     new.blocks = keep
     missing = list(dict.fromkeys(missing))
@@ -357,7 +357,7 @@ def apply_chat_answer(t: Template, text: str) -> tuple[Template, list[str]]:
         notes.append(f"Картинки из ответа с путями к файлам пропущены ({foreign}) — вставьте их сами.")
     if missing:
         notes.append(", ".join(f"Слайда {n}" if i == 0 else f"слайда {n}" for i, n in enumerate(missing))
-                     + " нет в презентации — пропущено.")
+                     + " нет в презентации — вместо него место для картинки.")
     skipped = [n for n in sorted(have) if n not in used]
     if skipped:
         notes.append("Нейросеть пропустила: " + ", ".join(map(str, skipped)) + ".")

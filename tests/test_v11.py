@@ -596,7 +596,7 @@ class ChatPromptTest(unittest.TestCase):
         from autoprint import slides
         base = slides_lesson()
         new, notes = slides.apply_chat_answer(base, CHAT_ANSWER)
-        imgs = [(b.slide, b.text) for b in new.blocks if b.type == BLOCK_IMAGE]
+        imgs = [(b.slide, b.text) for b in new.blocks if b.type == BLOCK_IMAGE and b.text]   # 0.12: слайд 5 — место
         self.assertEqual(imgs, [(1, base.find_block("sl1").text), (2, base.find_block("sl2").text)])
         self.assertEqual(new.title, "Функции по слайдам")
         self.assertEqual({b.id for b in new.blocks} & {b.id for b in base.blocks}, set())     # копия, свои id
@@ -641,7 +641,8 @@ class ChatPromptTest(unittest.TestCase):
             self.assertEqual(t.title, "Функции по слайдам")
             self.assertEqual([b.title for b in t.blocks if b.type == BLOCK_STAGE], ["Вступление", "Разбор"])
             self.assertTrue(any(b.type == BLOCK_CODE and b.text == "print(1)" for b in t.blocks))
-            self.assertFalse(any(b.type == BLOCK_IMAGE for b in t.blocks))   # слайдов без PDF нет — не битые картинки
+            # слайды без PDF — места (пустой text), а не битые картинки
+            self.assertTrue(all(not b.text and b.slide for b in t.blocks if b.type == BLOCK_IMAGE))
 
     def test_chat_answer_pasted_whole(self):
         """Скопирован весь ответ чата — с фразой и строками ~~~markdown — во вкладку «Вставить»."""
@@ -971,7 +972,8 @@ class FinalReviewTest(unittest.TestCase):
         self.assertFalse(any("secret" in x or "evil" in x for x in imgs))
         self.assertTrue(any("картинк" in n.lower() for n in notes), notes)
         parsed = L.parse_lesson(text, slide=lambda n: None)
-        self.assertFalse(any(b.type == BLOCK_IMAGE for b in parsed.template.blocks))
+        # 0.12: слайд без PDF — место (пустой text), а не пропуск; файлов с компьютера по-прежнему нет
+        self.assertEqual([(b.text, b.slide) for b in parsed.template.blocks if b.type == BLOCK_IMAGE], [("", 1)])
         self.assertIsNone(storage.media_path("//evil-host/share/p.png"))
         self.assertIsNone(storage.media_path("\\\\evil-host\\share\\p.png"))
 
