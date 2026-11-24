@@ -25,7 +25,6 @@ sys.path.insert(0, str(ROOT))
 TMP = Path(tempfile.mkdtemp(prefix="autoprint-report-"))
 os.environ["AUTOPRINT_DATA"] = str(TMP / "data")
 import quiet  # noqa: E402,F401 — окна только в памяти, без трея и уведомлений
-SHOTS =Path(sys.argv[1]) if len(sys.argv) > 1 else Path(tempfile.mkdtemp(prefix="autoprint-report-shots-"))
 
 from autoprint import __version__, report, updater  # noqa: E402
 from autoprint.logs import LOG_DIR, LOG_FILE  # noqa: E402
@@ -226,10 +225,8 @@ def test_issue_url(rep: dict) -> None:
 
 
 def test_with_app() -> None:
-    from PySide6.QtCore import Qt
-    from PySide6.QtTest import QTest
-    from PySide6.QtWidgets import QApplication, QLabel
-    app = QApplication(sys.argv)
+    from PySide6.QtWidgets import QApplication
+    QApplication(sys.argv)
     quiet.patch()
     rep = report.collect("с окном")
     gui = rep["system"].get("gui")
@@ -239,64 +236,7 @@ def test_with_app() -> None:
                                    and isinstance(rep["audio"]["inputs"], list)))
     check("и с окном в отчёте нет личного", not leaks(report.to_markdown(rep)))
 
-    from autoprint.storage import Settings
-    from autoprint.ui import report_dialog
-    from autoprint.ui.report_dialog import ReportDialog
-    from autoprint.ui.theme import theme
-    theme.setup(app, "dark")
-    d = ReportDialog(None, Settings.load())
-    d.setAttribute(Qt.WidgetAttribute.WA_DontShowOnScreen, True)
-    d.show()
-    QTest.qWait(50)
-    d.desc.setPlainText(f"Нажал Ctrl+F9 — строки съехали. Мой профиль {PROFILE}")
-    QTest.qWait(400)   # предпросмотр обновляется с задержкой
-    pv = d.preview.toPlainText()
-    check("окно: описание попало в предпросмотр", "строки съехали" in pv and "%USERPROFILE%" in pv)
-    check("окно: в предпросмотре нет личного", not leaks(pv), ", ".join(leaks(pv)))
-    texts = "\n".join(lb.text() for lb in d.findChildren(QLabel))
-    check("окно: строка с последней ошибкой", "В журнале есть ошибка" in texts and "ValueError" in texts)
-    SHOTS.mkdir(parents=True, exist_ok=True)
-    shots = []
-    for mode in ("dark", "light"):
-        theme.set_mode(mode)
-        QTest.qWait(80)
-        p = SHOTS / f"report-dialog-{mode}.png"
-        d.grab().save(str(p))
-        shots.append(p)
-    check("окно: снимки в тёмной и светлой теме", all(p.is_file() and p.stat().st_size > 10_000 for p in shots))
-    for p in shots:
-        print("снимок:", p)
-
-    d.with_settings.setChecked(False)   # Switch сам шлёт toggled
-    pv = d.preview.toPlainText()
-    check("окно: без настроек — их нет в предпросмотре", "hotkey_toggle" not in pv and "строки съехали" in pv)
-    d.with_settings.setChecked(True)
-    check("окно: настройки вернулись", "hotkey_toggle" in d.preview.toPlainText())
-
-    zp = d.save_to(TMP / "out" / "из-окна.zip")
-    check("окно: отчёт сохранён в zip", zp is not None and zp.is_file() and d.saved_path == zp)
-
-    opened = []
-
-    class FakeServices:   # браузер не открываем — только запоминаем ссылку
-        @staticmethod
-        def openUrl(url) -> bool:
-            opened.append(bytes(url.toEncoded()).decode("ascii"))
-            return True
-    real = report_dialog.QDesktopServices
-    report_dialog.QDesktopServices = FakeServices
-    try:
-        d.open_github()
-    finally:
-        report_dialog.QDesktopServices = real
-    url = opened[0] if opened else ""
-    body = parse_qs(urlsplit(url).query).get("body", [""])[0]
-    check("окно: «Открыть на GitHub» — ссылка с именем файла", url.startswith("https://github.com/")
-          and len(url) < 6000 and "из-окна.zip" in body and "строки съехали" in body, url[:200])
-    check("окно: значок «bug» для заголовка окна", "bug" in report_dialog.icons.PATHS)
-    d.close()
-    d.deleteLater()
-    QTest.qWait(20)
+    # окно «Сообщить об ошибке» — с 1.0 лист в окне программы: tests/test_app_sheets.py (WindowSheetsTest)
 
 
 def main() -> int:

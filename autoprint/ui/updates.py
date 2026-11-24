@@ -1,19 +1,16 @@
-"""Обновления в интерфейсе: фоновая проверка и загрузка, окно «Доступно обновление».
+"""Обновления: фоновая проверка и загрузка (лист «Доступно обновление» — в окне программы, sheets.js).
 
 Собранная программа (.exe) ставит сборку из релиза: скачивание, проверка SHA-256 и распаковка — здесь,
 в фоне; замену файлов делает скрипт после выхода программы (см. updater.prepare_exe_update / relaunch).
 """
 from __future__ import annotations
 
-import html
 import logging
 import threading
 import time
 from pathlib import Path
 
-from PySide6.QtCore import QObject, Qt, QUrl, Signal
-from PySide6.QtGui import QDesktopServices
-from PySide6.QtWidgets import QDialog, QHBoxLayout, QLabel, QProgressBar, QPushButton, QTextBrowser, QVBoxLayout
+from PySide6.QtCore import QObject, Signal
 
 from .. import __version__, updater
 from ..storage import Settings
@@ -172,136 +169,3 @@ class UpdateManager(QObject):
             updater.apply(root, rel.version)
         self.applied = True
         return rel.version
-
-
-def _fmt_size(n: int) -> str:
-    return f"{n / 1_048_576:.1f} МБ" if n >= 1_048_576 else f"{n // 1024} КБ"
-
-
-class UpdateDialog(QDialog):
-    """Что нового + «Обновить и перезапустить» / «Пропустить эту версию» / «Позже»."""
-    restart_requested = Signal()
-
-    def __init__(self, manager: UpdateManager, rel: Release, parent=None) -> None:
-        super().__init__(parent)
-        self.m, self.rel = manager, rel
-        self.setWindowTitle("Доступно обновление")
-        self.setMinimumSize(560, 420)
-
-        head = QLabel(f"<h3>{rel.name}</h3>Установлена версия <b>{__version__}</b>, "
-                      f"доступна <b>{rel.version}</b>"
-                      + (f" от {rel.published}" if rel.published else "")
-                      + (" <span style='color:#d29922'>(бета)</span>" if rel.prerelease else "") + ".")
-        head.setTextFormat(Qt.TextFormat.RichText)
-        notes = QTextBrowser()
-        notes.setOpenExternalLinks(True)
-        notes.setMarkdown(rel.notes.strip() or "_Автор не добавил описание к этой версии._")
-
-        self.status = QLabel()
-        self.status.setWordWrap(True)
-        self.status.setTextFormat(Qt.TextFormat.RichText)
-        self.status.setOpenExternalLinks(True)
-        self.bar = QProgressBar()
-        self.bar.hide()
-        self._want_restart = False
-
-        self.btn_install = QPushButton()
-        self.btn_install.setDefault(True)
-        self.btn_install.clicked.connect(self._install)
-        skip = QPushButton("Пропустить эту версию")
-        skip.clicked.connect(self._skip)
-        later = QPushButton("Позже")
-        later.clicked.connect(self.reject)
-        row = QHBoxLayout()
-        row.addStretch(1)
-        row.addWidget(skip)
-        row.addWidget(later)
-        row.addWidget(self.btn_install)
-
-        lay = QVBoxLayout(self)
-        lay.addWidget(head)
-        lay.addWidget(QLabel("Что нового:"))
-        lay.addWidget(notes, 1)
-        lay.addWidget(self.status)
-        lay.addWidget(self.bar)
-        lay.addLayout(row)
-
-        manager.progress.connect(self._on_progress)
-        manager.ready.connect(self._on_ready)
-        manager.download_failed.connect(self._on_failed)
-        self._refresh()
-
-    def _refresh(self) -> None:
-        m = self.m
-        if not m.installable(self.rel):
-            self.btn_install.setText("Скачать…")
-            self.status.setText(html.escape(m.block_reason(self.rel) or FROZEN_NOTE))
-        elif m.staged and m.staged[0].version == self.rel.version:
-            self.btn_install.setText("Перезапустить и обновить")
-            if m.mode == MODE_FROZEN:
-                self.status.setText("Обновление скачано, контрольная сумма совпала. Программа закроется "
-                                    "на несколько секунд и откроется уже новой версией. "
-                                    "Ваши занятия и настройки не изменятся.")
-            else:
-                self.status.setText("Обновление скачано и проверено. Ваши занятия и настройки не изменятся.")
-        elif m.downloading:
-            self.btn_install.setText("Отменить загрузку")
-            self.bar.show()
-        else:
-            self.btn_install.setText("Обновить и перезапустить")
-            self.status.setText("Ваши занятия и настройки не изменятся.")
-
-    def _install(self) -> None:
-        m = self.m
-        if not m.installable(self.rel):
-            QDesktopServices.openUrl(QUrl(self.rel.page_url))
-            self.accept()
-        elif m.downloading:
-            m.cancel()
-        elif m.staged and m.staged[0].version == self.rel.version:
-            self.accept()
-            self.restart_requested.emit()
-        else:
-            self._want_restart = True
-            m.download(self.rel)
-            self._refresh()
-
-    def _skip(self) -> None:
-        self.m.settings.update_skip_version = self.rel.version
-        self.m.settings.save()
-        self.reject()
-
-    def _on_progress(self, stage: str, got: int, total: int) -> None:
-        self.bar.show()
-        self.bar.setMaximum(total or 0)   # 0 — «бегущая» полоса
-        self.bar.setValue(got if total else 0)
-        size = f": {_fmt_size(got)}" + (f" из {_fmt_size(total)}" if total else "") if got else "…"
-        self.status.setText(stage + size)
-
-    def _on_ready(self, rel: Release) -> None:
-        if rel.version != self.rel.version:
-            return
-        self.bar.hide()
-        self._refresh()
-        if self._want_restart:
-            self.accept()
-            self.restart_requested.emit()
-
-    def _on_failed(self, text: str) -> None:
-        self.bar.hide()
-        self._want_restart = False
-        self._refresh()
-        msg = f"<span style='color:#e5534b'>{html.escape(text)}</span>"
-        if self.m.mode == MODE_FROZEN:   # всегда остаётся ручной путь — страница релиза
-            msg += (f"<br>Новую версию можно скачать и вручную: "
-                    f"<a href='{html.escape(self.rel.page_url, quote=True)}'>страница релиза</a>.")
-        self.status.setText(msg)
-
-    def done(self, r: int) -> None:
-        for sig, slot in ((self.m.progress, self._on_progress), (self.m.ready, self._on_ready),
-                          (self.m.download_failed, self._on_failed)):
-            try:
-                sig.disconnect(slot)
-            except (RuntimeError, TypeError):
-                pass
-        super().done(r)

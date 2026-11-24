@@ -30,7 +30,7 @@ function connect(channel, onState) {
   return es;
 }
 
-let navSeq = -1, noticeSeq = -1, dropSeq = -1;
+let navSeq = -1, noticeSeq = -1, dropSeq = -1, sheetSeq = -1;
 export function now() { return Date.now() + (S._offset || 0); }   // часы программы
 
 function onApp(s) {
@@ -54,6 +54,12 @@ function onApp(s) {
     const first = dropSeq === -1;
     dropSeq = S.drop.seq;
     if (!first && S.drop.files && S.drop.files.length) emit("drop", S.drop.files);
+  }
+  if (S.sheet && S.sheet.seq !== sheetSeq) {
+    const first = sheetSeq === -1;
+    sheetSeq = S.sheet.seq;
+    // программа просит открыть лист; при первом подключении — только свежую просьбу (окно только загрузилось)
+    if (S.sheet.name && (!first || now() - S.sheet.t < 8000)) setTimeout(() => emit("sheet", { ...S.sheet }), 0);
   }
   emit("app", S);
   if (!window.__ready) { window.__ready = true; emit("ready", S); }

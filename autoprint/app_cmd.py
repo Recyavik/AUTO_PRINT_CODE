@@ -17,6 +17,13 @@ log = logging.getLogger(__name__)
 CALL_TIMEOUT_S = 600
 THREAD_CALLS = {"ai_check", "ai_models"}      # вызовы без окна и настроек Qt — в потоке сервера
 
+
+def open_url(url: str) -> bool:
+    """Открыть ссылку в браузере по умолчанию (тесты подменяют: браузер не открывается)."""
+    from PySide6.QtCore import QByteArray, QUrl
+    from PySide6.QtGui import QDesktopServices
+    return QDesktopServices.openUrl(QUrl.fromEncoded(QByteArray(url.encode("utf-8"))))
+
 # окна выбора файла: назначение → (заголовок, фильтр, несколько файлов)
 PICK = {
     "import": ("Импорт урока", None, True),
@@ -387,20 +394,45 @@ class AppCommands(QObject):
         return True
 
     def cmd_record_sound(self, _d: dict) -> None:
-        """«Записать звук клавиатуры…» (до листа записи в окне, Task 15 — прежнее окошко поверх окна программы)."""
-        from .ui.record_dialog import RecordDialog
-        self.app.hotkey_capture(True)
-        try:
-            dlg = RecordDialog(self.app.window, volume=max(40, self.app.settings.sound_volume))
-            dlg.exec()
-            key = dlg.style_key
-        finally:
-            self.app.hotkey_capture(False)
-        if key:
-            self.app.settings.sound_style = key
+        """«Записать звук клавиатуры…» — лист записи (RecordFlow)."""
+        self.app.open_record()
+
+    def call_record(self, d: dict):
+        """Шаги листа записи: op = monitor | quiet | start | stop | skip | preview | save | close."""
+        flow = self.app.record
+        op = str(d.get("op") or "")
+        if op == "close":
+            self.app.close_record()
+            return True
+        if flow is None:
+            raise ValueError("Запись уже закрыта")
+        kind = str(d.get("kind") or "")
+        device = d.get("device")
+        device = str(device) if device is not None else None
+        if op == "monitor":
+            return flow.monitor(device)
+        if op == "quiet":
+            flow.quiet()
+            return True
+        if op == "start":
+            return flow.start(kind, device)
+        if op == "stop":
+            flow.stop()
+            return True
+        if op == "skip":
+            flow.skip(kind)
+            return True
+        if op == "preview":
+            return flow.preview(kind)
+        if op == "save":
+            key = flow.save(str(d.get("name") or ""))
+            s = self.app.settings
+            s.sound_style = key
+            self.app.close_record()
             self.app.on_setting_changed("sound_style")
             self.app._notify("Свой звук сохранён и выбран. «Послушать» — как он звучит при печати.")
-        self.app.publish_now()
+            return key
+        raise ValueError("неизвестный шаг записи")
 
     def cmd_restart(self, _d: dict) -> None:
         self.app.restart_app()
@@ -416,6 +448,78 @@ class AppCommands(QObject):
 
     def cmd_report(self, _d: dict) -> None:
         self.app.open_report()
+
+    # ------------------------------------------------------------ «Сообщить об ошибке» (Task 15)
+    def _report(self, d: dict) -> dict:
+        from . import report
+        inc = bool(d.get("include_settings", True))
+        key = inc
+        if getattr(self, "_rep_key", None) != key:       # сбор (журнал, система) — не на каждую букву описания
+            self._rep, self._rep_key = report.collect(include_settings=inc, settings=self.app.settings), key
+        self._rep["description"] = report.sanitize(str(d.get("description") or "").strip())
+        return self._rep
+
+    def call_report(self, d: dict) -> dict:
+        """Отчёт для предпросмотра: markdown — всё, что уйдёт автору; crash — последняя ошибка из журнала."""
+        from . import report
+        if d.get("fresh"):
+            self._rep_key = None
+        r = self._report(d)
+        crash = report.last_crash(r)
+        return {"markdown": report.to_markdown(r), "log_lines": report.LOG_TAIL_LINES,
+                "crash": {"time": r["crashes"][0]["time"], "text": report.crash_summary(crash)[:150]} if crash else None,
+                "zip_name": report.default_zip_name(), "desktop": str(_desktop())}
+
+    def call_report_save(self, d: dict) -> dict:
+        from . import report
+        path = Path(str(d.get("path") or ""))
+        if not str(path) or str(path) == ".":
+            raise ValueError("Не указано, куда сохранить")
+        if path.suffix.lower() != ".zip":
+            path = path.with_name(path.name + ".zip")
+        try:
+            saved = report.save_zip(self._report(d), path)
+        except OSError as e:
+            raise ValueError(f"Не удалось сохранить отчёт: {e}") from None
+        self._rep_saved = saved
+        return {"path": str(saved), "name": saved.name, "folder": saved.parent.name}
+
+    def call_report_github(self, d: dict) -> dict:
+        """«Открыть на GitHub»: новое сообщение (краткий текст в ссылке, файл .zip — приложить вручную)."""
+        from PySide6.QtGui import QGuiApplication
+        from . import report
+        r = self._report(d)
+        saved = getattr(self, "_rep_saved", None)
+        if saved is not None and not Path(saved).exists():
+            saved = None
+        url = report.issue_url(r, report.default_title(r), saved)
+        if not open_url(url):
+            QGuiApplication.clipboard().setText(url)
+            return {"ok": False}
+        return {"ok": True, "saved": saved is not None}
+
+    def call_report_copy(self, d: dict) -> bool:
+        from PySide6.QtGui import QGuiApplication
+        from . import report
+        QGuiApplication.clipboard().setText(report.to_markdown(self._report(d)))
+        return True
+
+    def cmd_open_log_folder(self, _d: dict) -> None:
+        from .report import open_log_folder
+        open_log_folder()
+
+    # ------------------------------------------------------------ «Доступно обновление» (Task 15)
+    def cmd_update_install(self, _d: dict) -> None:
+        self.app.update_install()
+
+    def call_update_skip(self, _d: dict) -> bool:
+        rel = self.app.updates.latest
+        if rel is None:
+            return False
+        self.app.settings.update_skip_version = rel.version
+        self.app.save_settings()
+        self.app.publish_now()
+        return True
 
     def call_ai_set(self, d: dict) -> dict:
         """Нейросеть (which: main | backup): provider, url, key (шифруется DPAPI), model. → {problem}. Ключ назад
@@ -799,6 +903,14 @@ class AppCommands(QObject):
     def call_pick_save(self, d: dict) -> str:
         """Куда сохранить: системное окно → путь или "" (передумали)."""
         name = "".join(c for c in str(d.get("name") or "") if c not in '\\/:*?"<>|').strip()
+        if d.get("dir") and name:                         # папка по умолчанию (отчёт — на Рабочий стол)
+            name = str(Path(str(d["dir"])) / name)
         path, _ = QFileDialog.getSaveFileName(self.app.window, str(d.get("title") or "Сохранить"), name,
                                               str(d.get("filter") or "Все файлы (*.*)"))
         return str(path or "")
+
+
+def _desktop() -> Path:
+    from PySide6.QtCore import QStandardPaths
+    d = QStandardPaths.writableLocation(QStandardPaths.StandardLocation.DesktopLocation)
+    return Path(d) if d else Path.home()

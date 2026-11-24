@@ -86,6 +86,11 @@ class App(QObject):
         self.nav = {"seq": 0, "hash": ""}   # просьба странице открыть экран (seq растёт)
         self.drop_info = {"seq": 0, "files": []}   # файлы, перетащенные в окно
         self.update_info: dict | None = None
+        self.update_progress: dict | None = None   # лист «Доступно обновление»: этап и сколько скачано
+        self.update_error = ""
+        self._update_restart = False        # «Обновить и перезапустить»: перезапуск, как только скачается
+        self.sheet_req = {"seq": 0, "name": "", "text": "", "t": 0}   # просьба странице открыть лист
+        self.record = None                  # RecordFlow, пока открыт лист «Записать звук клавиатуры»
         from .jobs import Jobs
         self.jobs = Jobs(self)              # фоновые работы: нейросеть составляет урок, качаются картинки
         self.jobs.changed.connect(lambda: self.changed.emit("jobs"))
@@ -113,7 +118,8 @@ class App(QObject):
         self.updates.checked.connect(self._on_update_checked)
         self.updates.check_failed.connect(self._on_update_check_failed)
         self.updates.ready.connect(self._on_update_ready)
-        self.updates.download_failed.connect(lambda t: log.warning("Обновление не скачано: %s", t))
+        self.updates.progress.connect(self._on_update_progress)
+        self.updates.download_failed.connect(self._on_update_failed)
         self.relaunch_requested = False     # app.py перезапустит программу после выхода
         self._auto_checked_once = False
         self._quitting = False
@@ -704,10 +710,36 @@ class App(QObject):
 
     _restart_app = restart_app
 
+    # ================================================================ листы окна
+    def open_sheet(self, name: str, text: str = "") -> None:
+        """Попросить страницу открыть лист (update | report | record | crash) и показать окно."""
+        self.sheet_req = {"seq": self.sheet_req["seq"] + 1, "name": name, "text": text, "t": int(time.time() * 1000)}
+        self.show_window()
+        self.publish_now()
+
     def open_report(self) -> None:
-        """До листа «Сообщить об ошибке» (Task 15) — прежнее окно поверх окна программы."""
-        from .ui.report_dialog import show_report_dialog
-        show_report_dialog(self.window, self.settings)
+        self.open_sheet("report")
+
+    def show_crash(self, text: str) -> None:
+        """Внутренняя ошибка — лист «Внутренняя ошибка: …» с «Сообщить об ошибке…»."""
+        self.open_sheet("crash", text)
+
+    def open_record(self) -> None:
+        """«Записать звук клавиатуры…»: запись без окна (RecordFlow), шаги — лист; хоткеи на это время сняты."""
+        from .record_flow import RecordFlow
+        if self.record is None:
+            self.record = RecordFlow(max(40, self.settings.sound_volume), parent=self)
+            self.record.changed.connect(self.publish_now)
+            self.hotkey_capture(True)
+        self.open_sheet("record")
+
+    def close_record(self) -> None:
+        flow, self.record = self.record, None
+        if flow is not None:
+            flow.close()
+            flow.deleteLater()
+            self.hotkey_capture(False)
+        self.publish_now()
 
     def _open_log(self) -> None:
         import os
@@ -903,8 +935,23 @@ class App(QObject):
         if manual:
             self._notify(text, warn=True)
 
+    def _on_update_progress(self, stage: str, got: int, total: int) -> None:
+        self.update_progress = {"stage": stage, "got": got, "total": total}
+        self.update_error = ""
+        self.changed.emit("update")
+
+    def _on_update_failed(self, text: str) -> None:
+        log.warning("Обновление не скачано: %s", text)
+        self.update_progress, self.update_error, self._update_restart = None, text, False
+        self.changed.emit("update")
+
     def _on_update_ready(self, rel) -> None:
+        self.update_progress, self.update_error = None, ""
         self._show_update_button(rel)
+        if self._update_restart:
+            self._update_restart = False
+            self.install_update_and_restart()
+            return
         if self.settings.update_mode == MODE_AUTO:
             text = f"Версия {rel.version} скачана и установится при выходе из программы."
         else:
@@ -926,15 +973,29 @@ class App(QObject):
         self.changed.emit("update")
 
     def open_update_dialog(self) -> None:
-        """До листа «Обновление» (Task 15) — прежнее окно поверх окна программы."""
-        from .ui.updates import UpdateDialog
-        rel = self.updates.latest
-        if rel is None:
+        """Лист «Доступно обновление» (найденной версии ещё нет — сначала проверить)."""
+        if self.updates.latest is None:
             self.check_updates(manual=True)
             return
-        dlg = UpdateDialog(self.updates, rel, self.window)
-        dlg.restart_requested.connect(self.install_update_and_restart)
-        dlg.exec()
+        self.open_sheet("update")
+
+    def update_install(self) -> None:
+        """Главная кнопка листа: скачать вручную / отменить загрузку / перезапустить / скачать и перезапустить."""
+        from .app_cmd import open_url
+        m, rel = self.updates, self.updates.latest
+        if rel is None:
+            return
+        if not m.installable(rel):
+            open_url(rel.page_url)
+        elif m.downloading:
+            m.cancel()
+        elif m.staged and m.staged[0].version == rel.version:
+            self.install_update_and_restart()
+        else:
+            self._update_restart = True
+            self.update_error = ""
+            m.download(rel)
+        self.changed.emit("update")
 
     def install_update_and_restart(self) -> None:
         if self._busy_typing():

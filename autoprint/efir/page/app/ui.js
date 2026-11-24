@@ -191,7 +191,9 @@ export function sheet(title, body, buttons, o = {}) {
       scrim.remove();
       resolve(v);
     };
-    const api = { done, box };
+    // закрыть «мимо кнопок» (Esc, щелчок по фону): o.beforeClose() может спросить и не дать закрыть
+    const tryClose = async () => { if (!o.beforeClose || (await o.beforeClose()) !== false) done(null); };
+    const api = { done, box, tryClose };
     let first = null, auto = null;
     for (const [i, b] of (buttons || []).entries()) {
       if (b.spacer) { foot.append(h("span", { class: "spacer" })); continue; }
@@ -202,7 +204,7 @@ export function sheet(title, body, buttons, o = {}) {
     }
     if (!foot.childElementCount) foot.remove();
     scrim.append(box);
-    scrim.addEventListener("mousedown", (e) => { if (e.target === scrim && o.dismiss !== false) done(null); });
+    scrim.addEventListener("mousedown", (e) => { if (e.target === scrim && o.dismiss !== false) tryClose(); });
     document.body.append(scrim);
     sheets.push(api);
     if (o.onOpen) o.onOpen(api);
@@ -223,7 +225,7 @@ export function ask(text, o = {}) {
 document.addEventListener("keydown", (e) => {
   if (e.key !== "Escape") return;
   if (openPop) { closePop(); e.stopPropagation(); return; }
-  if (sheets.length) { sheets[sheets.length - 1].done(null); e.stopPropagation(); e.preventDefault(); }
+  if (sheets.length) { sheets[sheets.length - 1].tryClose(); e.stopPropagation(); e.preventDefault(); }
 }, true);
 export function sheetOpen() { return sheets.length > 0; }
 

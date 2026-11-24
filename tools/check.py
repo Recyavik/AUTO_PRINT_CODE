@@ -20,7 +20,7 @@ NPM = "npm.cmd" if os.name == "nt" else "npm"
 # тихие тесты-сценарии: окна — только в памяти, без трея, уведомлений и настоящих нажатий
 SCRIPT_TESTS = ["test_steps", "test_engine", "test_human", "test_lesson_ai", "test_report", "test_sounds", "test_v10", "test_v11", "test_v12",
                 "test_updater", "test_efir", "test_lesson", "test_v09", "ui_regress",
-                "test_app_shell", "test_app_core", "test_app_page", "test_app_library", "test_app_lesson", "test_app_edit", "test_app_sheets", "test_wizard_core", "test_app_wizard", "test_app_compact", "test_media_copy", "test_app_efir", "test_app_settings"]
+                "test_app_shell", "test_app_core", "test_app_page", "test_app_library", "test_app_lesson", "test_app_edit", "test_app_sheets", "test_wizard_core", "test_app_wizard", "test_app_compact", "test_media_copy", "test_app_efir", "test_app_settings", "test_record_flow"]
 
 
 def run(title: str, cmd: list[str], cwd: Path = ROOT) -> bool:

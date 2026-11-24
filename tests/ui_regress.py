@@ -57,7 +57,7 @@ def pump(seconds: float = 0.2) -> None:
 class StraySpy(QObject):
     """Виджет, показанный самостоятельным окном (setVisible(True)/show() до вставки в родителя), мелькает
     на панели задач. Ждём только настоящие окна программы, меню и подсказки."""
-    EXPECTED = ("AppWindow", "ReportDialog", "QMenu", "QTipLabel", "QComboBoxPrivateContainer")
+    EXPECTED = ("AppWindow", "QMenu", "QTipLabel", "QComboBoxPrivateContainer")
 
     def __init__(self) -> None:
         super().__init__()
@@ -95,13 +95,8 @@ def main() -> int:
         pump()
     check("смена темы без ошибок", not errors, errors[0].splitlines()[-1] if errors else "")
 
-    # окно «Сообщить об ошибке» (до листа в окне) — без лишних окон на панели задач
-    from autoprint.ui.report_dialog import ReportDialog
-    d = ReportDialog(win.window, s)
-    d.setAttribute(Qt.WidgetAttribute.WA_DontShowOnScreen, True)
-    d.show()
-    pump()
-    d.close()
+    # «Сообщить об ошибке» — лист в окне (1.0): отдельных окон на панели задач нет
+    win.open_report()
     pump()
     check("окно программы и отчёт открываются без лишних окон на панели задач", not spy.stray,
           f"{len(spy.stray)}: {', '.join(sorted(set(spy.stray)))[:200]}")

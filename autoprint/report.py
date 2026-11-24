@@ -1,6 +1,6 @@
 """Отчёт об ошибке: версии, система, обезличенные настройки и журнал — для сообщения автору.
 
-Без виджетов: окно — ui/report_dialog.py. Qt используется, только если уже есть QGuiApplication
+Без виджетов: лист «Сообщить об ошибке» — в окне программы (sheets.js, app_cmd.call_report*). Qt используется, только если уже есть QGuiApplication
 (экраны, звуковые устройства); без него отчёт собирается тоже.
 
 Приватность. В отчёт НЕ попадают:
@@ -455,6 +455,13 @@ def collect(description: str = "", include_settings: bool = True, settings: Sett
         "log_lines": len(tail),
     }
     return report
+
+
+def open_log_folder() -> None:
+    """Открыть папку с журналом работы (data/logs) в Проводнике."""
+    from .logs import LOG_DIR
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
+    os.startfile(LOG_DIR)
 
 
 def last_crash(report: dict) -> str | None:

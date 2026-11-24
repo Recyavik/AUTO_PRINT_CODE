@@ -6,6 +6,7 @@ import os
 import signal
 import sys
 import threading
+from pathlib import Path
 
 from PySide6.QtCore import QLockFile
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
@@ -70,27 +71,35 @@ def main() -> int:
 
     from autoprint.logs import setup_logging
     crash_box_open = False
+    live: dict = {}                       # программа, когда она создана (окно со страницей — лист вместо окошка)
 
     def on_crash(text: str) -> None:
         nonlocal crash_box_open
-        # окно можно показать только из GUI-потока; ошибки фоновых потоков остаются в журнале.
-        # Одна и та же ошибка может повторяться — второе окно поверх первого не показываем
+        # показать можно только из GUI-потока; ошибки фоновых потоков остаются в журнале.
+        # Одна и та же ошибка может повторяться — второе окошко поверх первого не показываем
         if threading.current_thread() is not threading.main_thread() or crash_box_open:
             return
-        crash_box_open = True
+        prog_ = live.get("prog")
+        if prog_ is not None and getattr(prog_.window, "_loaded", False):
+            prog_.show_crash(text)        # лист «Внутренняя ошибка: …» с «Сообщить об ошибке…»
+            return
+        crash_box_open = True             # страница окна ещё не загрузилась — системное окошко
         try:
             box = QMessageBox(QMessageBox.Icon.Critical, APP_NAME,
-                              f"Внутренняя ошибка: {text}\n\nПодробности — в журнале. Сообщите об ошибке — "
-                              "отчёт без личных данных поможет её исправить.", parent=QApplication.activeWindow())
-            report_btn = box.addButton("Сообщить об ошибке…", QMessageBox.ButtonRole.ActionRole)
+                              f"Внутренняя ошибка: {text}\n\nПодробности — в журнале. Отчёт без личных данных "
+                              "поможет её исправить.", parent=QApplication.activeWindow())
+            save_btn = box.addButton("Сохранить отчёт на Рабочий стол", QMessageBox.ButtonRole.ActionRole)
             box.addButton("Закрыть", QMessageBox.ButtonRole.RejectRole)
             box.exec()
-            if box.clickedButton() is report_btn:
+            if box.clickedButton() is save_btn:
                 try:
-                    from autoprint.ui.report_dialog import show_report_dialog
-                    show_report_dialog(QApplication.activeWindow(), None)   # None → настройки из settings.json
-                except Exception:   # иначе ошибку окна отчёта молча проглотил бы обработчик исключений
-                    logging.getLogger("autoprint.app").exception("Окно «Сообщить об ошибке» не открылось")
+                    from PySide6.QtCore import QStandardPaths
+                    from autoprint import report
+                    desk = QStandardPaths.writableLocation(QStandardPaths.StandardLocation.DesktopLocation)
+                    path = report.save_zip(report.collect(), Path(desk or Path.home()) / report.default_zip_name())
+                    QMessageBox.information(None, APP_NAME, f"Отчёт сохранён: {path}\n\nПришлите этот файл автору.")
+                except Exception:   # иначе ошибку сохранения молча проглотил бы обработчик исключений
+                    logging.getLogger("autoprint.app").exception("Отчёт об ошибке не сохранён")
         finally:
             crash_box_open = False
 
@@ -116,6 +125,7 @@ def main() -> int:
     app.installEventFilter(styler)
     app.setWindowIcon(logo.make_icon(logo.APP))   # и для диалогов
     prog = App(settings, store)
+    live["prog"] = prog
     win = prog.window
     icon_file = DATA_DIR / "autoprintcode.ico"
     if logo.save_ico(icon_file):

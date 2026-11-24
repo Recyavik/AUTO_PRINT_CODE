@@ -1,5 +1,6 @@
 """Меню урока одним списком и листы урока: экспорт (формат, галочки .autoprint с размерами), печать и PDF, план урока,
-ответ нейросети, «Подставить слайды», «Разложить по этапам».
+ответ нейросети, «Подставить слайды», «Разложить по этапам». Листы окна: обновление, «Сообщить об ошибке», запись
+звука клавиатуры, внутренняя ошибка.
 
     .venv\\Scripts\\python.exe tests\\test_app_sheets.py
 """
@@ -238,6 +239,208 @@ class SheetsTest(AppPage):
         self.assertEqual(labels[0], "Открыть")
         self.assertEqual(labels[1:], ["Переименовать", "Дублировать", "Экспорт…", "Печать или PDF…", "План урока…",
                                       "Обновить по ответу нейросети…", "Удалить…"])
+
+
+# ================================================================ Task 15: листы окна — обновление, отчёт, запись, сбой
+
+class WindowSheetsTest(AppPage):
+    port = 18986
+    templates = staticmethod(lessons)
+    route = "#/lessons"
+
+    def setUp(self):
+        self.go("#/lessons", "lessons")
+        self.opened: list[str] = []
+        from autoprint import app_cmd
+        self.patch(app_cmd, "open_url", lambda url: self.opened.append(url) or True)
+
+    def tearDown(self):
+        self.js("window.appUI.closePop(); document.querySelectorAll('.scrim').forEach(s => s.remove())")
+        if self.app.record is not None:
+            self.app.close_record()
+        super().tearDown()
+
+    def patch(self, obj, name, fn):
+        old = getattr(obj, name)
+        setattr(obj, name, fn)
+        self.addCleanup(setattr, obj, name, old)
+
+    def sheet(self) -> str:
+        self.assertTrue(self.wait_js("!!document.querySelector('.scrim .sheet')"))
+        return self.js("[...document.querySelectorAll('.scrim .sheet')].pop().textContent")
+
+    def sheet_has(self, text: str, timeout: float = 5) -> bool:
+        return self.wait_js(f"[...document.querySelectorAll('.scrim .sheet')].some(s => s.textContent.includes({text!r}))", timeout)
+
+    def sheet_click(self, text: str):
+        f = f"[...document.querySelectorAll('.scrim .sheet button')].filter(b => b.textContent.trim() === {text!r} && !b.disabled)"
+        self.assertTrue(self.wait_js(f"{f}.length > 0"), text)
+        self.js(f"{f}.pop().click()")
+
+    def no_sheet(self) -> bool:
+        return self.wait_js("!document.querySelector('.scrim .sheet')")
+
+    # ---------------------------------------------------------------- обновление
+    def release(self):
+        from autoprint.updater import Release
+        return Release("9.9.9", "v9.9.9", "AutoPrintCode 9.9.9", "## Что нового\n\n- Быстрее печать", "https://example.org/rel",
+                       "", "2026-11-25")
+
+    def test_update_sheet_buttons_by_state(self):
+        up = self.app.updates
+        rel = self.release()
+        self.patch(up, "latest", rel)
+        self.patch(up, "installable", lambda r: True)
+        started = []
+        self.patch(up, "download", lambda r: started.append(r.version))
+        self.app.open_update_dialog()
+        text = self.sheet()
+        self.assertIn("Доступно обновление", text)
+        self.assertIn("9.9.9", text)
+        self.assertIn("Быстрее печать", text)
+        self.sheet_click("Обновить и перезапустить")
+        self.assertTrue(self.wait_py(lambda: started == ["9.9.9"]))
+        up.downloading = True
+        self.app.update_progress = {"stage": "Загрузка", "got": 1048576, "total": 4194304}
+        self.app.publish_now()
+        self.assertTrue(self.sheet_has("Отменить загрузку"))
+        self.assertTrue(self.sheet_has("Загрузка: 1.0 МБ из 4.0 МБ"))
+        up.downloading = False
+        self.patch(up, "staged", (rel, Path(".")))
+        self.app.update_progress = None
+        self.app.publish_now()
+        self.assertTrue(self.sheet_has("Перезапустить и обновить"))
+        restarted = []
+        self.patch(self.app, "install_update_and_restart", lambda: restarted.append(1))
+        self.sheet_click("Перезапустить и обновить")
+        self.assertTrue(self.wait_py(lambda: restarted == [1]))
+        self.assertTrue(self.no_sheet())
+
+    def test_update_sheet_manual_download_and_skip(self):
+        up = self.app.updates
+        self.patch(up, "latest", self.release())
+        self.patch(up, "installable", lambda r: False)
+        self.patch(up, "block_reason", lambda r: "В выпуске нет сборки для Windows.")
+        self.app.open_update_dialog()
+        self.assertTrue(self.sheet_has("В выпуске нет сборки"))
+        self.sheet_click("Скачать…")
+        self.assertTrue(self.wait_py(lambda: self.opened == ["https://example.org/rel"]))
+        self.assertTrue(self.no_sheet())
+        self.app.open_update_dialog()
+        self.sheet()
+        self.sheet_click("Пропустить эту версию")
+        self.assertTrue(self.wait_py(lambda: self.app.settings.update_skip_version == "9.9.9"))
+        self.assertTrue(self.no_sheet())
+        self.app.settings.update_skip_version = ""
+
+    # ---------------------------------------------------------------- сообщить об ошибке
+    def test_report_sheet_preview_and_save(self):
+        from autoprint.logs import LOG_FILE
+        LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
+        with LOG_FILE.open("a", encoding="utf-8") as f:
+            f.write("2026-11-25 10:00:00,000 CRITICAL MainThread autoprint: Необработанное исключение\n"
+                    "Traceback (most recent call last):\n  File \"x.py\", line 1, in <module>\nValueError: boom\n")
+        self.app.open_report()
+        text = self.sheet()
+        self.assertIn("Сообщить об ошибке", text)
+        self.assertTrue(self.sheet_has("ValueError: boom"))                      # строка с последней ошибкой
+        self.js("{ const t = document.querySelector('#repDesc'); t.value = 'Нажал Ctrl+F9 — строки съехали'; "
+                "t.dispatchEvent(new Event('input', {bubbles: true})); }")
+        self.assertTrue(self.wait_js("document.querySelector('#repPreview').textContent.includes('строки съехали')"))
+        self.assertTrue(self.wait_js("document.querySelector('#repPreview').textContent.includes('hotkey_toggle')"))
+        self.click("#repSettings")
+        self.assertTrue(self.wait_js("!document.querySelector('#repPreview').textContent.includes('hotkey_toggle')"))
+        out = TMP / "из-окна.zip"
+        self.patch(self.app.commands, "call_pick_save", lambda d: str(out))
+        self.sheet_click("Сохранить отчёт…")
+        self.assertTrue(self.wait_py(lambda: out.is_file()))
+        with zipfile.ZipFile(out) as z:
+            self.assertTrue(any("строки съехали" in z.read(n).decode("utf-8", "replace") for n in z.namelist() if n.endswith(".md")))
+        self.sheet_click("Открыть на GitHub")
+        self.assertTrue(self.wait_py(lambda: len(self.opened) == 1))
+        from urllib.parse import parse_qs, urlsplit
+        body = parse_qs(urlsplit(self.opened[0]).query).get("body", [""])[0]
+        self.assertIn("из-окна.zip", body)
+        self.assertIn("строки съехали", body)
+        self.sheet_click("Скопировать")
+        from PySide6.QtGui import QGuiApplication
+        self.assertTrue(self.wait_py(lambda: "строки съехали" in QGuiApplication.clipboard().text()))
+
+    # ---------------------------------------------------------------- запись звука
+    def fake_recorder(self):
+        import test_record_flow as T
+        from autoprint import record_flow
+        self.patch(record_flow, "make_recorder", lambda parent=None: T.FakeRecorder(parent))
+        return T
+
+    def test_record_sheet_steps_and_close_ask(self):
+        T = self.fake_recorder()
+        self.app.commands.cmd_record_sound({})
+        self.assertTrue(self.sheet_has("Записать звук клавиатуры"))
+        self.assertTrue(self.wait_js("[...document.querySelectorAll('#recDevice option')].length === 2"))
+        self.assertTrue(self.wait_py(lambda: self.app.record is not None and self.app.record.monitoring))
+        self.assertTrue(self.wait_py(lambda: bool(self.app.hotkeys._bindings) is False))      # хоткеи сняты
+        self.sheet_click("Далее")
+        self.assertTrue(self.sheet_has("Обычные клавиши"))
+        self.assertTrue(self.wait_js("[...document.querySelectorAll('.scrim .sheet button')].find(b => b.textContent.trim() === 'Далее').disabled"))
+        T.FakeRecorder.next_samples = T.clicks(9)
+        self.sheet_click("Начать запись")
+        self.assertTrue(self.wait_py(lambda: self.app.record.recording == "key"))
+        self.sheet_click("Стоп")
+        self.assertTrue(self.sheet_has("Найдено: 9 ударов — хорошо"))
+        self.assertTrue(self.wait_js("!![...document.querySelectorAll('.scrim .sheet button')].find(b => b.textContent.trim() === 'Далее' && !b.disabled)"))
+        # закрыть с записями — спросить
+        self.js("document.dispatchEvent(new KeyboardEvent('keydown', {key: 'Escape', bubbles: true}))")
+        self.assertTrue(self.sheet_has("Закрыть без сохранения? Записи пропадут."))
+        self.sheet_click("Отмена")
+        self.assertTrue(self.sheet_has("Найдено: 9 ударов"))
+        self.assertIsNotNone(self.app.record)
+        self.js("document.dispatchEvent(new KeyboardEvent('keydown', {key: 'Escape', bubbles: true}))")
+        self.assertTrue(self.sheet_has("Закрыть без сохранения?"))
+        self.sheet_click("Закрыть")
+        self.assertTrue(self.no_sheet())
+        self.assertTrue(self.wait_py(lambda: self.app.record is None))
+        self.assertTrue(self.wait_py(lambda: bool(self.app.hotkeys._bindings)))              # хоткеи вернулись
+
+    def test_record_sheet_saves_style(self):
+        T = self.fake_recorder()
+        from autoprint import sounds
+        self.app.commands.cmd_record_sound({})
+        self.assertTrue(self.sheet_has("Микрофон"))
+        self.sheet_click("Далее")
+        T.FakeRecorder.next_samples = T.clicks(8)
+        self.sheet_click("Начать запись")
+        self.sheet_click("Стоп")
+        self.sheet_click("Далее")
+        self.assertTrue(self.sheet_has("Пробел"))
+        self.sheet_click("Пропустить — возьмём обычные клавиши")
+        self.assertTrue(self.sheet_has("Enter"))
+        self.sheet_click("Пропустить — возьмём обычные клавиши")
+        self.assertTrue(self.sheet_has("Назовите набор"))
+        self.js("{ const t = document.querySelector('#recName'); t.value = 'Лист'; t.dispatchEvent(new Event('input', {bubbles: true})); }")
+        self.sheet_click("Сохранить")
+        self.assertTrue(self.no_sheet())
+        self.assertTrue(self.wait_py(lambda: self.app.settings.sound_style.startswith("my_")))
+        key = self.app.settings.sound_style
+        self.assertEqual(sounds.available_styles()[key], "Своя: Лист")
+        self.app.settings.sound_style = sounds.DEFAULT_STYLE
+        self.app.on_setting_changed("sound_style")
+        sounds.delete_custom(key)
+
+    # ---------------------------------------------------------------- внутренняя ошибка
+    def test_crash_sheet(self):
+        self.app.show_crash("ValueError: boom")
+        self.assertTrue(self.sheet_has("Внутренняя ошибка: ValueError: boom"))
+        self.sheet_click("Сообщить об ошибке…")
+        self.assertTrue(self.sheet_has("Что случилось?"))
+
+
+class OldDialogsRemovedTest(unittest.TestCase):
+    def test_old_dialogs_removed(self):
+        ui = Path(storage.__file__).parent / "ui"
+        for name in ("report_dialog.py", "record_dialog.py"):
+            self.assertFalse((ui / name).exists(), name)
+        self.assertNotIn("class UpdateDialog", (ui / "updates.py").read_text(encoding="utf-8"))
 
 
 PDF_PROBE = r'''

@@ -1,0 +1,69 @@
+/* Листы окна: обновление, «Сообщить об ошибке», запись звука клавиатуры, внутренняя ошибка. */
+/* подвал с кнопками — внутри листа и всегда виден, даже если лист прокручен (длинный отчёт) */
+.sheet .sbody:has(> .updsheet, > .repsheet, > .recsheet) { padding-bottom: 0; }
+.sheet .sfoot.inbody { margin: 4px -20px 0; padding: 14px 20px; position: sticky; bottom: 0; z-index: 1;
+  background: var(--panel); }
+.updsheet, .repsheet, .recsheet, .crashsheet { display: flex; flex-direction: column; gap: 12px; }
+.crashsheet p { margin: 0; }
+
+/* обновление */
+.updhead { display: flex; flex-direction: column; gap: 2px; }
+.updhead b { font-size: 16px; }
+.updnotes { max-height: 300px; overflow: auto; padding: 12px 14px; border-radius: var(--r-md); background: var(--sunken);
+  border: 1px solid var(--line); font-size: 14px; }
+.updnotes h2, .updnotes h3, .updnotes h4 { font-size: 15px; margin: 6px 0 4px; }
+.updnotes ul, .updnotes ol { padding-left: 20px; margin: 4px 0; }
+.updnotes p { margin: 4px 0; }
+.updstatus { margin: 0; color: var(--dim); font-size: 14px; }
+.updstatus.warn { color: var(--live); }
+.updbar { height: 6px; border-radius: 3px; background: var(--raised2); overflow: hidden; }
+.updbar span { display: block; height: 100%; width: 0; background: var(--accent); transition: width .2s; }
+.updbar.busy span { width: 30%; animation: updrun 1.2s ease-in-out infinite; }
+@keyframes updrun { from { transform: translateX(-100%); } to { transform: translateX(340%); } }
+
+/* сообщить об ошибке */
+.repsheet > p { margin: 0; }
+.repsheet .ta { min-height: 88px; resize: vertical; padding: 8px 12px; height: auto; line-height: 1.5; }
+.repcrash { display: flex; gap: 12px; align-items: flex-start; padding: 10px 12px; border-radius: var(--r-md);
+  background: var(--live-soft); }
+.repcrash .i { color: var(--live); flex: none; margin-top: 2px; }
+.repcrash div { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.repcrash small { color: var(--dim); overflow-wrap: anywhere; }
+.reprow { display: flex; align-items: center; justify-content: space-between; gap: 14px; }
+.reprow > div { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.reprow b { font-weight: 500; }
+.rephead { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: -6px; }
+.reppreview { margin: 0; height: 200px; overflow: auto; padding: 10px 12px; border-radius: var(--r-md); background: var(--sunken);
+  border: 1px solid var(--line); color: var(--dim); font: 11.5px/1.5 var(--mono); white-space: pre; }
+
+/* запись звука */
+.rechead { display: flex; align-items: center; gap: 12px; }
+.rechead .dots { display: flex; gap: 6px; }
+.rechead .dots span { width: 8px; height: 8px; border-radius: 50%; background: var(--raised2); }
+.rechead .dots span.done { background: var(--accent-line); }
+.rechead .dots span.on { background: var(--accent); }
+.recsheet > h3 { font-size: 18px; font-weight: 700; margin: 0; }
+.recsheet > p.dim { margin: -6px 0 0; }
+.reccontent { display: flex; flex-direction: column; gap: 14px; min-height: 230px; }
+.reccontent > .btn.ghost { align-self: flex-start; }
+.recmeter { height: 12px; border-radius: 6px; background: var(--sunken); border: 1px solid var(--line); overflow: hidden; }
+.recmeter span { display: block; height: 100%; width: 0; background: linear-gradient(90deg, var(--ok), var(--accent) 80%, var(--live));
+  transition: width .08s linear; }
+.recbox { display: flex; flex-direction: column; gap: 12px; padding: 14px 16px; border-radius: var(--r-lg); background: var(--raised);
+  border: 1px solid var(--line); }
+.recctl { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.recctl .spacer { flex: 1; }
+.recclock { color: var(--dim); font-size: 15px; }
+.recwave { width: 100%; height: 72px; display: block; border-radius: var(--r); background: var(--sunken); }
+.recwave path { stroke: var(--dim); stroke-width: 1; fill: none; vector-effect: non-scaling-stroke; }
+.recwave rect { fill: var(--accent-soft); }
+.recstatus { margin: 0; font-size: 14px; color: var(--dim); }
+.recstatus.t-ok { color: var(--ok); }
+.recstatus.t-live { color: var(--live); }
+.recstatus.t-accent { color: var(--accent); }
+.recwarn { margin: 0; color: var(--live); font-size: 14px; }
+.recsum { display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: var(--r-md); padding: 4px 14px; }
+.recsumrow { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; padding: 8px 0; }
+.recsumrow + .recsumrow { border-top: 1px solid var(--line); }
+.recsumrow b { font-weight: 500; }
+#recName { max-width: 320px; }

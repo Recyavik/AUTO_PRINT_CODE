@@ -114,6 +114,20 @@ def settings_state(app) -> dict:
     return d
 
 
+def release_state(app) -> dict | None:
+    """Лист «Доступно обновление»: найденная версия, что нового и что сейчас можно сделать."""
+    m = app.updates
+    rel = m.latest
+    if rel is None:
+        return None
+    return {"version": rel.version, "name": rel.name, "notes": rel.notes or "", "published": rel.published,
+            "prerelease": bool(rel.prerelease), "current": __version__, "page_url": rel.page_url,
+            "installable": bool(m.installable(rel)), "reason": m.block_reason(rel) if not m.installable(rel) else "",
+            "staged": bool(m.staged and m.staged[0].version == rel.version), "downloading": bool(m.downloading),
+            "frozen": m.mode == "frozen", "progress": app.update_progress, "error": app.update_error,
+            "skipped": app.settings.update_skip_version == rel.version}
+
+
 def efir_state_cached(app) -> dict:
     return getattr(app, "_efir_state_last", None) or efir_state(app)
 
@@ -194,6 +208,9 @@ def app_state(app) -> dict:
         "nav": dict(app.nav),
         "efir": efir,
         "settings": settings_state(app),
+        "release": release_state(app),
+        "record": app.record.state() if getattr(app, "record", None) is not None else None,
+        "sheet": dict(app.sheet_req),
         # «Новый урок»: что выбрано в прошлый раз, шаблоны «Начать с» для своего плана, видео зарядок
         "wizard": {"plan": s.lesson_plan, "cls": s.lesson_class, "minutes": s.lesson_minutes, "brk": s.lesson_break,
                    "style": s.lesson_style, "task": s.lesson_task, "explain": s.lesson_explain,
