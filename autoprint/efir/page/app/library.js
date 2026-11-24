@@ -5,6 +5,7 @@ import { h, btn, iconBtn, clear, toast } from "./ui.js";
 import { icon } from "./icons.js";
 import { setCrumbs, registerDrop } from "./shell.js";
 import { lessonMenuItems, menuAt, lessonById } from "./lessonmenu.js";
+import { exportSheet } from "./sheets.js";
 
 export function plural(n, one, few, many) {
   const a = Math.abs(n) % 100, b = a % 10;
@@ -52,7 +53,7 @@ export function lessonsView(root) {
   setCrumbs([{ label: "Уроки" }]);
   const search = h("input", { id: "libSearch", type: "search", placeholder: "Найти урок", "aria-label": "Найти урок",
     autocomplete: "off" });
-  const exportAll = iconBtn("download", "Все уроки одним файлом (.autoprint)", () => send({ cmd: "export_all" }), { kind: "ghost" });
+  const exportAll = iconBtn("download", "Все уроки одним файлом (.autoprint)", () => exportSheet(null, true), { kind: "ghost" });
   exportAll.id = "exportAll";
   const newBtn = h("a", { class: "btn primary", id: "newLessonBtn", href: "#/new" }, icon("plus"), h("span", null, "Новый урок"));
   const cont = h("section", { id: "continueCard", class: "today", hidden: true });
@@ -121,7 +122,7 @@ export function lessonsView(root) {
         if (rows[i]) rows[i].focus();
       }
     });
-    row.addEventListener("contextmenu", (e) => menuAt(e, lessonMenuItems(x.id, rename)));
+    row.addEventListener("contextmenu", (e) => menuAt(e, lessonMenuItems(x.id, rename, { open: true })));
     return row;
   }
 
@@ -135,7 +136,7 @@ export function lessonsView(root) {
         `${p.topics} ${plural(p.topics, "урок", "урока", "уроков")}`));
     card.addEventListener("click", () => open(p.id));
     card.addEventListener("keydown", (e) => { if (e.key === "Enter" && e.target === card) { e.preventDefault(); open(p.id); } else if (e.key === "F2") { e.preventDefault(); rename(p.id); } });
-    card.addEventListener("contextmenu", (e) => menuAt(e, lessonMenuItems(p.id, rename)));
+    card.addEventListener("contextmenu", (e) => menuAt(e, lessonMenuItems(p.id, rename, { open: true })));
     return card;
   }
 

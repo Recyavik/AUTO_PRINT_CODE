@@ -636,22 +636,6 @@ class App(QObject):
                     t.look = lk.id
         return package.export_package(path, lessons=lessons, plans=plans_, looks=looks)
 
-    def export_package_dialog(self, templates: list[Template]) -> None:
-        """До листа «Экспорт» (Task 10): прежнее окошко с галочками поверх окна программы."""
-        from .ui.export_package import ExportPackageDialog
-        if not templates:
-            return
-        d = ExportPackageDialog(self.window, templates, self)
-        if d.exec() != d.DialogCode.Accepted:
-            return
-        name = templates[0].title if len(templates) == 1 else "Уроки AutoPrint"
-        safe = "".join(c for c in name if c not in '\\/:*?"<>|').strip() or "урок"
-        path, _ = QFileDialog.getSaveFileName(self.window, "Урок одним файлом", safe + ".autoprint",
-                                              "Урок AutoPrint (*.autoprint)")
-        if not path:
-            return
-        self._package_to(templates, path, d.include_plans(), d.include_looks())
-
     def _package_to(self, templates, path, include_plans: bool, include_looks: bool) -> dict | None:
         try:
             s = self.export_package(templates, path, include_plans, include_looks)
@@ -663,23 +647,11 @@ class App(QObject):
                      f"{s['looks']}, файлов внутри — {s['files']} ({mb:.1f} МБ). {path}")
         return s
 
-    def export_template(self, t: Template, fmt: str, path: str | None = None) -> None:
-        """fmt: package | md | ipynb | students | json. path None — спросить файл системным окном."""
-        if fmt == "package" and path is None:
-            self.export_package_dialog([t])
-            return
-        safe = "".join(c for c in t.title if c not in '\\/:*?"<>|').strip() or "template"
-        if path is None:
-            flt = {"md": "Markdown (*.md)", "ipynb": "Jupyter (*.ipynb)", "students": "Jupyter (*.ipynb)"}.get(
-                fmt, "JSON (*.json)")
-            name = f"{safe} — для учеников.ipynb" if fmt == "students" else f"{safe}.{fmt}"
-            path, _ = QFileDialog.getSaveFileName(self.window, "Экспорт", name, flt)
-            if not path:
-                return
+    def export_template(self, t: Template, fmt: str, path: str) -> bool:
+        """Урок в файл path (куда — спросил лист «Экспорт»): package | md | ipynb | students | json."""
         try:
             if fmt == "package":
-                self._package_to([t], path, True, True)
-                return
+                return self._package_to([t], path, True, True) is not None
             if fmt == "md":
                 from .lesson_md import export_md
                 export_md(t, Path(path))
@@ -688,8 +660,10 @@ class App(QObject):
             else:
                 TemplateStore.export_template(t, path)
             self._notify(f"Сохранено: {path}")
+            return True
         except OSError as e:
             self._notify(f"Не сохранилось: {e}", warn=True)
+            return False
 
     def restart_app(self) -> None:
         """Перезапуск программы — тем же путём, что после обновления."""

@@ -242,6 +242,54 @@ class AppWindow(FramelessWindow):
         else:
             self.view.page().runJavaScript(code, 0, callback)
 
+    # ------------------------------------------------------------ печать урока
+    def _wait(self, signal, start, timeout_ms: int) -> bool:
+        """Запустить start() и дождаться signal(…, ok) — страница ждёт ответа (классы печати на ней до конца)."""
+        from PySide6.QtCore import QEventLoop
+        loop = QEventLoop()
+        res = {"ok": False}
+
+        def done(*args) -> None:
+            res["ok"] = bool(args[-1]) if args else False
+            loop.quit()
+        signal.connect(done)
+        try:
+            start()
+            QTimer.singleShot(timeout_ms, loop.quit)
+            loop.exec()
+        finally:
+            signal.disconnect(done)
+        return res["ok"]
+
+    def print_pdf(self, path: str, open_after: bool = True) -> bool:
+        """«Сохранить PDF…»: страница урока как при печати (@media print), A4; потом файл открывается."""
+        if self.view is None:
+            return False
+        from PySide6.QtCore import QMarginsF
+        from PySide6.QtGui import QPageLayout, QPageSize
+        page = self.view.page()
+        layout = QPageLayout(QPageSize(QPageSize.PageSizeId.A4), QPageLayout.Orientation.Portrait,
+                             QMarginsF(12, 12, 12, 12), QPageLayout.Unit.Millimeter)
+        ok = self._wait(page.pdfPrintingFinished, lambda: page.printToPdf(str(path), layout), 120_000)
+        if ok and open_after:
+            try:
+                os.startfile(str(path))
+            except OSError as e:
+                log.warning("PDF не открылся: %s", e)
+        return ok
+
+    def print_dialog(self) -> bool:
+        """«Печать…»: системный выбор принтера, печать страницы урока. False — передумали или не напечаталось."""
+        if self.view is None:
+            return False
+        from PySide6.QtPrintSupport import QPrintDialog, QPrinter
+        printer = QPrinter(QPrinter.PrinterMode.HighResolution)
+        dlg = QPrintDialog(printer, self)
+        dlg.setWindowTitle("Печать урока")
+        if dlg.exec() != QPrintDialog.DialogCode.Accepted:
+            return False
+        return self._wait(self.view.printFinished, lambda: self.view.print(printer), 300_000)
+
     # ------------------------------------------------------------ области и кнопки окна
     def set_regions(self, data: dict) -> None:
         self.regions = Regions.from_data(data)

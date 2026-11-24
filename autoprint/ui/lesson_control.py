@@ -149,8 +149,9 @@ class LessonController(QObject):
             self.efir.open_tab()
         return ok
 
-    def _chat_prompt(self, t: Template) -> None:
-        """«⋯ → Промпт для своего чата»: урок со слайдами — по каждому слайду; иначе — общий, материал прикладывают."""
+    def chat_prompt(self, t: Template) -> None:
+        """«Скопировать задание» (лист «Обновить по ответу нейросети»): урок со слайдами — по каждому слайду; иначе —
+        общий, материал прикладывают."""
         from PySide6.QtGui import QGuiApplication
         from .. import lesson_ai as L
         from ..storage import BLOCK_IMAGE, BLOCK_STAGE
@@ -163,8 +164,10 @@ class LessonController(QObject):
             text = L.lesson_prompt(L.Options(style=L.STYLE_SCENARIO, minutes=total, cls=self.main.settings.lesson_class),
                                    plan=plan, exercises=exercises)
         QGuiApplication.clipboard().setText(text)
-        self.main._notify("Промпт скопирован: вставьте его в ChatGPT, GigaChat, Алису или DeepSeek и приложите файл "
-                          "презентации или методички. Ответ — «⋯ → Вставить ответ нейросети».")
+        self.main._notify("Задание скопировано: вставьте его в ChatGPT, GigaChat, Алису или DeepSeek и приложите файл "
+                          "презентации или методички. Ответ чата — в поле ниже.")
+
+    _chat_prompt = chat_prompt
 
     def _apply_answer(self, t: Template, text: str) -> None:
         """«⋯ → Вставить ответ нейросети»: копия урока по ответу (слайды — по номерам), рядом с исходным. Урок по
@@ -216,14 +219,6 @@ class LessonController(QObject):
             return
         self.main._notify(msg, tray=bool(notes))
         self.main.open_lesson(new.id, ask=False)
-
-    def _fill_slides(self, t: Template) -> None:
-        """«Подставить слайды из презентации…»: выбрать PDF или PowerPoint — места «Слайд N» получают картинки."""
-        from PySide6.QtWidgets import QFileDialog
-        path, _ = QFileDialog.getOpenFileName(self.main, "Презентация — для картинок слайдов", "",
-                                              "Презентация (*.pdf *.pptx)")
-        if path:
-            self.fill_slides_from(t, path)
 
     def fill_slides_from(self, t: Template, path: str) -> bool:
         from .. import slides
@@ -520,18 +515,14 @@ class LessonController(QObject):
                 self.main.unlink_plan(t)
             elif cmd == "delete_lesson" and t is not None:
                 self.main.delete_lesson(t, ask=False)
-            elif cmd == "export" and t is not None and d.get("fmt") in ("package", "md", "ipynb", "students", "json"):
-                self.main.export_template(t, str(d["fmt"]))
             elif cmd == "slide" and t is not None:
                 self._show_slide(t, str(d.get("block") or ""))
             elif cmd == "slide_step" and t is not None:
                 self._slide_step(t, 1 if int(d.get("d") or 1) > 0 else -1)
             elif cmd == "chat_prompt" and t is not None:
-                self._chat_prompt(t)
+                self.chat_prompt(t)
             elif cmd == "apply_answer" and t is not None:
                 self._apply_answer(t, str(d.get("text") or ""))
-            elif cmd == "fill_slides" and t is not None:
-                self._fill_slides(t)
             elif cmd == "find_image" and t is not None:
                 self._find_image(t, str(d.get("block") or ""))
             elif cmd == "open_tab":

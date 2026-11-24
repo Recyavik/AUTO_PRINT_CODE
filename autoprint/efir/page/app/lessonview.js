@@ -7,6 +7,7 @@ import { h, btn, iconBtn, seg, popover, menu, ask, toast, clear, closePop } from
 import { icon } from "./icons.js";
 import { setCrumbs } from "./shell.js";
 import { lessonMenuItems } from "./lessonmenu.js";
+import { slidesFill } from "./sheets.js";
 import { A, cmd, now, mmss, hm, hhmm, clockAt, nextHalfHour, durText, plural } from "../lesson/state.js";
 import * as Q from "../lesson/queue.js";
 import { renderMain, renderPlan, stagesOf, nodeOf, stageOfBlock, markOnScreen } from "../lesson/render.js";
@@ -507,7 +508,7 @@ function onMainClick(e) {
     else if (a === "open-tab") cmd({ cmd: "open_tab" });
     else if (a === "add-video") cmd({ cmd: "look_edit" });
     else if (a === "find-image") cmd({ cmd: "find_image", block: actBtn.closest(".blk").dataset.id });
-    else if (a === "fill-slides") cmd({ cmd: "fill_slides" });
+    else if (a === "fill-slides") { const L = A.S && A.S.lesson; if (L) slidesFill(L.id); }
     return;
   }
   const arm = t.closest(".armbtn");
@@ -596,7 +597,8 @@ export function lessonView(root, r) {
   let asked = "";
   const focusWanted = (id) => {
     const cur = LC.state && LC.state.lesson ? LC.state.lesson.id : null;
-    if (!id || id === cur || id === asked || !(S.lessons || []).some((x) => x.id === id)) return;
+    // урок уже в фокусе программы (его открыла она — канал урока ещё в пути): второй раз не просить
+    if (!id || id === cur || id === S.focus_id || id === asked || !(S.lessons || []).some((x) => x.id === id)) return;
     asked = id;
     send({ cmd: "open", lesson: id }).catch(() => {});
   };

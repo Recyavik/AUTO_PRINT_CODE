@@ -117,9 +117,6 @@ class AppCommands(QObject):
     def cmd_recognize(self, d: dict) -> None:
         self.app.recognize_lesson(self._t(d))
 
-    def cmd_export_all(self, _d: dict) -> None:
-        self.app.export_package_dialog(list(self.app.store.templates))
-
     def cmd_new_lesson(self, d: dict) -> None:
         self.app.new_template(str(d.get("structure") or "empty"))
 
@@ -169,6 +166,84 @@ class AppCommands(QObject):
             return [str(p) for p in paths]
         path, _ = QFileDialog.getOpenFileName(self.app.window, title, str(d.get("dir") or ""), flt)
         return [str(path)] if path else []
+
+    # ------------------------------------------------------------ листы урока (Task 10)
+    def _many(self, d: dict) -> list:
+        """Уроки листа: all — все, ids / id — эти."""
+        if d.get("all"):
+            return list(self.app.store.templates)
+        ids = d.get("ids") or ([d["id"]] if d.get("id") else [])
+        ts = [t for t in (self.app.store.get(str(i)) for i in ids) if t is not None]
+        if not ts:
+            raise ValueError("урок не найден")
+        return ts
+
+    def call_export_sizes(self, d: dict) -> dict:
+        """«Экспорт» .autoprint: сколько весят картинки урока и оформление экрана учеников, есть ли план."""
+        from .storage import KIND_PLAN
+        ts = self._many(d)
+        base = self.app.package_media_size(ts, include_looks=False)
+        full = self.app.package_media_size(ts, include_looks=True)
+        return {"pics": base, "looks": max(0, full - base), "linked": any(t.plan_id or t.kind == KIND_PLAN for t in ts)}
+
+    def call_export(self, d: dict) -> dict:
+        """Сохранить урок (или все) в path: package | md | ipynb | students | json."""
+        ts = self._many(d)
+        fmt, path = str(d.get("fmt") or "package"), str(d.get("path") or "")
+        if not path:
+            raise ValueError("не выбран файл")
+        if fmt == "package":
+            s = self.app._package_to(ts, path, bool(d.get("plans", True)), bool(d.get("looks", True)))
+            if s is None:
+                raise ValueError("файл не сохранился")
+            return s
+        if fmt not in ("md", "ipynb", "students", "json") or len(ts) != 1:
+            raise ValueError("неизвестный формат")
+        if not self.app.export_template(ts[0], fmt, path):
+            raise ValueError("файл не сохранился")
+        return {"path": path}
+
+    def call_print_pdf(self, d: dict) -> dict:
+        path = str(d.get("path") or "")
+        if not path or not self.app.window.print_pdf(path):
+            raise ValueError("PDF не сохранился")
+        self.app._notify(f"PDF сохранён: {path}", quiet=True)
+        return {"path": path}
+
+    def call_print(self, _d: dict) -> bool:
+        return bool(self.app.window.print_dialog())
+
+    def call_plan_link(self, d: dict) -> dict:
+        """«План урока…»: link (plan) | unlink | make."""
+        t = self._t(d)
+        op = str(d.get("op") or "")
+        if op == "link":
+            notes = self.app.link_plan(t, str(d.get("plan") or ""))
+            return {"plan": t.plan_id, "notes": notes or []}
+        if op == "unlink":
+            self.app.unlink_plan(t)
+            return {"plan": ""}
+        if op == "make":
+            p = self.app.make_plan(t)
+            if p is None:
+                raise ValueError("из этого урока план не сделать")
+            return {"plan": p.id}
+        raise ValueError("неизвестное действие")
+
+    def call_prompt(self, d: dict) -> bool:
+        """«Скопировать задание» для своего чата (урок со слайдами — по слайдам)."""
+        self.app.lesson.chat_prompt(self._t(d))
+        return True
+
+    def call_answer(self, d: dict) -> bool:
+        text = str(d.get("text") or "").strip()
+        if not text:
+            raise ValueError("Вставьте ответ нейросети")
+        self.app.lesson._apply_answer(self._t(d), text)
+        return True
+
+    def call_slides_fill(self, d: dict) -> bool:
+        return bool(self.app.lesson.fill_slides_from(self._t(d), str(d.get("path") or "")))
 
     def call_place_image(self, d: dict) -> dict:
         """Картинка с диска в урок (место «Нужна картинка», «Выбрать файл…», файл на окне): копия в data/media,

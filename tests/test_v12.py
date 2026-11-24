@@ -1205,14 +1205,9 @@ class PackageTest(unittest.TestCase):
             s = win.export_package([t], f, include_plans=True, include_looks=True)
             self.assertEqual((s["plans"], s["looks"]), (1, 1))
             self.assertGreater(win.package_media_size([t], include_looks=True), 100)
-            from autoprint.ui.export_package import ExportPackageDialog
-            d = ExportPackageDialog(win.window, [t], win)
-            self.assertTrue(d.include_plans() and d.include_looks())
-            self.assertIn("видео зарядок", d.cb_look.text())
-            self.assertIn("КБ", d.cb_look.text())
-            d.cb_look.setChecked(False)
-            self.assertFalse(d.include_looks())
-            d.deleteLater()
+            sizes = win.commands.call_export_sizes({"id": t.id})        # 1.0: размеры для листа «Экспорт»
+            self.assertTrue(sizes["linked"])
+            self.assertGreater(sizes["looks"], 100)
         finally:
             close(win)
 

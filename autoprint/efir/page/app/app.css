@@ -194,6 +194,20 @@ input[type=checkbox]:not(.sw) { accent-color: var(--accent); width: 16px; height
 .sheet .sbody { padding: 8px 20px 18px; display: flex; flex-direction: column; gap: 14px; }
 .sheet .sfoot { display: flex; align-items: center; gap: 10px; padding: 14px 20px; border-top: 1px solid var(--line); }
 .sheet .sfoot .spacer { flex: 1; }
+/* листы урока: формат экспорта столбиком, списки действий, поле ответа */
+.seg.vseg { display: flex; flex-direction: column; align-items: stretch; }
+.seg.vseg button { justify-content: flex-start; text-align: left; height: 38px; }
+.exportsheet, .printsheet, .answersheet, .plansheet, .pkgopts { display: flex; flex-direction: column; gap: 12px; }
+.printsheet .flabel, .exportsheet .flabel { margin-bottom: -4px; }
+.printsheet .seg { align-self: flex-start; }
+.pkgopts[hidden] { display: none; }
+.sheet .sheetlist { border: 1px solid var(--line); border-radius: var(--r-md); padding: 6px; }
+.sheet .sheetlist .phead { padding: 6px 10px 2px; }
+.sheet .sheetlist .mi .ml { flex: 0 0 auto; }
+.sheet .sheetlist .mi .mh { margin-left: auto; text-align: right; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sheet .sheetlist .meta { padding: 4px 10px; margin: 0; }
+.answersheet .ansta { min-height: 200px; font: 13px/1.5 var(--mono); }
+.answersheet p { margin: 0; }
 @keyframes fade { from { opacity: 0; } to { opacity: 1; } }
 @keyframes rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
 @media (prefers-reduced-motion: reduce) { .scrim, .sheet { animation: none; } }

@@ -19,15 +19,15 @@ export async function askDelete(x) {
   return ok;
 }
 
-/** Пункты меню урока или плана. rename(id) — переименовать на месте (список) или в шапке (урок). */
-export function lessonMenuItems(id, rename) {
+/** Пункты меню урока или плана, одним списком. rename(id) — переименовать на месте (список) или в шапке (урок).
+ *  o.open — меню в «Уроках»: первым пунктом «Открыть». */
+export function lessonMenuItems(id, rename, o = {}) {
   const x = lessonById(id);
   if (!x) return [];
   const isPlan = x.kind === "plan";
-  const items = isPlan
-    ? [{ label: "Новый урок по плану", icon: "plus", on: () => send({ cmd: "new_topic", plan: x.id }) },
-      { label: "Открыть план", icon: "open", on: () => send({ cmd: "open", lesson: x.id }) }]
-    : [{ label: "Открыть", icon: "open", on: () => send({ cmd: "open", lesson: x.id }) }];
+  const items = [];
+  if (isPlan && o.open) items.push({ label: "Новый урок по плану", icon: "plus", on: () => send({ cmd: "new_topic", plan: x.id }) });
+  if (o.open) items.push({ label: isPlan ? "Открыть план" : "Открыть", icon: "open", on: () => send({ cmd: "open", lesson: x.id }) });
   items.push({ label: "Переименовать", icon: "pencil", on: () => rename && rename(x.id) },
     { label: "Дублировать", icon: "copy", on: () => send({ cmd: "duplicate", id: x.id }) });
   for (const fn of extraItems) items.push(...(fn(x) || []));

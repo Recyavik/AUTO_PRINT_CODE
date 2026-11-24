@@ -7,7 +7,8 @@
 from __future__ import annotations
 
 from . import __version__, scenario
-from .storage import BLOCK_STAGE, KIND_PLAN
+from .scenario_import import looks_like_scenario
+from .storage import BLOCK_IMAGE, BLOCK_STAGE, KIND_PLAN
 
 PREF_KEYS = ("page_plan", "page_past", "page_stage_timer", "start_screen", "start_timer")
 
@@ -51,6 +52,10 @@ def app_state(app) -> dict:
         x["plan_id"] = t.plan_id if t.plan_id in plan_titles else ""
         x["meta"] = lesson_meta(t, plan_title=plan_titles.get(t.plan_id, ""),
                                 topics=len(store.topics_of(t.id)) if t.kind == KIND_PLAN else 0)
+        # меню урока: «Подставить слайды…» — есть пустые «Слайд N»; «Разложить по этапам» — похоже на сценарий
+        x["stages"] = sum(1 for b in t.blocks if b.type == BLOCK_STAGE)
+        x["slides_empty"] = any(b.type == BLOCK_IMAGE and b.slide and not (b.text or "").strip() for b in t.blocks)
+        x["scenario"] = looks_like_scenario(t.blocks)
         lessons.append(x)
     plans = [plan_state(p, len(store.topics_of(p.id))) for p in store.templates if p.kind == KIND_PLAN]
     w = app.efir.live_webinar()
