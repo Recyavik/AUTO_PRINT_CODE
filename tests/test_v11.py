@@ -54,8 +54,8 @@ class Base(unittest.TestCase):
 class PrefsTest(Base):
     def test_defaults(self):
         s = storage.Settings()
-        self.assertEqual((s.page_zoom, s.page_plan, s.page_past, s.page_stage_timer, s.start_timer, s.start_screen),
-                         (100, "strip", "dim", True, False, False))
+        self.assertEqual((s.page_zoom, s.page_plan, s.page_past, s.page_stage_timer, s.start_compact, s.start_screen),
+                         (100, "side", "dim", True, False, False))
 
     def test_prefs_command(self):
         cmd = self.win.lesson.command
@@ -63,9 +63,9 @@ class PrefsTest(Base):
         cmd({"cmd": "prefs", "key": "page_plan", "value": "side"})
         cmd({"cmd": "prefs", "key": "page_past", "value": "collapse"})
         cmd({"cmd": "prefs", "key": "page_stage_timer", "value": False})
-        cmd({"cmd": "prefs", "key": "start_timer", "value": True})
+        cmd({"cmd": "prefs", "key": "start_compact", "value": True})
         s = self.win.settings
-        self.assertEqual((s.page_zoom, s.page_plan, s.page_past, s.page_stage_timer, s.start_timer),
+        self.assertEqual((s.page_zoom, s.page_plan, s.page_past, s.page_stage_timer, s.start_compact),
                          (130, "side", "collapse", False, True))
         cmd({"cmd": "prefs", "key": "page_zoom", "value": 900})          # вне 80…200 — к краю
         self.assertEqual(s.page_zoom, 200)
@@ -76,7 +76,7 @@ class PrefsTest(Base):
         p = self.state()["prefs"]
         self.assertEqual(p["page_zoom"], 200)
         self.assertEqual(p["page_plan"], "side")
-        self.assertEqual(p["start_timer"], True)
+        self.assertEqual(p["start_compact"], True)
 
 
 # ================================================================ Task 3: план строкой — сдвиг конца урока

@@ -229,10 +229,11 @@ class Settings:
     page_lesson: str = ""              # какой урок был на экране урока
     # «Мои настройки» экрана урока
     page_zoom: int = 100               # размер текста страницы, % (80…200)
-    page_plan: str = "strip"           # план в «Уроке»: strip — строкой сверху, side — сбоку, hidden — скрыт
+    page_plan: str = "side"            # план в «Уроке»: side — сбоку, top — строкой сверху, hidden — скрыт
     page_past: str = "dim"             # пройденные этапы: dim — приглушать, collapse — сворачивать
     page_stage_timer: bool = True      # «осталось» на текущем этапе
-    start_timer: bool = False          # «Начать урок» открывает мини-таймер «Эфира»
+    start_timer: bool = False          # до 1.0: «Начать урок» открывал мини-таймер (migrations v1 → start_compact)
+    start_compact: bool = False        # 1.0: «Начать урок» — окно в маленький режим поверх всех
     start_screen: bool = False         # «Начать урок» открывает экран учеников (вкладку)
     step_nav: str = "arrows"           # шаги: arrows — стрелками от курсора (код — продолжение файла)
                                        #       | home — от начала документа (Ctrl+Home)
@@ -290,6 +291,7 @@ class Settings:
     window_geometry: str = ""
     compact: bool = False              # 1.0: окно было в маленьком режиме
     compact_geometry: str = ""         # 1.0: геометрия маленького режима (base64)
+    last_view: str = ""                # 1.0: экран окна при выходе (#/lessons, #/lesson/<id>, #/settings/…)
 
     @classmethod
     def load(cls) -> "Settings":

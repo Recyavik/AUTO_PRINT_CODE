@@ -24,8 +24,8 @@ from .theme import theme
 log = logging.getLogger(__name__)
 
 # «Мои настройки» экрана урока: поле Settings → допустимые значения
-PREFS = {"page_zoom": "zoom", "page_plan": ("side", "top", "hidden", "strip"), "page_past": ("dim", "collapse"),
-         "page_stage_timer": "bool", "start_timer": "bool", "start_screen": "bool"}
+PREFS = {"page_zoom": "zoom", "page_plan": ("side", "top", "hidden"), "page_past": ("dim", "collapse"),
+         "page_stage_timer": "bool", "start_compact": "bool", "start_screen": "bool"}
 ANSWER_FETCH_LIMIT = 90     # «Вставить ответ нейросети»: фото качаются не дольше, потом урок добавляется со ссылками
 
 
@@ -147,7 +147,7 @@ class LessonController(QObject):
         ok = self.efir.launch_lesson(t, **kw)
         if ok and s.start_screen and self.efir.clients <= 0:
             self.efir.open_tab()
-        if ok and s.start_timer:                       # «При начале урока — маленький режим» (бывший мини-таймер)
+        if ok and s.start_compact:                     # «При начале урока — маленький режим» (бывший мини-таймер)
             self.main.set_compact(True)
         return ok
 

@@ -10,7 +10,7 @@ from . import __version__, scenario
 from .scenario_import import looks_like_scenario
 from .storage import BLOCK_IMAGE, BLOCK_STAGE, KIND_PLAN, PROFILES, STRUCTURES
 
-PREF_KEYS = ("page_plan", "page_past", "page_stage_timer", "start_screen", "start_timer")
+PREF_KEYS = ("page_plan", "page_past", "page_stage_timer", "start_screen", "start_compact")
 
 
 def _cli_found() -> dict:

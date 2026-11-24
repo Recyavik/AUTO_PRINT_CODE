@@ -86,10 +86,10 @@ class SettingsTest(AppPage):
         self.click("#f-theme button[data-value=dark]")
         self.assertTrue(self.wait_js("!document.documentElement.classList.contains('light')"))
 
-    def test_start_timer_means_compact(self):
+    def test_start_compact(self):
         self.section("lesson")
-        self.click("#f-start_timer")
-        self.assertTrue(self.wait_py(lambda: self.app.settings.start_timer))
+        self.click("#f-start_compact")
+        self.assertTrue(self.wait_py(lambda: self.app.settings.start_compact))
         self.app.printer.set_focus("L")
         self.app.lesson.command({"cmd": "start"})
         try:
@@ -97,7 +97,7 @@ class SettingsTest(AppPage):
         finally:
             self.app.lesson.command({"cmd": "stop"})
             self.app.set_compact(False)
-            self.app.settings.start_timer = False
+            self.app.settings.start_compact = False
 
     # ---------------------------------------------------------------- хоткеи
     def test_hotkey_capture_rules(self):

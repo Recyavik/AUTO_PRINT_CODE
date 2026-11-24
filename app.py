@@ -144,8 +144,7 @@ def main() -> int:
 
     if server.listen(channel):
         server.newConnection.connect(on_second_instance)
-    if "--tray" not in sys.argv:   # автозапуск с Windows — сразу в трей, без окна
-        win.show()
+    prog.start(tray="--tray" in sys.argv)   # автозапуск с Windows — сразу в трей, без окна
     code = app.exec()
     # канал «один экземпляр» и блокировку освобождаем до перезапуска: новая версия стартует, пока этот
     # процесс ещё завершается, и должна сама занять канал (иначе её окно не покажется при повторном запуске)

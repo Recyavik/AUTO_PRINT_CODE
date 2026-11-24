@@ -806,6 +806,39 @@ class App(QObject):
         tid = next((x for x in (added, s.page_lesson, s.current_tab) if x and self.store.get(x)),
                    first.id if first is not None else "")
         self.printer.set_focus(tid)
+        # экран при запуске: урок в эфире — он; иначе последний экран (если он ещё есть). Страница откроет его,
+        # когда загрузится (nav при первом подключении — только если адреса у неё нет)
+        self.view = self._initial_view()
+        self.nav = {"seq": self.nav["seq"] + 1, "hash": self.view}
+        if s.compact:                    # был маленький режим — так и остаётся (окно покажет start())
+            self.window.set_compact(True)
+            self.tray.set_compact(True)
+
+    def _initial_view(self) -> str:
+        lid = self.efir.live_lesson_id()
+        if lid and self.store.get(lid) is not None:
+            return f"#/lesson/{lid}"
+        v = self.settings.last_view or ""
+        if v.startswith("#/lesson/"):
+            lid = v[len("#/lesson/"):].split("/")[0].split("?")[0]
+            return v if lid and self.store.get(lid) is not None else "#/lessons"
+        return v if v.startswith(("#/lessons", "#/efir", "#/settings")) else "#/lessons"
+
+    def remember_view(self, hash_: str) -> None:
+        """Страница перешла на другой экран: запомнить для следующего запуска (шаги «Нового урока» — нет)."""
+        h = str(hash_ or "")[:300]
+        if not h.startswith("#/") or h.startswith("#/new") or h.startswith("#/dev"):
+            return
+        self.view = h
+        if self.settings.last_view != h:
+            self.settings.last_view = h
+            self._settings_timer.start()
+
+    def start(self, tray: bool = False) -> None:
+        """Показать окно при запуске (автозапуск с Windows — --tray: сразу в трей, без окна)."""
+        if tray:
+            return
+        self.window.show()
 
     def _save_session(self) -> None:
         s = self.settings

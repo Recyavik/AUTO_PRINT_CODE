@@ -76,6 +76,18 @@ def apply(settings, store=None) -> bool:
         settings.window_geometry = ""
         done.append("window_v10")
         changed = True
+    if "v1" not in done:
+        # 1.0: одно окно. План «строкой» — теперь «сверху»; «размер интерфейса» Qt — масштаб страницы окна;
+        # мини-таймер при начале урока — маленький режим окна; геометрия прежнего маленького окна не подходит
+        if settings.page_plan == "strip":
+            settings.page_plan = "top"
+        if settings.ui_scale != 100 and settings.page_zoom == 100:
+            settings.page_zoom = max(80, min(200, int(settings.ui_scale)))
+        settings.ui_scale = 100
+        settings.start_compact = bool(settings.start_timer)
+        settings.window_geometry = ""
+        done.append("v1")
+        changed = True
     if store is None:
         return changed
     if "roles_v10" not in done:

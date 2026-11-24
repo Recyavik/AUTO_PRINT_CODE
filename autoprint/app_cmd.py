@@ -345,7 +345,7 @@ class AppCommands(QObject):
         if getattr(s, key) != v:
             setattr(s, key, v)
             self.app.on_setting_changed(key)
-            if key.startswith("page_") or key in ("start_screen", "start_timer"):
+            if key.startswith("page_") or key in ("start_screen", "start_compact"):
                 self.app.lesson.schedule_publish()
         self.app.publish_now()
         return {"value": getattr(s, key)}
@@ -372,6 +372,10 @@ class AppCommands(QObject):
             self.app.on_setting_changed("hotkeys")
         self.app.publish_now()
         return {"ok": True}
+
+    def cmd_view(self, d: dict) -> None:
+        """Страница открыла экран (адрес) — запомнить для следующего запуска."""
+        self.app.remember_view(str(d.get("hash") or ""))
 
     def cmd_hotkey_capture(self, d: dict) -> None:
         """Пока страница ждёт сочетание — глобальные хоткеи сняты."""

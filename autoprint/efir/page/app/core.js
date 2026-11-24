@@ -107,7 +107,14 @@ export function route() {
   }
   return { view: parts[0] || "lessons", id: parts[1] || "", rest: parts.slice(2), query: q, parts };
 }
-window.addEventListener("hashchange", () => emit("route", route()));
+// программа запоминает экран для следующего запуска (адрес — в момент отправки: «Уйти без сохранения?» мог вернуть прежний)
+let viewTimer = 0;
+function reportView() {
+  clearTimeout(viewTimer);
+  viewTimer = setTimeout(() => { if (location.hash) send({ cmd: "view", hash: location.hash }).catch(() => {}); }, 400);
+}
+window.addEventListener("hashchange", () => { emit("route", route()); reportView(); });
+on("ready", reportView);
 
 export function start() {
   connect("app", onApp);

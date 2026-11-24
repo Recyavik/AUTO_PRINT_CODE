@@ -246,5 +246,123 @@ class RegressTest(unittest.TestCase):
         self.assertEqual((blk.text, blk.steps), ("a = 1\nb = 2", [1, 2]))
 
 
+# ================================================================ Task 17: 1.0 — миграция настроек и сессия окна
+
+class MigrationV1Test(unittest.TestCase):
+    def old(self) -> Settings:
+        s = Settings()
+        s.migrations = ["tray_v1", "window_v10"]
+        s.page_plan, s.ui_scale, s.page_zoom, s.start_timer, s.window_geometry = "strip", 150, 100, True, "AAAA"
+        return s
+
+    def test_migration_v1_values(self):
+        from autoprint import migrations
+        s = self.old()
+        self.assertTrue(migrations.apply(s))
+        self.assertEqual((s.page_plan, s.page_zoom, s.ui_scale, s.start_compact, s.window_geometry),
+                         ("top", 150, 100, True, ""))
+        self.assertIn("v1", s.migrations)
+        s2 = self.old()
+        s2.page_zoom, s2.ui_scale = 120, 175                 # масштаб страницы уже свой — не трогать
+        migrations.apply(s2)
+        self.assertEqual((s2.page_zoom, s2.ui_scale), (120, 100))
+        s3 = self.old()
+        s3.ui_scale = 250                                     # к пределам 80…200
+        migrations.apply(s3)
+        self.assertEqual(s3.page_zoom, 200)
+
+    def test_migration_v1_once(self):
+        from autoprint import migrations
+        s = self.old()
+        migrations.apply(s)
+        s.page_plan, s.window_geometry, s.start_compact = "strip", "BBBB", False
+        self.assertFalse(migrations.apply(s))
+        self.assertEqual((s.page_plan, s.window_geometry, s.start_compact), ("strip", "BBBB", False))
+
+    def test_new_defaults(self):
+        s = Settings()
+        self.assertEqual((s.page_plan, s.start_compact, s.last_view, s.compact), ("side", False, "", False))
+
+
+class SessionTest(unittest.TestCase):
+    """Перезапуск программы: тот же экран, маленький режим, урок в эфире; --tray — без окна."""
+
+    def setUp(self):
+        self.apps = []
+
+    def tearDown(self):
+        for a in self.apps:
+            a.efir.stop_live()
+            a._quitting = True
+            a.shutdown()
+            a.window.hide()
+        pump()
+
+    def start(self, templates=None, settings=None):
+        from autoprint.app_core import App
+        if templates is not None:
+            a = make_app(templates)
+            if settings is not None:
+                a.settings.__dict__.update(settings)
+        else:
+            store = TemplateStore()
+            a = App(self.apps[-1].settings if self.apps else Settings(), store, web=False)
+        self.apps.append(a)
+        return a
+
+    def restart(self, a):
+        """Выход и новый запуск с теми же настройками и данными."""
+        from autoprint.app_core import App
+        s = a.settings
+        a._quitting = True
+        a.shutdown()
+        a.window.hide()
+        self.apps.remove(a)
+        pump()
+        b = App(s, TemplateStore(), web=False)
+        self.apps.append(b)
+        return b
+
+    def test_restore_last_view(self):
+        a = self.start([lesson("A", "LA"), lesson("B", "LB")])
+        a.commands.cmd_view({"hash": "#/settings/sound"})
+        self.assertEqual(a.settings.last_view, "#/settings/sound")
+        a.commands.cmd_view({"hash": "#/new/plan"})          # шаги «Нового урока» не восстанавливаются
+        self.assertEqual(a.settings.last_view, "#/settings/sound")
+        b = self.restart(a)
+        self.assertEqual(b.nav["hash"], "#/settings/sound")
+        b.commands.cmd_view({"hash": "#/lesson/LB"})
+        c = self.restart(b)
+        self.assertEqual(c.nav["hash"], "#/lesson/LB")
+        c.delete_lesson(c.store.get("LB"))                   # урока больше нет — «Уроки»
+        c.settings.last_view = "#/lesson/LB"
+        d = self.restart(c)
+        self.assertEqual(d.nav["hash"], "#/lessons")
+
+    def test_restore_live_lesson_view(self):
+        a = self.start([lesson("A", "LA"), lesson("B", "LB")])
+        a.commands.cmd_view({"hash": "#/efir"})
+        a.printer.set_focus("LB")
+        a.lesson.command({"cmd": "start"})
+        self.assertEqual(a.efir.live_lesson_id(), "LB")
+        a.set_compact(True)
+        b = self.restart(a)
+        self.assertEqual(b.nav["hash"], "#/lesson/LB")      # урок в эфире — важнее последнего экрана
+        self.assertTrue(b.window.compact)
+        b.efir.restore()
+        self.assertEqual(b.efir.live_lesson_id(), "LB")
+        b.set_compact(False)
+
+    def test_tray_flag_starts_hidden(self):
+        a = self.start([lesson("A", "LA")])
+        a.window.hide()
+        a.start(tray=True)
+        pump()
+        self.assertFalse(a.window.isVisible())
+        a.start(tray=False)
+        pump()
+        self.assertTrue(a.window.isVisible())
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
