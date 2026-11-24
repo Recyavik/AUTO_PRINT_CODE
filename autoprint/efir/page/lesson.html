@@ -219,17 +219,29 @@ body.mode-prep .lbl .sub { cursor: text; }
 .r-important .c { color: var(--imp); font-weight: 700; font-size: 16px; }
 .r-extra .c { color: var(--dim); }
 .r-trap .c li::marker { color: var(--trap); }
-/* правка заметки — то же поле, тот же шрифт: блок не прыгает */
-textarea.c.edit { display: block; width: 100%; margin: 0; padding: 0; border: none; outline: none; resize: none;
-  background: transparent; font-family: inherit; white-space: pre-wrap; field-sizing: content; min-height: 1.55em;
-  caret-color: var(--accent); overflow: hidden; }
-.r-say textarea.c.edit { font-size: 18px; font-weight: 500; line-height: 1.55; }
-.r-term textarea.c.edit { font-size: 16px; line-height: 1.55; }
-.r-tell textarea.c.edit { font-size: 16px; }
-.r-ask textarea.c.edit { font-size: 18px; font-weight: 600; }
-.r-do textarea.c.edit { font-size: 14.5px; }
-.r-output textarea.c.edit { font: 14px/1.55 var(--mono); }
-.r-important textarea.c.edit { font-size: 16px; font-weight: 700; }
+/* правка заметки «как в Word» — то же поле, тот же шрифт: блок не прыгает; разметки не видно */
+.ned .rich { outline: none; min-height: 1.55em; caret-color: var(--accent); cursor: text; }
+.ned .rich:empty::before { content: attr(data-placeholder); color: var(--faint); font-style: italic; font-weight: 400; }
+.ned .rich a { color: var(--accent); }
+.r-ask .ned .rich { font-size: 18px; font-weight: 600; color: var(--text); }
+.r-term .ned .rich { font-size: 16px; }
+.ned .termin { display: block; width: 100%; margin: 0 0 2px; padding: 0; border: none; outline: none; background: transparent;
+  font: 800 19px/1.4 var(--ui); color: var(--text); }
+.ned .termin::placeholder, .ned .ansin::placeholder { color: var(--faint); font-weight: 400; font-style: italic; }
+.ansed { display: flex; flex-direction: column; gap: 2px; margin-top: 4px; }
+.ansrow { display: flex; align-items: center; gap: 6px; }
+.ansrow .arr { color: var(--ask-ans); font-size: 15px; }
+.ansin { flex: 1; min-width: 0; padding: 2px 0; border: none; border-bottom: 1px dashed var(--stroke2); outline: none;
+  background: transparent; font: 15px/1.55 var(--ui); color: var(--ask-ans); }
+.ansin:focus { border-bottom-color: var(--accent); }
+.ansdel { min-height: 24px; padding: 0 6px; border: none; background: transparent; color: var(--faint); }
+.addans { align-self: flex-start; min-height: 26px; margin-top: 2px; padding: 0 10px; font-size: 13px; background: transparent; color: var(--dim); }
+.blk > .rtb { position: absolute; top: 2px; right: 8px; z-index: 6; display: flex; flex-wrap: wrap; gap: 2px; padding: 3px;
+  border-radius: 9px; background: var(--menu); border: 1px solid var(--stroke2); box-shadow: var(--shadow); }
+.rtb button { min-height: 26px; padding: 0 9px; font-size: 13px; border: none; border-radius: 6px; background: transparent; color: var(--text2); }
+.rtb button:hover { background: var(--card2); color: var(--text); }
+.rtb .rt-bold { font-weight: 900; } .rtb .rt-italic { font-style: italic; font-family: Georgia, serif; }
+.rtb .rt-code { font-family: var(--mono); }
 .blk.editing .row { box-shadow: 0 0 0 1px var(--accent-line) inset; }
 
 /* код */
@@ -405,7 +417,7 @@ body.mode-lesson.plan-strip.plan-open nav#plan { display: block; position: fixed
     --show:#6B2FB0; --extra:#6B2FB0; --term:#0E7C6E; --output:#237A32;
     --t-c:#777; --t-k:#9A5500; --t-b:#0F6A85; --t-f:#1F5FBF; --t-cl:#7A4E00; --t-d:#7A4E00; --t-t:#B00020; --t-a:#8A4513;
     --t-s:#1E6B2B; --t-n:#6B2FB0; --t-o:#555; font-size: 12px; }
-  header { position: static; border: none; padding: 0 0 8px; } .tools, #legend, #offline, #toast, #nowbar, #strip, .armbtn, .efirbtn, .phint, .ins,
+  header { position: static; border: none; padding: 0 0 8px; } .tools, #legend, #offline, #toast, #nowbar, #strip, .rtb, .armbtn, .efirbtn, .phint, .ins,
   .blk > .tools, .sedit, #lessonsBtn, .pmin { display: none !important; }
   #wrap { display: block; padding: 0; } nav#plan { position: static; max-height: none; overflow: visible; margin-bottom: 14px; }
   .stage { break-inside: auto; margin-bottom: 10px; } .stage .body, .stage.collapsed .body { display: block !important; }

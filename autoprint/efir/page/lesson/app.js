@@ -724,6 +724,7 @@ $("main").addEventListener("click", (e) => {
     return;
   }
   if (!blk) return;
+  if (t.closest(".ned, .rtb")) return;              // щелчок внутри правки (поле, ответы, кнопки) — правка уже идёт
   const it = A.byId.get(blk.dataset.id);
   if (!it) return;
   E.selectBlock(it.id);

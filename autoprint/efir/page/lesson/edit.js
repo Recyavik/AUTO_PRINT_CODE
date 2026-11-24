@@ -5,6 +5,8 @@ import { A, $, el, icon, menu, closeMenu, toast, newId, isTyping, cmd } from "./
 import * as Q from "./queue.js";
 import { nodeOf, stageOfBlock } from "./render.js";
 import { beginCode, endCode } from "./code.js";
+import { mdHtml, askParts, escapeHtml } from "./md.js";
+import { toMarkdown, cleanPaste } from "./richtext.js";
 
 const refresh = () => window.dispatchEvent(new Event("suflor:refresh"));
 export const item = (id) => A.byId.get(id);
@@ -107,67 +109,261 @@ export function moveStage(id, afterStage) {
 }
 window.__moveStage = moveStage;       // для проверки переноса этапа без мыши
 
-// ---------------------------------------------------------------- правка заметки
-function autosize(ta) {
-  ta.style.height = "auto";
-  ta.style.height = ta.scrollHeight + "px";
+// ---------------------------------------------------------------- правка заметки «как в Word»
+// В поле — оформленный текст, как его потом читают; Markdown — только внутри (toMarkdown). У «Спроси» — поле
+// вопроса и строки ответов, у «Термина» — термин и определение. Панель кнопок плавает в строке подписи:
+// текст при начале правки не сдвигается.
+const TOOLS = [["bold", "Ж", "Жирный (Ctrl+B)"], ["italic", "К", "Курсив (Ctrl+I)"], ["ul", "• Список", "Маркированный список"],
+  ["ol", "1. Список", "Нумерованный список"], ["code", "Код", "Код в строке, например print()"], ["link", "Ссылка", "Ссылка (Ctrl+K)"],
+  ["clear", "Очистить", "Убрать оформление выделенного"]];
+
+let noteState = null;      // {id, box, bar, node, rich, focusEl, modal}
+
+function richField(html, placeholder, label) {
+  const r = el("div", "rich");
+  r.contentEditable = "true";
+  r.spellcheck = true;
+  r.innerHTML = html;
+  r.dataset.placeholder = placeholder;
+  r.setAttribute("role", "textbox");
+  r.setAttribute("aria-multiline", "true");
+  r.setAttribute("aria-label", label);
+  return r;
 }
 
-let noteState = null;      // {id, ta, node}
+function answerRow(value, onChange) {
+  const row = el("div", "ansrow");
+  row.appendChild(el("span", "arr", "→"));
+  const inp = el("input", "ansin");
+  inp.value = value;
+  inp.placeholder = "Что может ответить ученик";
+  inp.setAttribute("aria-label", "Ответ ученика");
+  row.appendChild(inp);
+  const del = el("button", "ansdel", "×");
+  del.type = "button";
+  del.title = "Убрать ответ";
+  del.addEventListener("mousedown", (e) => e.preventDefault());
+  del.onclick = () => { row.remove(); onChange(); };
+  row.appendChild(del);
+  inp.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && !e.ctrlKey) {
+      e.preventDefault();
+      const nr = answerRow("", onChange);
+      row.after(nr);
+      nr.querySelector("input").focus();
+    } else if (e.key === "Backspace" && !inp.value) {
+      const prev = row.previousElementSibling && row.previousElementSibling.querySelector("input");
+      e.preventDefault();
+      row.remove();
+      onChange();
+      if (prev) prev.focus();
+    }
+  });
+  return row;
+}
+
+function toggleCode(rich) {
+  const sel = getSelection();
+  if (!sel.rangeCount) return;
+  const r = sel.getRangeAt(0);
+  const node = r.commonAncestorContainer;
+  const anc = (node.nodeType === 1 ? node : node.parentElement).closest("code");
+  if (anc && rich.contains(anc)) { anc.replaceWith(document.createTextNode(anc.textContent)); return; }
+  if (r.collapsed) return;
+  const code = document.createElement("code");
+  code.textContent = r.toString();
+  r.deleteContents();
+  r.insertNode(code);
+  const nr = document.createRange();
+  nr.setStartAfter(code);
+  nr.collapse(true);
+  sel.removeAllRanges();
+  sel.addRange(nr);
+}
+
+function insertFragment(rich, html) {
+  const sel = getSelection();
+  const t = document.createElement("template");
+  t.innerHTML = html;
+  const frag = t.content;
+  const last = frag.lastChild;
+  if (!rich.textContent.trim()) {
+    rich.innerHTML = "";
+    rich.appendChild(frag);
+  } else {
+    let r;
+    if (sel.rangeCount && rich.contains(sel.getRangeAt(0).commonAncestorContainer)) { r = sel.getRangeAt(0); r.deleteContents(); }
+    else { r = document.createRange(); r.selectNodeContents(rich); r.collapse(false); }
+    r.insertNode(frag);
+  }
+  if (last) {
+    const nr = document.createRange();
+    nr.selectNodeContents(last);
+    nr.collapse(false);
+    sel.removeAllRanges();
+    sel.addRange(nr);
+  }
+}
+
+function addLink(rich) {
+  const sel = getSelection();
+  const saved = sel.rangeCount ? sel.getRangeAt(0).cloneRange() : null;
+  if (noteState) noteState.modal = true;
+  const url = (prompt("Адрес ссылки", "https://") || "").trim();
+  if (noteState) noteState.modal = false;
+  rich.focus();
+  if (saved) { sel.removeAllRanges(); sel.addRange(saved); }
+  if (!/^https?:\/\/\S+$/i.test(url)) return;
+  if (sel.isCollapsed) insertFragment(rich, `<a href="${escapeHtml(url)}">${escapeHtml(url)}</a>`);
+  else document.execCommand("createLink", false, url);
+}
+
+function runTool(cmd_, rich) {
+  rich.focus();
+  if (cmd_ === "bold" || cmd_ === "italic") document.execCommand(cmd_);
+  else if (cmd_ === "ul") document.execCommand("insertUnorderedList");
+  else if (cmd_ === "ol") document.execCommand("insertOrderedList");
+  else if (cmd_ === "code") toggleCode(rich);
+  else if (cmd_ === "link") addLink(rich);
+  else if (cmd_ === "clear") { document.execCommand("removeFormat"); document.execCommand("unlink"); }
+  rich.dispatchEvent(new Event("input", { bubbles: true }));
+}
+
+function toolbar(rich) {
+  const bar = el("div", "rtb");
+  bar.setAttribute("role", "toolbar");
+  bar.setAttribute("aria-label", "Оформление текста");
+  for (const [k, n, h] of TOOLS) {
+    const b = el("button", "rt-" + k, n);
+    b.type = "button";
+    b.dataset.cmd = k;
+    b.title = h;
+    b.addEventListener("mousedown", (e) => e.preventDefault());    // выделение в тексте остаётся
+    b.onclick = () => runTool(k, rich);
+    bar.appendChild(b);
+  }
+  return bar;
+}
 
 export function beginNote(n, it, caretAtEnd = true) {
-  if (noteState && noteState.id === it.id) { noteState.ta.focus(); return; }
+  if (noteState && noteState.id === it.id) { noteState.focusEl.focus(); return; }
   finishEditing();
   const c = n.querySelector(".row > .c");
   if (!c) return;
-  const ta = el("textarea", "c edit");
-  ta.value = it.text || "";
-  ta.rows = 1;
-  ta.spellcheck = true;
-  ta.placeholder = it.role === "ask" ? "Вопрос. Ниже строки «→ ответ» — что могут ответить ученики"
-    : it.role === "term" ? "Термин в первой строке, ниже — определение" : "Пишите…";
-  ta.setAttribute("aria-label", "Текст заметки");
-  c.replaceWith(ta);
+  document.execCommand("defaultParagraphSeparator", false, "p");
+  document.execCommand("styleWithCSS", false, false);
+  const box = el("div", "c edit ned");
+  const role = it.role || "text";
+  const text = it.text || "";
+  let rich, termIn = null, ansBox = null;
+  const changed = () => Q.draft(it.id, { text: serialize() });
+  if (role === "ask") {
+    const [q, ans] = askParts(text);
+    rich = richField(mdHtml(q), "Вопрос классу", "Вопрос");
+    box.appendChild(rich);
+    ansBox = el("div", "ansed");
+    for (const a of ans) ansBox.appendChild(answerRow(a, changed));
+    const add = el("button", "addans", "+ ответ ученика");
+    add.type = "button";
+    add.addEventListener("mousedown", (e) => e.preventDefault());
+    add.onclick = () => { const r = answerRow("", changed); ansBox.insertBefore(r, add); r.querySelector("input").focus(); };
+    ansBox.appendChild(add);
+    box.appendChild(ansBox);
+  } else if (role === "term") {
+    const [head, ...rest] = text.trim().split("\n");
+    termIn = el("input", "termin");
+    termIn.value = text.trim() ? head.trim() : "";
+    termIn.placeholder = "Термин";
+    termIn.setAttribute("aria-label", "Термин");
+    box.appendChild(termIn);
+    rich = richField(mdHtml(rest.join("\n").trim()), "Определение — дословно", "Определение");
+    box.appendChild(rich);
+  } else {
+    rich = richField(mdHtml(text), "Пишите…", "Текст заметки");
+    box.appendChild(rich);
+  }
+  function serialize() {
+    let md = toMarkdown(rich);
+    if (termIn) md = (termIn.value.trim() + (md ? "\n" + md : "")).trim();
+    if (ansBox) {
+      const a = [...ansBox.querySelectorAll(".ansin")].map((i) => i.value.trim()).filter(Boolean);
+      if (a.length) md = (md ? md + "\n" : "") + a.map((x) => "→ " + x).join("\n");
+    }
+    return md;
+  }
+  const bar = toolbar(rich);
+  n.appendChild(bar);
+  c.replaceWith(box);
   n.classList.add("editing");
   A.editing = it.id;
-  noteState = { id: it.id, ta, node: n };
-  autosize(ta);
-  ta.focus({ preventScroll: true });
-  if (caretAtEnd) ta.setSelectionRange(ta.value.length, ta.value.length);
-  ta.addEventListener("input", () => { autosize(ta); Q.draft(it.id, { text: ta.value }); });
-  ta.addEventListener("keydown", (e) => {
-    if (e.key === "Escape") { e.preventDefault(); ta.blur(); return; }
+  const focusEl = termIn && !termIn.value ? termIn : rich;
+  noteState = { id: it.id, box, bar, node: n, rich, focusEl, modal: false };
+  box.addEventListener("input", changed);
+  rich.addEventListener("paste", (e) => {
+    const dt = e.clipboardData;
+    if (!dt) return;
+    const img = [...(dt.items || [])].find((x) => x.kind === "file" && /^image\//.test(x.type));
+    const html = dt.getData("text/html"), plain = dt.getData("text/plain");
+    e.preventDefault();
+    if (img && !plain) { uploadImage(img.getAsFile(), it.id); return; }        // снимок экрана — картинкой после заметки
+    if (html) insertFragment(rich, cleanPaste(html));
+    else if (plain) document.execCommand("insertText", false, plain);
+    changed();
+  });
+  box.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") { e.preventDefault(); document.activeElement.blur(); return; }
     if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
       e.preventDefault();
-      const role = (item(it.id) || it).role || "say";
-      const nid = insertBlock(it.id, "markdown", { role });
-      ta.blur();
+      const nrole = (item(it.id) || it).role || "say";
+      const nid = insertBlock(it.id, "markdown", { role: nrole });
+      document.activeElement.blur();
       startEditingSoon(nid);
       return;
     }
-    if (e.altKey && (e.key === "ArrowUp" || e.key === "ArrowDown")) {
-      e.preventDefault();
-      moveBlock(it.id, e.key === "ArrowDown" ? 1 : -1);
+    if (e.altKey && (e.key === "ArrowUp" || e.key === "ArrowDown")) { e.preventDefault(); moveBlock(it.id, e.key === "ArrowDown" ? 1 : -1); return; }
+    if ((e.ctrlKey || e.metaKey) && e.target === rich) {
+      const k = e.key.toLowerCase();
+      if (k === "k" || k === "л") { e.preventDefault(); runTool("link", rich); }
+      else if (k === "u" || k === "г") e.preventDefault();                     // подчёркивания в заметке нет
     }
   });
-  ta.addEventListener("blur", () => setTimeout(() => {
-    if (noteState && noteState.ta === ta && document.activeElement !== ta) finishNote();
+  box.addEventListener("focusout", () => setTimeout(() => {
+    const st = noteState;
+    if (!st || st.box !== box || st.modal) return;
+    const a = document.activeElement;
+    if (a && (box.contains(a) || bar.contains(a))) return;
+    finishNote();
   }, 0));
+  focusEl.focus({ preventScroll: true });
+  if (caretAtEnd && focusEl === rich) {
+    const r = document.createRange();
+    r.selectNodeContents(rich);
+    r.collapse(false);
+    const sel = getSelection();
+    sel.removeAllRanges();
+    sel.addRange(r);
+  }
 }
 
 function finishNote() {
   if (!noteState) return;
-  const { id, node } = noteState;
+  const { id, node, bar } = noteState;
   noteState = null;
   Q.flush(id);
+  bar.remove();
   if (A.editing === id) A.editing = null;
   node.classList.remove("editing");
   node.dataset.v = "stale";            // перерисовать: заметка показывается снова (сразу, без ответа программы)
   refresh();
 }
 
+function blurNote() {
+  const a = document.activeElement;
+  if (noteState && a && noteState.box.contains(a)) a.blur();
+}
+
 export function finishEditing() {
-  if (noteState) noteState.ta.blur(), finishNote();
+  if (noteState) { blurNote(); finishNote(); }
   endCode();
 }
 
@@ -181,7 +377,7 @@ export function startEditingSoon(id) {
   }));
 }
 
-export function finishNoteOnly() { if (noteState) { noteState.ta.blur(); finishNote(); } }
+export function finishNoteOnly() { if (noteState) { blurNote(); finishNote(); } }
 export function editingNote() { return noteState; }
 
 // ---------------------------------------------------------------- маленькое поле на месте (заголовок, минуты)

@@ -147,29 +147,120 @@ class PageEditTest(Page):
     def test_click_edit_same_height(self):
         h0 = self.js("document.querySelector('[data-id=n1] .row > .c').getBoundingClientRect().height")
         self.js("document.querySelector('[data-id=n1] .row > .c').click()")
-        self.assertTrue(self.edge.wait("document.activeElement && document.activeElement.tagName === 'TEXTAREA'"))
+        self.assertTrue(self.edge.wait("document.activeElement && document.activeElement.isContentEditable"))
         h1 = self.js("document.activeElement.getBoundingClientRect().height")
         self.assertLessEqual(abs(h1 - h0), 2, f"было {h0}, в правке {h1}")
         self.js("document.activeElement.blur()")
 
     def test_type_saves(self):
         self.js("document.querySelector('[data-id=n4] .row > .c').click()")
-        self.assertTrue(self.edge.wait("document.activeElement && document.activeElement.tagName === 'TEXTAREA'"))
+        self.assertTrue(self.edge.wait("document.activeElement && document.activeElement.isContentEditable"))
         self.edge.text(" Привет!")
         self.assertTrue(self.wait_py(lambda: self.block("n4").text.endswith(" Привет!")), self.block("n4").text)
         self.js("document.activeElement.blur()")
-        self.assertTrue(self.edge.wait("!document.querySelector('[data-id=n4] textarea') && "
+        self.assertTrue(self.edge.wait("!document.querySelector('[data-id=n4] .rich') && "
                                        "document.querySelector('[data-id=n4] .c').textContent.includes('Привет!')"))
 
     def test_echo_keeps_caret(self):
         self.js("document.querySelector('[data-id=n2] .row > .c').click()")
-        self.assertTrue(self.edge.wait("document.activeElement && document.activeElement.tagName === 'TEXTAREA'"))
-        self.js("{ const t = document.activeElement; t.__mark = 1; t.setSelectionRange(3, 3); }")
+        self.assertTrue(self.edge.wait("document.activeElement && document.activeElement.isContentEditable"))
+        self.js("{ const t = document.activeElement; t.__mark = 1; const tn = t.querySelector('p').firstChild;"
+                " const r = document.createRange(); r.setStart(tn, 3); r.collapse(true);"
+                " const sel = getSelection(); sel.removeAllRanges(); sel.addRange(r); }")
         self.block("intro1").text = "Цель: научиться писать функции (обновлено)."
         self.win.lesson.publish()
         self.assertTrue(self.edge.wait("document.querySelector('[data-id=intro1] .c').textContent.includes('обновлено')"))
-        self.assertTrue(self.js("document.activeElement.__mark === 1 && document.activeElement.selectionStart === 3"))
+        self.assertTrue(self.js("document.activeElement.__mark === 1 && getSelection().anchorOffset === 3"))
         self.js("document.activeElement.blur()")
+
+    # ---------------------------------------------------------------- 0.11 Task 5: правка как в Word
+    def select_text(self, bid, word):
+        self.js(f"""{{ const root = document.querySelector('[data-id={bid}] .rich');
+            const w = document.createTreeWalker(root, NodeFilter.SHOW_TEXT); let n;
+            while ((n = w.nextNode())) {{ const i = n.data.indexOf({word!r}); if (i >= 0) {{
+              const r = document.createRange(); r.setStart(n, i); r.setEnd(n, i + {len(word)});
+              const s = getSelection(); s.removeAllRanges(); s.addRange(r); break; }} }} }}""")
+
+    def tool(self, cmd_):
+        self.js(f"{{ const b = document.querySelector('.rtb [data-cmd={cmd_}]');"
+                " b.dispatchEvent(new MouseEvent('mousedown', {bubbles: true, cancelable: true})); b.click(); }")
+
+    def test_rich_bold(self):
+        self.js("document.querySelector('[data-id=n1] .row > .c').click()")
+        self.assertTrue(self.edge.wait("document.activeElement && document.activeElement.isContentEditable"))
+        self.assertTrue(self.edge.wait("!!document.querySelector('.rtb [data-cmd=bold]')"))
+        self.select_text("n1", "Сегодня")
+        self.tool("bold")
+        self.assertTrue(self.wait_py(lambda: "**Сегодня**" in self.block("n1").text), self.block("n1").text)
+        self.assertNotIn("*", self.js("document.querySelector('[data-id=n1] .rich').textContent"))
+        self.select_text("n1", "Сегодня")
+        self.tool("bold")                                                          # снять жирный
+        self.assertTrue(self.wait_py(lambda: "*" not in self.block("n1").text), self.block("n1").text)
+        self.js("document.activeElement.blur()")
+
+    def test_rich_roundtrip(self):
+        md = ("**a** *b* `c` [d](https://x.ru) и https://y.ru\n\n- e\n- f\n\n1. g\n2. h\n\n# Заголовок\n\n"
+              "строка\nещё строка")
+        once = self.js(f"window.__rt.roundtrip({md!r})")
+        self.assertEqual(once, md)
+        self.assertEqual(self.js("window.__rt.roundtrip('**a** b\\n- e')"), "**a** b\n\n- e")
+        before = self.block("n3").text
+        self.js("document.querySelector('[data-id=n3] .row > .c').click()")
+        self.assertTrue(self.edge.wait("document.activeElement && document.activeElement.isContentEditable"))
+        self.js("document.activeElement.blur()")
+        pump(600)
+        self.assertEqual(self.block("n3").text, before)                         # открыть и закрыть — текст тот же
+
+    def test_ask_fields(self):
+        q = "Что такое функция?\n→ кусок кода с именем"
+        self.assertEqual(self.block("n2").text, q)
+        self.js("document.querySelector('[data-id=n2] .row > .c').click()")
+        self.assertTrue(self.edge.wait("document.querySelectorAll('[data-id=n2] .ansin').length === 1"))
+        self.assertEqual(self.js("document.querySelector('[data-id=n2] .ansin').value"), "кусок кода с именем")
+        self.assertNotIn("→", self.js("document.querySelector('[data-id=n2] .rich').textContent"))
+        self.js("document.querySelector('[data-id=n2] .addans').click()")
+        self.assertTrue(self.edge.wait("document.activeElement && document.activeElement.classList.contains('ansin')"))
+        self.edge.text("блок с именем")
+        self.assertTrue(self.wait_py(lambda: self.block("n2").text == q + "\n→ блок с именем"), self.block("n2").text)
+        self.js("document.querySelectorAll('[data-id=n2] .ansdel')[1].click()")
+        self.assertTrue(self.wait_py(lambda: self.block("n2").text == q), self.block("n2").text)
+        self.js("document.activeElement.blur()")
+
+    def test_term_fields(self):
+        t0 = self.block("n3").text
+        term, definition = t0.split("\n", 1)
+        self.js("document.querySelector('[data-id=n3] .row > .c').click()")
+        self.assertTrue(self.edge.wait("!!document.querySelector('[data-id=n3] .termin')"))
+        self.assertEqual(self.js("document.querySelector('[data-id=n3] .termin').value"), term)
+        self.js("{ const i = document.querySelector('[data-id=n3] .termin'); i.focus(); i.setSelectionRange(i.value.length, i.value.length); }")
+        self.edge.text(" Python")
+        self.assertTrue(self.wait_py(lambda: self.block("n3").text == f"{term} Python\n{definition}"), self.block("n3").text)
+        for _ in range(7):
+            self.edge.key("Backspace", "Backspace", 8)
+        self.assertTrue(self.wait_py(lambda: self.block("n3").text == t0), self.block("n3").text)
+        self.js("document.activeElement.blur()")
+
+    def test_paste_word(self):
+        ids = lambda: [b.id for b in self.t.blocks]
+        self.js("document.querySelector('.ins[data-after=n4] .insbtn').click()")
+        self.assertTrue(self.edge.wait("!!document.querySelector('.menu')"))
+        self.js("[...document.querySelectorAll('.menu .mi')].find(b => b.querySelector('.ml').textContent === 'Заметка').click()")
+        self.assertTrue(self.wait_py(lambda: ids()[-1] != "n4"))
+        new = ids()[-1]
+        self.assertTrue(self.edge.wait("document.activeElement && document.activeElement.isContentEditable"))
+        html = ('<html><head><style>p{color:red}</style></head><body><!--StartFragment-->'
+                '<p class=MsoNormal style="margin:0"><b><span style="font-size:14pt">Жир</span></b> '
+                '<span style="color:red;font-family:Calibri">текст</span></p>'
+                '<ul><li style="mso-list:l0">раз</li><li>два</li></ul><script>x()</script><!--EndFragment--></body></html>')
+        self.js(f"""{{ const dt = new DataTransfer(); dt.setData('text/html', {html!r}); dt.setData('text/plain', 'Жир текст');
+            document.activeElement.dispatchEvent(new ClipboardEvent('paste', {{clipboardData: dt, bubbles: true, cancelable: true}})); }}""")
+        self.assertTrue(self.wait_py(lambda: (self.block(new) or Block(BLOCK_MARKDOWN, "")).text == "**Жир** текст\n\n- раз\n- два"),
+                        (self.block(new) or Block(BLOCK_MARKDOWN, "")).text)
+        self.assertEqual(self.js("document.querySelector('.rich [style], .rich script, .rich span') === null"), True)
+        self.js("document.activeElement.blur()")
+        self.js(f"document.querySelector('[data-id=\"{new}\"] .lbl').click()")
+        self.edge.key("Delete", "Delete", 46)
+        self.assertTrue(self.wait_py(lambda: new not in ids()))
 
     def test_other_nodes_kept(self):
         self.js("document.querySelectorAll('.blk[data-id]').forEach(n => n.__keep = 1)")
@@ -189,7 +280,7 @@ class PageEditTest(Page):
         ids = [b.id for b in self.t.blocks]
         new = self.t.blocks[ids.index("n1") + 1]
         self.assertEqual((new.type, new.role), (BLOCK_MARKDOWN, "ask"))
-        self.assertTrue(self.edge.wait("document.activeElement && document.activeElement.tagName === 'TEXTAREA'"))
+        self.assertTrue(self.edge.wait("document.activeElement && document.activeElement.isContentEditable"))
         self.edge.text("Новый вопрос?")
         self.js("document.activeElement.blur()")
         self.assertTrue(self.wait_py(lambda: self.block(new.id).text == "Новый вопрос?"))   # правка заменяет объекты блоков
@@ -238,7 +329,7 @@ class PageEditTest(Page):
         self.js("[...document.querySelectorAll('.menu .mi')].find(b => b.querySelector('.ml').textContent === 'Говоришь').click()")
         self.assertTrue(self.wait_py(lambda: ids()[ids().index("n3") + 1] != "c1"))
         new = ids()[ids().index("n3") + 1]
-        self.assertTrue(self.edge.wait("document.activeElement && document.activeElement.tagName === 'TEXTAREA'"))
+        self.assertTrue(self.edge.wait("document.activeElement && document.activeElement.isContentEditable"))
         self.edge.text("Определение — дословно.")
         self.js("document.activeElement.blur()")
         self.assertTrue(self.wait_py(lambda: (self.block(new) or Block(BLOCK_MARKDOWN, "")).text == "Определение — дословно."))
@@ -286,7 +377,7 @@ class PageEditTest(Page):
         self.win.efir.server.stop()
         pump(200)
         self.js("document.querySelector('[data-id=n1] .row > .c').click()")
-        self.assertTrue(self.edge.wait("document.activeElement && document.activeElement.tagName === 'TEXTAREA'"))
+        self.assertTrue(self.edge.wait("document.activeElement && document.activeElement.isContentEditable"))
         self.edge.text(" (без связи)")
         self.js("document.activeElement.blur()")
         self.js("document.querySelector('.ins[data-after=n1] .insbtn').click()")
@@ -562,7 +653,7 @@ class PagePerfTest(Page):
         self.mode("prep")
         before = self.js("window.__renders()")
         self.js("document.querySelectorAll('.blk[data-type=markdown] .row > .c')[3].click()")
-        self.assertTrue(self.edge.wait("document.activeElement && document.activeElement.tagName === 'TEXTAREA'"))
+        self.assertTrue(self.edge.wait("document.activeElement && document.activeElement.isContentEditable"))
         for ch in "двадцать букв подряд":
             self.edge.text(ch)
         pump(1200)
