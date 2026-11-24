@@ -68,7 +68,11 @@ def app_state(app) -> dict:
                 "index": ag.index, "count": len(segs), "name": cur.activity.name if cur is not None else "",
                 "ends_ms": int(cur.end.timestamp() * 1000) if cur is not None else 0,
                 "start_ms": int(ag.start.timestamp() * 1000) if ag.start else 0,
-                "end_ms": int(ag.end.timestamp() * 1000) if ag.end else 0}
+                "end_ms": int(ag.end.timestamp() * 1000) if ag.end else 0,
+                # повестка — для маленького режима (урок и вебинар одинаково): этапы с часами
+                "segments": [{"name": sg.activity.name, "kind": sg.activity.kind or "",
+                              "start_ms": int(sg.start.timestamp() * 1000), "end_ms": int(sg.end.timestamp() * 1000)}
+                             for sg in segs]}
     win = app.window
     return {
         "version": __version__,

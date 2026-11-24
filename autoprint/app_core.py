@@ -201,6 +201,8 @@ class App(QObject):
 
     def set_compact(self, on: bool) -> None:
         self.window.set_compact(on)
+        if hasattr(self, "tray"):
+            self.tray.set_compact(self.window.compact)
         self.show_window()
         self._settings_timer.start()
         self.changed.emit("window")

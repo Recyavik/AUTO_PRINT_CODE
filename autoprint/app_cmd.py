@@ -80,6 +80,9 @@ class AppCommands(QObject):
         op = str(d.get("op") or "")
         if op == "regions":
             self.app.window.set_regions(d)
+        elif op == "compact":                      # маленький режим — и пункт трея меняется
+            arg = d.get("arg")
+            self.app.set_compact(not self.app.window.compact if arg is None else bool(arg))
         else:
             self.app.window.window_cmd(op, d.get("arg"))
             self.app.changed.emit("window")
@@ -316,6 +319,20 @@ class AppCommands(QObject):
                 t.title = topic
             self.app.add_new_lesson(t, notes + list(res.get("notes") or []), res.get("style") or "")
         return {"job": self.app.jobs.start("ai", fn, done, title)}
+
+    def cmd_live_next(self, _d: dict) -> None:
+        """Маленький режим, «Следующий этап»: следующий этап урока или блок вебинара — с этой минуты (до начала —
+        первый)."""
+        ef = self.app.efir
+        if ef.live_webinar() is None:
+            return
+        ag = ef.agenda()
+        if ag.phase == "after":
+            return
+        nxt = ag.index + 1 if ag.phase == "live" else 0
+        if nxt < len(ef.segments()):
+            ef.start_now(nxt)
+            self.app.lesson.schedule_publish()
 
     def cmd_job_cancel(self, d: dict) -> None:
         self.app.jobs.cancel(str(d.get("id") or ""))

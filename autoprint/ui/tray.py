@@ -17,7 +17,7 @@ class Tray:
         self.icon = QSystemTrayIcon(self.icons[logo.IDLE], app)
         menu = QMenu()
         menu.addAction("Показать окно", app.show_window)
-        menu.addAction("Маленький режим", lambda: app.set_compact(True))
+        self.compact_action = menu.addAction("Маленький режим", lambda: app.set_compact(not app.window.compact))
         menu.addSeparator()
         menu.addAction("Старт / пауза", lambda: app.printer.toggle(
             countdown=max(1, int(app.settings.button_countdown_s)), pressed=True))
@@ -38,6 +38,10 @@ class Tray:
     def items(self) -> list[str]:
         """Подписи пунктов меню (для проверки)."""
         return [a.text() for a in self.menu.actions() if not a.isSeparator()]
+
+    def set_compact(self, on: bool) -> None:
+        """Пункт меню — в другой режим: маленький окно уже — «Большой режим»."""
+        self.compact_action.setText("Большой режим" if on else "Маленький режим")
 
     def set_state(self, kind: str, tip: str) -> None:
         self.icon.setIcon(self.icons.get(kind, self.icons[logo.IDLE]))

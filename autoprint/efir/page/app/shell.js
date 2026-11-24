@@ -128,12 +128,13 @@ function rectOf(el) {
  * раз пиксель прямоугольника больше пикселя окна (в разных Chromium getBoundingClientRect с CSS zoom считает по-разному). */
 export function sendRegions(force) {
   const drag = [], holes = [];
+  const shown = (el) => el.getClientRects().length > 0;           // fixed-элементы (табло) без offsetParent — тоже видны
   for (const d of document.querySelectorAll("[data-drag]")) {
-    if (!d.offsetParent && d.id !== "titlebar") continue;
+    if (!shown(d)) continue;
     if (d.parentElement && d.parentElement.closest("[data-drag]")) continue;   // вложенная ручка — внутри внешней
     drag.push(rectOf(d));
     for (const x of d.querySelectorAll(INTERACTIVE)) {
-      if (x.offsetParent === null) continue;
+      if (!shown(x)) continue;
       const outer = x.parentElement && x.parentElement.closest(INTERACTIVE);
       if (outer && d.contains(outer)) continue;                   // внутри другой кнопки или поля — уже дырка
       holes.push(rectOf(x));
