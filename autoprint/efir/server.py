@@ -53,8 +53,9 @@ mimetypes.add_type("font/woff", ".woff")
 mimetypes.add_type("image/webp", ".webp")
 mimetypes.add_type("image/svg+xml", ".svg")
 
-# screen — экран эфира для учеников, lesson — страница суфлёра урока, preview — предпросмотр из редактора шаблона
-CHANNELS = ("screen", "lesson", "preview")
+# screen — экран эфира для учеников, lesson — страница суфлёра урока, preview — предпросмотр из редактора шаблона,
+# app — окно программы (1.0): список уроков, эфир, настройки, состояние набора и окна
+CHANNELS = ("screen", "lesson", "preview", "app")
 _LANG_ICON = re.compile(r"/static/lang/([a-z0-9+#-]+\.svg)")
 _STATIC = re.compile(r"/static/(lesson|vendor)/([a-z0-9-]+\.(js|css|txt))")
 _STATIC_TYPES = {"js": "text/javascript; charset=utf-8", "css": "text/css; charset=utf-8",
@@ -143,6 +144,9 @@ class _Handler(BaseHTTPRequestHandler):
                 return self._send(200, body, "text/html; charset=utf-8")
             if path == "/lesson":
                 body = (PAGE_DIR / "lesson.html").read_bytes()
+                return self._send(200, body, "text/html; charset=utf-8")
+            if path == "/app":
+                body = (PAGE_DIR / "app.html").read_bytes()
                 return self._send(200, body, "text/html; charset=utf-8")
             if path == "/state":
                 return self._json(owner.snapshot(self._channel(query)))
@@ -336,7 +340,7 @@ class BroadcastServer:
         self._cond = threading.Condition()
         # экран эфира до первого настоящего состояния — «ждать»: открытая вкладка учеников держит прежний кадр
         # (после перезапуска программы она не мигает чёрным, идущий перерыв не пропадает)
-        self._states: dict[str, dict] = {"screen": {"mode": "wait"}, "lesson": {}, "preview": {}}
+        self._states: dict[str, dict] = {"screen": {"mode": "wait"}, "lesson": {}, "preview": {}, "app": {}}
         self._revs: dict[str, int] = {ch: 0 for ch in CHANNELS}
         self._media: dict[str, Path] = {}
         self._media_ids: dict[str, str] = {}

@@ -39,12 +39,16 @@ EXCLUDES = [
 ]
 # Нужны обязательно: QtMultimedia (QSoundEffect), QtSvg (значки), QtNetwork (QLocalServer —
 # второй запуск активирует уже открытое окно)
-HIDDEN = ["PySide6.QtMultimedia", "PySide6.QtSvg", "PySide6.QtNetwork", "PySide6.QtPdf"]   # QtPdf — материал урока из PDF
+HIDDEN = ["PySide6.QtMultimedia", "PySide6.QtSvg", "PySide6.QtNetwork", "PySide6.QtPdf",   # QtPdf — материал урока из PDF
+          "PySide6.QtWebEngineWidgets", "PySide6.QtWebEngineCore", "PySide6.QtPrintSupport"]   # 1.0: окно — встроенный браузер
 
 # Лишние двоичные файлы Qt (имена в сборке, без учёта регистра), всего ~60 МБ:
 # - FFmpeg и его плагин (~20 МБ): QSoundEffect играет WAV через windowsmediaplugin — проверено;
 # - opengl32sw.dll (~20 МБ): программный OpenGL, программе на виджетах он не нужен;
-# - экранная клавиатура (platforminputcontexts) — только она тянет Qt Quick/QML/OpenGL (~16 МБ);
+# - экранная клавиатура (platforminputcontexts, Qt6VirtualKeyboard). Qt Quick/QML/OpenGL с 1.0 остаются: на них
+#   стоит встроенный браузер (QtWebEngine) окна программы;
+# - у встроенного браузера — инструменты разработчика (*devtools*.pak, *.debug.pak, *.debug.bin) и переводы,
+#   кроме русского и английского;
 # - OpenSSL для Qt (*-x64.dll и qopensslbackend): QtNetwork нужен лишь для QLocalServer, а HTTPS
 #   у обновлений идёт через ssl самого Python (libssl-3.dll — остаётся);
 # - платформы qdirect2d/qminimal, networkinformation, тач-плагин TUIO, imageformats/qpdf (Qt6Pdf остаётся:
@@ -55,7 +59,10 @@ DROP_PATTERNS = [
     r"(^|/)(avcodec|avformat|avutil|avdevice|avfilter|swresample|swscale)-\d+\.dll$",
     r"/plugins/multimedia/ffmpegmediaplugin\.dll$",
     r"/plugins/platforminputcontexts/",
-    r"(^|/)qt6(virtualkeyboard|quick|qml|qmlmeta|qmlmodels|qmlworkerscript|opengl)\.dll$",
+    r"(^|/)qt6virtualkeyboard\.dll$",
+    r"(^|/)qtwebengine_devtools_resources(\.debug)?\.pak$",
+    r"\.debug\.(pak|bin)$",
+    r"/qtwebengine_locales/(?!(ru|en-US)\.pak$)[^/]+\.pak$",
     r"(^|/)lib(ssl|crypto)-3-x64\.dll$",
     r"/plugins/tls/qopensslbackend\.dll$",
     r"/plugins/platforms/(qdirect2d|qminimal)\.dll$",
@@ -75,7 +82,7 @@ REQUIRED = [
     "_internal/autoprint/samples/lesson-example.md", "_internal/autoprint/samples/lesson-example_files/func-scheme.png",
     "_internal/autoprint/efir/page/lang/python.svg",
     "_internal/autoprint/efir/page/lesson/app.js", "_internal/autoprint/efir/page/lesson/richtext.js",
-    "_internal/PySide6/Qt6Pdf.dll",
+    "_internal/PySide6/Qt6Pdf.dll", "_internal/PySide6/Qt6WebEngineCore.dll", "_internal/autoprint/efir/page/app.html",
 ]
 
 SPEC = '''# -*- mode: python ; coding: utf-8 -*-
@@ -202,9 +209,14 @@ def collect_datas() -> list[tuple[str, str]]:
     lang = page / "lang"                                  # значки языков для кода на странице суфлёра урока
     datas += [(str(f), "autoprint/efir/page/lang") for f in sorted(lang.glob("*.svg"))]
     datas.append((str(lang / "LICENSE-devicon.txt"), "autoprint/efir/page/lang"))
-    for sub in ("lesson", "vendor"):                      # скрипты экрана урока и CodeMirror
+    for sub in ("lesson", "vendor", "app"):               # скрипты урока, CodeMirror, окно программы (1.0)
         d = page / sub
-        datas += [(str(f), f"autoprint/efir/page/{sub}") for f in sorted(d.glob("*")) if f.suffix in (".js", ".css", ".txt")]
+        if d.is_dir():
+            datas += [(str(f), f"autoprint/efir/page/{sub}") for f in sorted(d.glob("*"))
+                      if f.suffix in (".js", ".css", ".txt")]
+    fonts = page / "fonts"                                # шрифты окна программы (1.0) — без интернета
+    if fonts.is_dir():
+        datas += [(str(f), "autoprint/efir/page/fonts") for f in sorted(fonts.glob("*")) if f.suffix in (".woff2", ".txt")]
     return datas
 
 
@@ -311,16 +323,41 @@ def make_setup(version: str, icon: Path) -> Path | None:
     return setup
 
 
+def use_out_dir(argv: list[str]) -> bool:
+    """--out ПАПКА: пробная сборка в свою папку — dist\\ с выпущенными версиями не трогается."""
+    global BUILD, DIST, APP_DIST
+    if "--out" not in argv:
+        return False
+    out = Path(argv[argv.index("--out") + 1]).resolve()
+    BUILD, DIST = out / "build", out / "dist"
+    APP_DIST = DIST / NAME
+    return True
+
+
+def selftest_dist() -> None:
+    """Собранная программа невидимо (offscreen) загружает своё окно — встроенный браузер в сборке работает."""
+    exe = APP_DIST / f"{NAME}.exe"
+    env = {**os.environ, "QT_QPA_PLATFORM": "offscreen"}
+    env.pop("AUTOPRINT_DATA", None)
+    r = subprocess.run([str(exe), "--selftest"], env=env, timeout=120)
+    if r.returncode != 0:
+        sys.exit(f"Собранная программа не прошла --selftest (код {r.returncode}): окно со встроенным браузером не "
+                 "загрузилось. Смотрите журнал во временной папке autoprint-selftest-*.")
+    say("Проверка --selftest: окно программы загружается")
+
+
 def main() -> int:
     t0 = time.monotonic()
+    use_out_dir(sys.argv)
     version = read_version()
     say(f"{NAME} {version}")
-    BUILD.mkdir(exist_ok=True)
-    DIST.mkdir(exist_ok=True)
+    BUILD.mkdir(parents=True, exist_ok=True)
+    DIST.mkdir(parents=True, exist_ok=True)
     icon = BUILD / "icon.ico"
     make_icon(icon)
     run_pyinstaller(version, icon)
     check_dist()
+    selftest_dist()
 
     for old in DIST.glob(f"{NAME}-*"):   # архивы и установщики прошлых сборок
         if old.is_file():

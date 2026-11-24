@@ -286,6 +286,8 @@ class Settings:
 
     current_tab: str = ""
     window_geometry: str = ""
+    compact: bool = False              # 1.0: окно было в маленьком режиме
+    compact_geometry: str = ""         # 1.0: геометрия маленького режима (base64)
 
     @classmethod
     def load(cls) -> "Settings":

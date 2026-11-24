@@ -409,7 +409,11 @@ class FramelessWindow(QWidget):
         pt = wintypes.POINT(x, y)
         user32.ScreenToClient(hwnd, ctypes.byref(pt))
         dpr = self.devicePixelRatioF() or 1.0
-        lx, ly = pt.x / dpr, pt.y / dpr
+        return self.client_hit(pt.x / dpr, pt.y / dpr)
+
+    def client_hit(self, lx: float, ly: float) -> int:
+        """Точка внутри окна (логические пиксели): заголовок (тянуть) или содержимое. Наследник может решать иначе —
+        окно программы спрашивает страницу (ui/app_window.py)."""
         if 0 <= ly < self.titlebar.height():
             child = self.childAt(int(lx), int(ly))
             if child is None or child is self.titlebar or child.property("drag"):
