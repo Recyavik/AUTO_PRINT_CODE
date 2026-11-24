@@ -21,7 +21,7 @@
 .srt small { font-size: 13px; color: var(--faint); line-height: 1.4; }
 .src { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: flex-end; min-width: 0; }
 .srow.swrow { display: block; padding: 8px 0; }
-.srow .sel { min-width: 220px; max-width: 100%; }
+.srow select.sel { min-width: 220px; max-width: 100%; }
 .snote { color: var(--faint); font-size: 13.5px; line-height: 1.5; max-width: 72ch; padding: 0 4px; }
 
 /* громкость */
@@ -40,7 +40,7 @@
 .aibox { display: flex; flex-direction: column; gap: 14px; padding: 12px 0 16px; }
 .aibox .field > .src { justify-content: flex-start; }
 .aibox .inp { width: 100%; max-width: 520px; }
-.aibox .sel { max-width: 520px; }
+.aibox select.sel { max-width: 520px; }
 .aibox .phint { line-height: 1.45; max-width: 72ch; }
 #aiModelMain.inp, #aiModelBackup.inp { width: 300px; }
 #aiBackup { border-top: 1px solid var(--line); }

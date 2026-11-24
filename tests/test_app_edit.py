@@ -132,6 +132,16 @@ class EditTest(EditPage):
         self.stop_live()
         self.assertTrue(self.wait_js("document.body.classList.contains('editing')"))
 
+    def test_selected_block_keeps_its_height(self):
+        """Выбранный блок (класс sel) — не выпадающий список (.sel у <select> — 40 px): заметка в правке не схлопывается."""
+        self.js("document.querySelector('[data-id=n1] .row > .c').click()")
+        self.assertTrue(self.wait_js(EDITABLE))
+        self.assertTrue(self.wait_js("document.querySelector('[data-id=n1]').classList.contains('sel')"))
+        blk, row = self.js("[document.querySelector('[data-id=n1]').getBoundingClientRect().bottom, "
+                           "document.querySelector('[data-id=n1] .row').getBoundingClientRect().bottom]")
+        self.assertGreaterEqual(blk + 1, row, "строка заметки вылезает из блока")
+        self.js("document.activeElement.blur()")
+
     def test_click_edit_same_height(self):
         h0 = self.js("document.querySelector('[data-id=n1] .row > .c').getBoundingClientRect().height")
         self.js("document.querySelector('[data-id=n1] .row > .c').click()")

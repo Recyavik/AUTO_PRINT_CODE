@@ -160,5 +160,91 @@ class AppCoreTest(unittest.TestCase):
         self.assertEqual(self.nav[-1], "#/settings/ai")
 
 
+# ================================================================ бывший ui_regress: окно без лишних окон, тема, отсчёт
+
+class RegressTest(unittest.TestCase):
+    """Перенесено из tests/ui_regress.py (Task 16): то, что проверялось на старых окнах, — на одном окне."""
+
+    def setUp(self):
+        from PySide6.QtCore import QEvent, QObject
+        from PySide6.QtWidgets import QMenu, QWidget
+        plan = Template("План", [stage("Этап", 10, id="P1s")], id="P1", kind="plan")
+        foreign = Template("Чужой", [Block(BLOCK_MARKDOWN, "чужая роль", role="warning", id="Fw"), stage("Начало", 5, id="Fs")], id="F")
+        self.stray: list[str] = []
+        spy_list = self.stray
+
+        class StraySpy(QObject):
+            """Виджет, показанный самостоятельным окном (до вставки в родителя), мелькает на панели задач."""
+            def eventFilter(self, obj, ev) -> bool:
+                if ev.type() == QEvent.Type.Show and isinstance(obj, QWidget) and obj.isWindow() \
+                        and type(obj).__name__ not in ("AppWindow", "QTipLabel", "QComboBoxPrivateContainer") \
+                        and not isinstance(obj, QMenu):
+                    spy_list.append(f"{type(obj).__name__} «{obj.objectName()}»")
+                return False
+        self.spy = StraySpy()
+        app.installEventFilter(self.spy)
+        self.errors: list[str] = []
+        self._hook = sys.excepthook
+        sys.excepthook = lambda t, v, tb: self.errors.append(f"{t.__name__}: {v}")
+        self.a = make_app([plan, foreign])
+        from PySide6.QtCore import Qt
+        self.a.window.setAttribute(Qt.WidgetAttribute.WA_DontShowOnScreen, True)
+        self.a.window.show()
+        pump()
+
+    def tearDown(self):
+        sys.excepthook = self._hook
+        app.removeEventFilter(self.spy)
+        self.a._quitting = True
+        self.a.shutdown()
+        self.a.window.hide()
+        pump()
+
+    def test_focus_is_lesson_not_plan(self):
+        """0.12: при запуске в фокусе — урок, а не план (план стоит первым)."""
+        f = self.a.printer.focus()
+        self.assertIsNotNone(f)
+        self.assertEqual(f.kind, "")
+
+    def test_theme_switch_without_errors(self):
+        from autoprint.ui.theme import theme
+        for mode in ("light", "dark", "light", "dark"):
+            self.a.settings.theme = mode
+            theme.set_mode(mode)
+            pump(60)
+        self.assertEqual(self.errors, [])
+
+    def test_no_stray_windows(self):
+        """Окно программы и лист «Сообщить об ошибке» — без лишних окон на панели задач."""
+        self.a.open_report()
+        self.a.open_update_dialog()
+        pump(100)
+        self.assertEqual(self.stray, [])
+        self.assertEqual(self.errors, [])
+
+    def test_pause_during_countdown_stays_paused(self):
+        """Пауза во время отсчёта: печать не начинается и не становится «Печатает» — остаётся «Пауза»."""
+        from autoprint.typer import IDLE, PAUSED, RUNNING, TypingEngine
+        e = TypingEngine(Settings())
+        states = []
+        e.state_changed.connect(states.append)
+        e.load("abc")
+        e.start(0.0, countdown=3)
+        pump(400)
+        e.pause()
+        pump(1100)
+        st = e.state
+        e.stop()
+        pump(200)
+        self.assertEqual(st, PAUSED)
+        self.assertNotIn(RUNNING, states)
+        self.assertEqual(e.state, IDLE)
+
+    def test_windows_newlines_in_sample(self):
+        from autoprint.storage import _block_from
+        blk = _block_from({"type": "code", "text": "a = 1\r\nb = 2", "steps": ["1", 2]})
+        self.assertEqual((blk.text, blk.steps), ("a = 1\nb = 2", [1, 2]))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

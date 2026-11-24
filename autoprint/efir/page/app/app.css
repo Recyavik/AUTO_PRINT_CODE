@@ -135,13 +135,14 @@ kbd { padding: 1px 6px; border-radius: 5px; border: 1px solid var(--line2); back
 /* поля */
 .field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .field > label, .flabel { font-size: 13.5px; color: var(--dim); font-weight: 500; }
-.inp, .sel, .ta { height: 40px; padding: 0 12px; border-radius: var(--r); background: var(--panel);
+/* select.sel — только у выпадающих списков: .sel у блока урока значит «выбран» */
+.inp, select.sel, .ta { height: 40px; padding: 0 12px; border-radius: var(--r); background: var(--panel);
   border: 1.5px solid var(--line2); font-size: 15px; color: var(--text); outline: 0; min-width: 0; }
-.inp:focus, .sel:focus, .ta:focus { border-color: var(--accent); }
+.inp:focus, select.sel:focus, .ta:focus { border-color: var(--accent); }
 .inp.lg { height: 48px; font-size: 18px; border-radius: var(--r-md); }
 .ta { height: auto; min-height: 110px; padding: 10px 12px; resize: vertical; line-height: 1.55; width: 100%; }
 .ta.mono { font-family: var(--mono); font-size: 13px; }
-.sel { padding-right: 34px; appearance: none; cursor: pointer;
+select.sel { padding-right: 34px; appearance: none; cursor: pointer;
   background-image: linear-gradient(45deg, transparent 50%, var(--dim) 50%), linear-gradient(135deg, var(--dim) 50%, transparent 50%);
   background-position: calc(100% - 17px) 50%, calc(100% - 12px) 50%; background-size: 5px 5px; background-repeat: no-repeat; }
 .num { display: inline-flex; align-items: center; gap: 8px; }

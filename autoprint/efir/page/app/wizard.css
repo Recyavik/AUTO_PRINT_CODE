@@ -97,7 +97,7 @@ body.dragging .mdrop { border-color: var(--accent); background: var(--accent-sof
 .ownchat[open] summary { margin-bottom: 10px; }
 .ownchat .ta { margin-top: 8px; }
 .wrow { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-.wrow .sel { width: auto; }
+.wrow select.sel { width: auto; }
 .psteps { margin: 0; padding-left: 22px; display: flex; flex-direction: column; gap: 6px; }
 .psteps li > span { margin-right: 10px; }
 .psum { font-size: 14px; display: flex; flex-direction: column; gap: 2px; }

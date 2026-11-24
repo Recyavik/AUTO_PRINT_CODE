@@ -2,8 +2,8 @@
 
 Окно — одно (ui/app_window.py, встроенный браузер со страницей /app). Всё, что раньше делало главное окно Qt
 (список уроков, меню, тосты, вопросы), теперь показывает страница: App только сообщает об изменениях сигналом
-changed(тема) и просит открыть нужный экран сигналом navigate(hash). Имена методов — как у прежнего MainWindow:
-на них опираются контроллеры урока и эфира.
+changed(тема) и просит открыть нужный экран (navigate) или лист (open_sheet). На имена методов опираются
+контроллеры урока и эфира (ui/lesson_control.py, ui/efir_control.py).
 """
 from __future__ import annotations
 
@@ -800,8 +800,11 @@ class App(QObject):
             self._save_settings()
         if s.window_geometry:
             self.window.restoreGeometry(QByteArray.fromBase64(s.window_geometry.encode()))
+        # по умолчанию — первый урок, а не план (планы стоят над уроками)
+        first = next((t for t in self.store.templates if t.kind != KIND_PLAN), None) or \
+            (self.store.templates[0] if self.store.templates else None)
         tid = next((x for x in (added, s.page_lesson, s.current_tab) if x and self.store.get(x)),
-                   self.store.templates[0].id if self.store.templates else "")
+                   first.id if first is not None else "")
         self.printer.set_focus(tid)
 
     def _save_session(self) -> None:

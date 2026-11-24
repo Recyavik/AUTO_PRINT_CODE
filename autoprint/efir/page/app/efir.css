@@ -43,7 +43,7 @@
 .wlooks { display: flex; flex-direction: column; gap: 10px; }
 .wlh { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .wlh .efh3 { margin: 0; flex: 1; }
-.wlh .sel { width: auto; min-width: 200px; }
+.wlh select.sel { width: auto; min-width: 200px; }
 .lthumbs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
 .lt { display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: var(--dim); }
 .lt-sw { aspect-ratio: 16 / 9; border-radius: var(--r); background: #000 center / cover no-repeat; border: 1px solid var(--line2);

@@ -17,10 +17,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import quiet  # noqa: E402,F401  — до PySide6: offscreen, своя папка данных
 
-from PySide6.QtCore import QPoint, QPointF, Qt  # noqa: E402
-from PySide6.QtGui import QWheelEvent  # noqa: E402
-from PySide6.QtWidgets import (QApplication, QComboBox, QLineEdit, QPlainTextEdit, QScrollArea,  # noqa: E402
-                               QSpinBox, QVBoxLayout, QWidget)
+from PySide6.QtWidgets import QApplication, QVBoxLayout, QWidget  # noqa: E402
 
 app = QApplication.instance() or QApplication([])
 quiet.patch()
@@ -36,137 +33,6 @@ def pump(ms: int = 50) -> None:
     while time.time() < end:
         app.processEvents()
         time.sleep(0.005)
-
-
-def wheel(w: QWidget, dy: int = -120) -> None:
-    pos = QPointF(w.width() / 2, w.height() / 2)
-    ev = QWheelEvent(pos, QPointF(w.mapToGlobal(pos.toPoint())), QPoint(0, 0), QPoint(0, dy),
-                     Qt.MouseButton.NoButton, Qt.KeyboardModifier.NoModifier, Qt.ScrollPhase.NoScrollPhase, False)
-    QApplication.sendEvent(w, ev)
-
-
-# ================================================================ Task 1: колёсико
-
-class WheelTest(unittest.TestCase):
-    """Колёсико над счётчиком или списком без фокуса крутит страницу, а не значение."""
-
-    @classmethod
-    def setUpClass(cls):
-        from autoprint.ui.widgets import install_wheel_guard
-        install_wheel_guard(app)
-
-    def page(self, child: QWidget) -> tuple[QScrollArea, QWidget]:
-        area = QScrollArea()
-        area.setWidgetResizable(True)
-        host = QWidget()
-        lay = QVBoxLayout(host)
-        sink = QLineEdit()                          # фокус — где-то ещё на странице, как в жизни
-        lay.addWidget(sink)
-        lay.addWidget(child)
-        lay.addSpacing(3000)                        # страница выше окна — есть что прокручивать
-        area.setWidget(host)
-        area.resize(400, 300)
-        area.show()
-        pump(30)
-        sink.setFocus()
-        pump(10)
-        return area, host
-
-    def test_unfocused_spin_scrolls_page(self):
-        sp = QSpinBox()
-        sp.setRange(0, 100)
-        sp.setValue(50)
-        area, _ = self.page(sp)
-        wheel(sp)
-        pump(30)
-        self.assertEqual(sp.value(), 50)
-        self.assertGreater(area.verticalScrollBar().value(), 0)
-        area.close()
-
-    def test_focused_spin_changes(self):
-        sp = QSpinBox()
-        sp.setRange(0, 100)
-        sp.setValue(50)
-        area, _ = self.page(sp)
-        area.activateWindow()
-        sp.setFocus()
-        pump(30)
-        if not sp.hasFocus():
-            self.skipTest("offscreen: фокус не встал")
-        wheel(sp)
-        pump(30)
-        self.assertNotEqual(sp.value(), 50)
-        area.close()
-
-    def test_unfocused_combo_unchanged(self):
-        cb = QComboBox()
-        cb.addItems(["Обычный", "Перерыв", "Зарядка"])
-        area, _ = self.page(cb)
-        wheel(cb)
-        wheel(cb)
-        pump(30)
-        self.assertEqual(cb.currentIndex(), 0)
-        area.close()
-
-    def test_text_editor_wheel_not_blocked(self):
-        ed = QPlainTextEdit("\n".join(f"строка {i}" for i in range(300)))
-        ed.setFixedHeight(120)
-        area, _ = self.page(ed)
-        wheel(ed.viewport())
-        pump(30)
-        self.assertGreater(ed.verticalScrollBar().value(), 0)
-        area.close()
-
-
-
-
-class RealWheelTest(unittest.TestCase):
-    """Ревью №1: колесо настоящей мыши. Qt отдаёт фокус счётчику (WheelFocus) раньше любых фильтров —
-    поэтому событие шлём через окно (QTest.wheelEvent), как это делает Windows, а не sendEvent в виджет."""
-
-    @classmethod
-    def setUpClass(cls):
-        from autoprint.ui.widgets import install_wheel_guard
-        install_wheel_guard(app)
-
-    def real_wheel(self, area: QWidget, child: QWidget, dy: int = -120) -> None:
-        from PySide6.QtTest import QTest
-        pos = QPointF(child.mapTo(area, QPoint(child.width() // 2, child.height() // 2)))
-        QTest.wheelEvent(area.windowHandle(), pos, QPoint(0, dy))
-        pump(40)
-
-    def page(self, child: QWidget):
-        return WheelTest.page(self, child)
-
-    def test_real_wheel_unfocused_spin(self):
-        sp = QSpinBox()
-        sp.setRange(0, 100)
-        sp.setValue(50)
-        area, _ = self.page(sp)
-        self.real_wheel(area, sp)
-        self.assertEqual(sp.value(), 50)
-        self.assertGreater(area.verticalScrollBar().value(), 0)
-        area.close()
-
-    def test_real_wheel_unfocused_combo(self):
-        cb = QComboBox()
-        cb.addItems(["Обычный", "Перерыв", "Зарядка"])
-        area, _ = self.page(cb)
-        self.real_wheel(area, cb)
-        self.assertEqual(cb.currentIndex(), 0)
-        area.close()
-
-    def test_click_then_wheel_changes(self):
-        from PySide6.QtTest import QTest
-        sp = QSpinBox()
-        sp.setRange(0, 100)
-        sp.setValue(50)
-        area, _ = self.page(sp)
-        QTest.mouseClick(sp.lineEdit(), Qt.MouseButton.LeftButton)
-        pump(30)
-        self.real_wheel(area, sp)
-        self.assertNotEqual(sp.value(), 50)
-        area.close()
 
 
 # ================================================================ Task 2: тема без зависаний

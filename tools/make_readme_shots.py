@@ -1,171 +1,136 @@
-"""Снимки для README (docs/images/): экран урока в Edge без окна, окно программы и таймер — в памяти.
+"""Снимки для README (docs/images/): окно программы — его страница /app в Edge без окна, на временных данных с
+образцовым уроком и планом.
 
     python tools/make_readme_shots.py
 
-На экране ничего не появляется: Qt рисует вне экрана (tests/quiet.py), Edge запускается с --headless=new
-и своим временным профилем и закрывается по своему pid. Данные — временная папка с образцовым уроком.
+На экране ничего не появляется: Qt — вне экрана (tests/quiet.py), Edge запускается с --headless=new и своим
+временным профилем и закрывается по своему pid. Снимки — в обеих темах там, где README показывает обе.
 """
 from __future__ import annotations
 
 import base64
 import sys
-import time
 from datetime import timedelta
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "tests"))
 sys.path.insert(0, str(ROOT))
-import quiet  # noqa: E402,F401  — до PySide6: offscreen, временная папка данных
+import apphelp  # noqa: E402  — до PySide6: offscreen, временная папка данных
+from apphelp import code, make_app, note, pump, stage  # noqa: E402
 
-from PySide6.QtWidgets import QApplication  # noqa: E402
-
-app = QApplication.instance() or QApplication([])
-quiet.patch()
-from autoprint.ui.theme import theme  # noqa: E402
-
-theme.setup(app, "dark")
-from autoprint.samples_lesson import lesson_sample  # noqa: E402
-from autoprint.storage import Settings, TemplateStore  # noqa: E402
-from autoprint.ui.main_window import MainWindow  # noqa: E402
+from autoprint.efir.model import Activity, Webinar  # noqa: E402
+from autoprint.samples_lesson import lesson_sample, plan_sample  # noqa: E402
+from autoprint.storage import Template  # noqa: E402
 from cdp import Edge  # noqa: E402
 
 OUT = ROOT / "docs" / "images"
 W, H = 1360, 860
+PORT = 18993
 
 
-def pump(ms: int = 40) -> None:
-    end = time.time() + ms / 1000
-    while time.time() < end:
-        app.processEvents()
-        time.sleep(0.003)
+def lessons() -> list[Template]:
+    t = lesson_sample()
+    p = plan_sample()
+    more = [Template("Циклы for и while", [stage("Повторение", 5), note("Что такое цикл?", role="ask"),
+                                           code("for i in range(3):\n    print(i)"), stage("Практика", 25)]),
+            Template("Функции", [stage("Разминка", 10), note("Функция — именованный кусок кода"), stage("Практика", 30)]),
+            Template("Списки и словари", [stage("Начало", 10), code("d = {'a': 1}\nprint(d['a'])"), stage("Задачи", 30)])]
+    return [p, t, *more]
 
 
 def main() -> int:
-    store = TemplateStore()
-    t = lesson_sample()
-    store.templates = [t]
-    store.save()
-    s = Settings()
-    s.efir_port = 18994
-    s.samples_seen = ["steps_v1", "tour_v1", "lesson_v1", "lesson_v2", "lesson_v3", "plan_v1"]
-    s.migrations = ["tray_v1", "window_v10", "roles_v10", "samples_v10"]
-    s.update_auto_check = False
-    s.start_timer = True              # для снимка таймера: «Начать урок» открывает и мини-таймер
-    win = MainWindow(s, store)
-    win.resize(520, 480)
-    win.show()
-    pump(300)
-    win.grab().save(str(OUT / "window-dark.png"))
-    print("снимок", OUT / "window-dark.png")
-    win.open_settings("print")
-    sw = win.settings_win
-    sw.resize(1000, 720)
-    pump(400)
-    sw.grab().save(str(OUT / "settings-print.png"))
-    print("снимок", OUT / "settings-print.png")
-    sw.close()
-    pump(100)
-
-    win.printer.set_focus(t.id)
-    win.printer.arm(t.next_code().id)
-    win.efir.ensure_server()
-    win.lesson.publish()
-    e = Edge.start(f"http://127.0.0.1:{win.efir.server.port}/lesson", pump=app.processEvents, width=W, height=H)
+    OUT.mkdir(parents=True, exist_ok=True)
+    templates = lessons()
+    win = make_app(templates, PORT)
+    s = win.settings
+    t = templates[1]
+    ef = win.efir
+    ef.ensure_server()
+    ef.store.add([Webinar(title="Вебинар «Python с нуля»", start="19:00", schedule=[
+        Activity("Приветствие", 5), Activity("Теория", 25), Activity("Зарядка для глаз", 5, kind="exercise", demo="off"),
+        Activity("Перерыв", 10, kind="break", demo="none"), Activity("Практика", 35), Activity("Вопросы", 10, demo="off")])])
+    win.publish_now()
+    e = Edge.start(f"http://127.0.0.1:{ef.server.port}/app#/lessons", pump=apphelp.app.processEvents, width=W, height=H)
     try:
         if not e.wait("window.__ready === true", 20):
             print("страница не загрузилась")
             return 1
 
-        def shot(name: str, clip: dict | None = None) -> None:
-            pump(500)
-            params = {"format": "png"}
-            if clip:
-                params["clip"] = dict(clip, scale=1)
-            data = e.call("Page.captureScreenshot", params)["data"]
+        def shot(name: str, wait: int = 700) -> None:
+            pump(wait)
+            data = e.call("Page.captureScreenshot", {"format": "png"})["data"]
             (OUT / name).write_bytes(base64.b64decode(data))
             print("снимок", OUT / name)
 
-        def mode(m: str) -> None:
-            e.eval(f"document.querySelector('.seg.modes button:{'first' if m == 'prep' else 'last'}-child').click()")
-            pump(400)
+        def go(hash_: str, wait: int = 500) -> None:
+            e.eval(f"location.hash = {hash_!r}; true")
+            pump(wait)
 
-        def shot_menu(name: str) -> bool:
-            # clip снимка — в координатах документа, а getBoundingClientRect — окна: прибавить прокрутку
-            pump(300)
-            r = e.eval("(() => { const m = document.querySelector('.menu'); if (!m) return null; const r = m.getBoundingClientRect();"
-                       " return {x: r.left + scrollX, y: r.top + scrollY, w: r.width, h: r.height}; })()")
-            if not r or not r["h"]:
-                print("меню не открылось:", name)
-                return False
-            shot(name, {"x": max(0, r["x"] - 16), "y": max(0, r["y"] - 16), "width": r["w"] + 32, "height": r["h"] + 32})
-            e.eval("document.body.dispatchEvent(new MouseEvent('mousedown', {bubbles: true}))")
-            pump(200)
-            return True
+        def theme(mode: str) -> None:
+            s.theme = mode
+            win.on_setting_changed("theme")
+            win.publish_now()
+            pump(500)
 
-        # Подготовка: правка заметки «как в Word» — панель Ж / К / списки, разметки не видно
-        mode("prep")
-        e.eval("(() => { const b = [...document.querySelectorAll('.blk[data-type=markdown]')].find(x => x.querySelector('.r-tell'));"
-               " window.scrollTo(0, b.getBoundingClientRect().top + scrollY - 260); b.querySelector('.row > .c').click(); })()")
+        theme("dark")
+        shot("library-dark.png")
+        go("#/new")
+        shot("new-lesson.png")
+        go("#/efir")
+        shot("efir.png")
+        for sec in ("typing", "ai", "sound"):
+            go(f"#/settings/{sec}")
+            shot(f"settings-{sec}.png")
+        win.open_report()
+        pump(1200)
+        shot("report.png")
+        e.eval("document.querySelectorAll('.scrim').forEach(s => s.remove()); true")
+
+        # подготовка: правка заметки «как в Word»
+        win.open_lesson(t.id, ask=False)
+        win.lesson.publish()
+        win.publish_now()
+        go(f"#/lesson/{t.id}", 900)
+        e.eval("(() => { if (!document.body.classList.contains('editing')) document.querySelector('#editToggle').click(); })()")
+        pump(400)
+        ok = e.eval("(() => { const c = [...document.querySelectorAll('#main .blk[data-id] .row > .c')]"
+                    ".find(x => x.closest('.blk').querySelector('.r-tell')); if (!c) return false;"
+                    " c.closest('.blk').scrollIntoView({block: 'center'}); c.click(); return true; })()")
+        if not ok:
+            print("заметка «Расскажи» не нашлась")
         shot("lesson-prep.png")
-        e.eval("document.activeElement && document.activeElement.blur()")
-        pump(300)
-        # палитра «+» по группам и «Мои настройки»
-        e.eval("(() => { const i = [...document.querySelectorAll('.ins .insbtn')][3]; i.scrollIntoView({block: 'center'}); i.click(); })()")
-        if not shot_menu("palette.png"):
-            return 1
-        window_top = "window.scrollTo(0, 0)"
-        e.eval(window_top)
-        e.eval("document.querySelector('#tools .prefsbtn').click()")
-        if not shot_menu("prefs.png"):
-            return 1
+        e.eval("document.activeElement && document.activeElement.blur(); true")
 
-        # Урок идёт: третий этап — текущий, пройденные свёрнуты
+        # урок идёт: третий этап — текущий
         win.lesson._start_stage_now(t, 2)
-        live = win.efir.store.live
-        win.efir.store.set_live(live.webinar_id, live.anchor - timedelta(minutes=2))
-        win.efir.live_changed.emit()
-        mode("lesson")
-        to_current = ("(() => { const s = document.querySelector('.stage.current');"
-                      " window.scrollTo(0, s ? s.getBoundingClientRect().top + scrollY - 250 : 0); })()")
-        e.eval(to_current)
-        shot("lesson-dark.png")
-
-        # «Печать ⚙»: меню печати
-        e.eval("[...document.querySelectorAll('#tools button')].find((b) => b.textContent.trim() === 'Печать').click()")
-        pump(300)
-        # clip снимка — в координатах документа, а getBoundingClientRect — окна: прибавить прокрутку
-        r = e.eval("(() => { const m = document.querySelector('.menu'); const r = m.getBoundingClientRect();"
-                   " return {x: r.left + scrollX, y: r.top + scrollY, w: r.width, h: r.height}; })()")
-        shot("print-menu.png", {"x": max(0, r["x"] - 16), "y": max(0, r["y"] - 16),
-                                "width": r["w"] + 32, "height": r["h"] + 32})
-        if not r["h"]:
-            print("меню «Печать» не открылось")
-            return 1
-        e.key("Escape", "Escape", 27)
-        e.eval("document.body.click()")
-
-        tw = win.efir.timer_window
-        if tw is not None:
-            tw.resize(520, 400)
-            pump(300)
-            tw.grab().save(str(OUT / "timer.png"))
-            print("снимок", OUT / "timer.png")
-
-        theme.set_mode("light")
+        live = ef.store.live
+        ef.store.set_live(live.webinar_id, live.anchor - timedelta(minutes=2))
+        ef.live_changed.emit()
+        win.lesson.publish()
+        win.publish_now()
         pump(900)
-        e.eval(to_current)
+        e.eval("(() => { const s = document.querySelector('.stage.current'); if (s) s.scrollIntoView({block: 'start'}); })()")
+        shot("lesson-dark.png")
+        theme("light")
         shot("lesson-light.png")
+        theme("dark")
+
+        # маленький режим: то же окно поверх всех, раскладка по размеру
+        win.set_compact(True)
+        win.publish_now()
+        e.call("Emulation.setDeviceMetricsOverride", {"width": 380, "height": 520, "deviceScaleFactor": 1, "mobile": False})
+        shot("compact.png", 900)
+        e.call("Emulation.clearDeviceMetricsOverride", {})
+        win.set_compact(False)
         errs = e.errors()
         if errs:
             print("ошибки страницы:", errs)
     finally:
         e.close()
-        if win.efir.timer_window is not None:
-            win.efir.timer_window.close_silently()
-        win.efir.shutdown()
+        ef.stop_live()
         win._quitting = True
-        win.close()
+        win.shutdown()
     return 0
 
 

@@ -70,7 +70,6 @@ class AppWindow(FramelessWindow):
         super().__init__(APP_NAME, minimize=True, maximize=True)
         self.app = app
         self.web = web
-        self.titlebar.hide()                 # заголовок рисует страница
         self.regions = Regions()
         self.compact = False
         self._big_geometry: QByteArray | None = None

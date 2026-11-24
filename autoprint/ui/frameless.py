@@ -1,4 +1,4 @@
-"""Свой заголовок окна (как в PasteTalk), но окно остаётся «настоящим» окном Windows.
+"""Окно без рамки Qt (заголовок рисует страница), но остаётся «настоящим» окном Windows.
 
 Окно создаётся без рамки Qt, а затем ему возвращаются стили обычного окна (WS_CAPTION,
 WS_THICKFRAME…). Неклиентская область убирается в WM_NCCALCSIZE, а WM_NCHITTEST сообщает Windows,
@@ -14,9 +14,8 @@ import logging
 from pathlib import Path
 from ctypes import wintypes
 
-from PySide6.QtCore import QEvent, QObject, QPointF, QRectF, QSize, Qt, Signal
-from PySide6.QtGui import QPainter, QPen
-from PySide6.QtWidgets import QApplication, QHBoxLayout, QLabel, QToolButton, QVBoxLayout, QWidget
+from PySide6.QtCore import QEvent, QObject, Qt, Signal
+from PySide6.QtWidgets import QApplication, QVBoxLayout, QWidget
 
 from .theme import theme
 
@@ -165,140 +164,11 @@ class NativeFrameStyler(QObject):
                 style_native_frame(int(w.winId()))
 
 
-# ---------------------------------------------------------------- кнопки окна
-
-class WinButton(QToolButton):
-    """«Свернуть / Развернуть / Закрыть» — тонкие значки как у Windows 11 (рисуются сами)."""
-    MIN, MAX, RESTORE, CLOSE = "min", "max", "restore", "close"
-
-    def __init__(self, kind: str, parent=None) -> None:
-        super().__init__(parent)
-        self.kind = kind
-        self.setObjectName("winClose" if kind == self.CLOSE else "winBtn")
-        self.setFixedSize(46, 40)
-        self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        self.setToolTip({self.MIN: "Свернуть", self.MAX: "Развернуть", self.RESTORE: "Восстановить",
-                         self.CLOSE: "Закрыть"}[kind])
-
-    def set_kind(self, kind: str) -> None:
-        self.kind = kind
-        self.setToolTip("Восстановить" if kind == self.RESTORE else "Развернуть")
-        self.update()
-
-    def paintEvent(self, e) -> None:
-        super().paintEvent(e)
-        p = QPainter(self)
-        p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        if self.kind == self.CLOSE and self.underMouse():
-            color = Qt.GlobalColor.white   # на красном фоне
-        else:
-            color = theme.c("text") if self.underMouse() else theme.c("dim")
-        pen = QPen(color, 1.0)
-        p.setPen(pen)
-        cx, cy = self.width() / 2, self.height() / 2
-        s = 5
-        if self.kind == self.MIN:
-            p.drawLine(QPointF(cx - s, cy), QPointF(cx + s, cy))
-        elif self.kind == self.MAX:
-            p.drawRoundedRect(QRectF(cx - s, cy - s, 2 * s, 2 * s), 1.5, 1.5)
-        elif self.kind == self.RESTORE:
-            p.drawRoundedRect(QRectF(cx - s, cy - s + 2, 2 * s - 2, 2 * s - 2), 1.5, 1.5)
-            p.drawLine(QPointF(cx - s + 2, cy - s), QPointF(cx + s - 1, cy - s))
-            p.drawLine(QPointF(cx + s, cy - s + 1), QPointF(cx + s, cy + s - 2))
-        else:
-            p.drawLine(QPointF(cx - s, cy - s), QPointF(cx + s, cy + s))
-            p.drawLine(QPointF(cx + s, cy - s), QPointF(cx - s, cy + s))
-        p.end()
-
-
-class StatusDot(QWidget):
-    """Цветная точка состояния в заголовке."""
-
-    def __init__(self, parent=None) -> None:
-        super().__init__(parent)
-        self.setFixedSize(QSize(8, 8))
-        self.token = "ok"
-        self.setProperty("drag", True)
-
-    def set_token(self, token: str) -> None:
-        self.token = token
-        self.update()
-
-    def paintEvent(self, e) -> None:
-        p = QPainter(self)
-        p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        p.setPen(Qt.PenStyle.NoPen)
-        p.setBrush(theme.c(self.token))
-        p.drawEllipse(QRectF(0.5, 0.5, 7, 7))
-        p.end()
-
-
-class TitleBar(QWidget):
-    """Полоса заголовка: [логотип][название][• состояние] … [доп. кнопки][— ▢ ✕]."""
-    HEIGHT = 40
-
-    def __init__(self, window: QWidget, title: str, minimize: bool = True, maximize: bool = True) -> None:
-        super().__init__(window)
-        self.window_ = window
-        self.setObjectName("titleBar")
-        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        self.setFixedHeight(self.HEIGHT)
-        lay = QHBoxLayout(self)
-        lay.setContentsMargins(8, 0, 0, 0)
-        lay.setSpacing(6)
-        self.left = QHBoxLayout()
-        self.left.setSpacing(6)
-        lay.addLayout(self.left)
-        self.title = QLabel(title)
-        self.title.setObjectName("titleText")
-        self.title.setProperty("drag", True)
-        lay.addWidget(self.title)
-        lay.addSpacing(6)
-        self.dot = StatusDot()
-        self.dot.hide()
-        lay.addWidget(self.dot)
-        self.status = QLabel()
-        self.status.setObjectName("titleStatus")
-        self.status.setProperty("drag", True)
-        lay.addWidget(self.status, 1)
-        self.right = QHBoxLayout()
-        self.right.setSpacing(2)
-        lay.addLayout(self.right)
-        lay.addSpacing(6)
-        self.btn_min = self.btn_max = None
-        if minimize:
-            self.btn_min = WinButton(WinButton.MIN)
-            self.btn_min.clicked.connect(window.showMinimized)
-            lay.addWidget(self.btn_min)
-        if maximize:
-            self.btn_max = WinButton(WinButton.MAX)
-            self.btn_max.clicked.connect(self._toggle_max)
-            lay.addWidget(self.btn_max)
-        self.btn_close = WinButton(WinButton.CLOSE)
-        self.btn_close.clicked.connect(window.close)
-        lay.addWidget(self.btn_close)
-
-    def set_status(self, text: str, token: str | None = None) -> None:
-        self.status.setText(text)
-        if token:
-            self.dot.set_token(token)
-            self.dot.show()
-        else:
-            self.dot.hide()
-
-    def _toggle_max(self) -> None:
-        w = self.window_
-        w.showNormal() if w.isMaximized() else w.showMaximized()
-
-    def sync_state(self) -> None:
-        if self.btn_max:
-            self.btn_max.set_kind(WinButton.RESTORE if self.window_.isMaximized() else WinButton.MAX)
-
-
 # ---------------------------------------------------------------- окно
 
 class FramelessWindow(QWidget):
-    """Окно верхнего уровня со своим заголовком. Наследник кладёт содержимое в self.body."""
+    """Окно верхнего уровня без рамки Qt: заголовок рисует содержимое (страница окна программы), а Windows знает,
+    где тянуть, через client_hit. Наследник кладёт содержимое в self.body."""
     closed = Signal()
 
     def __init__(self, title: str, minimize: bool = True, maximize: bool = True, parent=None) -> None:
@@ -306,12 +176,10 @@ class FramelessWindow(QWidget):
         self.setWindowFlag(Qt.WindowType.FramelessWindowHint, True)
         self.setWindowFlag(Qt.WindowType.Window, True)
         self.setWindowTitle(title)
-        self.titlebar = TitleBar(self, title, minimize, maximize)
         self._maximizable = maximize
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(0)
-        lay.addWidget(self.titlebar)
         self.body = QWidget()
         lay.addWidget(self.body, 1)
         self._styled_hwnd = 0
@@ -356,8 +224,6 @@ class FramelessWindow(QWidget):
             self._styled_hwnd = 0
             if self.isVisible():
                 self._apply_frame()
-        elif t == QEvent.Type.WindowStateChange:
-            self.titlebar.sync_state()
         return super().event(e)
 
     # ---- сообщения Windows
@@ -412,12 +278,8 @@ class FramelessWindow(QWidget):
         return self.client_hit(pt.x / dpr, pt.y / dpr)
 
     def client_hit(self, lx: float, ly: float) -> int:
-        """Точка внутри окна (логические пиксели): заголовок (тянуть) или содержимое. Наследник может решать иначе —
-        окно программы спрашивает страницу (ui/app_window.py)."""
-        if 0 <= ly < self.titlebar.height():
-            child = self.childAt(int(lx), int(ly))
-            if child is None or child is self.titlebar or child.property("drag"):
-                return HTCAPTION
+        """Точка внутри окна (логические пиксели): заголовок (тянуть) или содержимое. Окно программы спрашивает
+        страницу (ui/app_window.py)."""
         return HTCLIENT
 
     def _maximizable_or_resizable(self) -> bool:

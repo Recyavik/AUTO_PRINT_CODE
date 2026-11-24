@@ -1,4 +1,4 @@
-﻿"""Сквозная проверка нового интерфейса: главное окно готовит текст активного блока и печатает его в Блокнот.
+﻿"""Сквозная проверка: программа (App) готовит текст активного блока и печатает его в Блокнот.
 
     python tests/ui_print.py [block steps lines vscode]
 
@@ -31,7 +31,7 @@ from autoprint import winapi as w  # noqa: E402
 from autoprint.comments import strip_comments  # noqa: E402
 from autoprint.storage import Settings, TemplateStore  # noqa: E402
 from autoprint.typer import FINISHED  # noqa: E402
-from autoprint.app_core import App as MainWindow  # noqa: E402  — 1.0: программа без старого окна
+from autoprint.app_core import App  # noqa: E402  — 1.0: программа без старого окна
 from autoprint.ui.theme import theme  # noqa: E402
 
 _u = ctypes.windll.user32
@@ -68,7 +68,7 @@ def pump(seconds: float) -> None:
         time.sleep(0.01)
 
 
-def run(win: MainWindow, name: str, profile: str, strip: bool) -> bool:
+def run(win: App, name: str, profile: str, strip: bool) -> bool:
     s = win.settings
     s.profile, s.strip_comments = profile, strip
     win._apply_settings()
@@ -116,7 +116,7 @@ def open_editor(cmd: list[str], path: str, settle: float) -> bool:
     return True
 
 
-def wait_state(win: MainWindow, states: tuple, timeout: float = 120) -> bool:
+def wait_state(win: App, states: tuple, timeout: float = 120) -> bool:
     end = time.time() + timeout
     while time.time() < end:
         app.processEvents()
@@ -126,7 +126,7 @@ def wait_state(win: MainWindow, states: tuple, timeout: float = 120) -> bool:
     return False
 
 
-def run_steps(win: MainWindow, name: str, profile: str, cmd: list[str], settle: float = 1.5) -> bool:
+def run_steps(win: App, name: str, profile: str, cmd: list[str], settle: float = 1.5) -> bool:
     """Пошаговый урок: шаг за шагом, с возвратом наверх; итог = код без комментариев."""
     from autoprint.typer import IDLE
     s = win.settings
@@ -168,7 +168,7 @@ def run_steps(win: MainWindow, name: str, profile: str, cmd: list[str], settle: 
     return ok and done and win.engine.state in (FINISHED, IDLE)
 
 
-def run_lines(win: MainWindow, name: str, profile: str) -> bool:
+def run_lines(win: App, name: str, profile: str) -> bool:
     """По строкам: после каждой строки ждём; «Enter пользователя» и хоткей — по очереди."""
     from autoprint.typer import LINE_WAIT
     s = win.settings
@@ -225,7 +225,7 @@ def main() -> int:
     s.cpm, s.jitter, s.newline_pause_ms, s.punct_pause_ms = 1500, 0, 40, 0
     s.sound_enabled = False
     theme.setup(app, "dark")
-    win = MainWindow(s, TemplateStore(), web=False)
+    win = App(s, TemplateStore(), web=False)
     win.window.setAttribute(Qt.WidgetAttribute.WA_DontShowOnScreen, True)
     win.window.show()
     pump(0.5)
