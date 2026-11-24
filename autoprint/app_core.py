@@ -131,6 +131,10 @@ class App(QObject):
         self.changed.connect(self._schedule_publish)
         self.navigate.connect(self._on_navigate)
         self.efir.ensure_server()
+        # идёт урок или эфир — этапы сменяются по часам: окну — свежее «этап i из n» раз в 5 с
+        self._live_timer = QTimer(self, interval=5000,
+                                  timeout=lambda: self._schedule_publish() if self.efir.live_webinar() else None)
+        self._live_timer.start()
         theme.changed.connect(self._on_theme)
         self._apply_settings()
         self._apply_hotkeys()
@@ -526,6 +530,67 @@ class App(QObject):
         self._notify(msg)
         self.open_lesson(last.id)          # идёт урок — спросит, а не завершит его молча
         return last
+
+    def import_paths(self, paths: list[str]) -> dict:
+        """Файлы урока (перетащили в окно, «Уже есть файл урока?», Ctrl+O): пакеты .autoprint/.zip — с планами и
+        оформлениями; .pptx с одноимённым .pdf рядом — картинки слайдов из PDF; во время эфира презентации не
+        импортируются (PowerPoint занимает программу до минуты). → {added: [id], errors: [str], open: id}."""
+        from . import package
+        from .importers import FILE_EXTS, PACKAGE_EXTS, load_file
+        from .scenario_import import looks_like_scenario
+        paths = [str(p) for p in paths]
+        done: list[Template] = []
+        errors: list[str] = []
+        notes: list[str] = []
+        looks = []
+        skipped = [p for p in paths if Path(p).suffix.lower() not in FILE_EXTS]
+        if skipped:
+            errors.append(", ".join(Path(p).name for p in skipped) + ": подходят файлы .autoprint, .zip, .ipynb, .md, "
+                          ".py, .json, .pdf и .pptx")
+        paths = [p for p in paths if p not in skipped]
+        for p in [x for x in paths if x.lower().endswith(PACKAGE_EXTS)]:
+            try:
+                pkg = package.read_package(p)
+            except (OSError, ValueError, KeyError) as e:
+                errors.append(f"{Path(p).name}: {e}")
+                continue
+            done += pkg.plans + pkg.lessons
+            looks += pkg.looks
+            notes += pkg.notes
+            parts = [f"уроков: {len(pkg.lessons)}"] + ([f"планов: {len(pkg.plans)}"] if pkg.plans else []) + \
+                    ([f"оформлений экрана учеников: {len(pkg.looks)}"] if pkg.looks else [])
+            notes.append(f"Из {Path(p).name}: " + ", ".join(parts) + ".")
+        paths = [x for x in paths if not x.lower().endswith(PACKAGE_EXTS)]
+        pdfs = {Path(p).stem.lower(): p for p in paths if p.lower().endswith(".pdf")}
+        pptx = {Path(p).stem.lower() for p in paths if p.lower().endswith(".pptx")}
+        live = self.efir.live_webinar() is not None
+        for p in paths:
+            if p.lower().endswith(".pdf") and Path(p).stem.lower() in pptx:
+                continue                         # PDF той же презентации — картинки к слайдам PPTX
+            if p.lower().endswith((".pdf", ".pptx")) and live:
+                errors.append(f"{Path(p).name}: идёт эфир — презентацию импортируйте после него")
+                continue
+            try:
+                if p.lower().endswith(".pptx"):
+                    t, warns = self.pptx_lesson(p, pdfs.get(Path(p).stem.lower()))
+                    notes += warns
+                else:
+                    t = load_file(p)
+            except Exception as e:   # noqa: BLE001 — показать причину по каждому файлу
+                errors.append(f"{Path(p).name}: {e}")
+                continue
+            if not t.blocks:
+                errors.append(f"{Path(p).name}: нет блоков для импорта")
+                continue
+            done.append(t)
+        last = self.add_imported(done, looks, notes) if done else None
+        if errors:
+            self._notify("Не импортировано — " + "; ".join(errors)[:400], warn=True)
+        scen = next((t for t in done if t.kind != KIND_PLAN and looks_like_scenario(t.blocks)), None)
+        if scen is not None:                     # тетрадка-сценарий с ⏱ — предложить разложить по этапам
+            self._notify(f"В уроке «{scen.title}» есть заголовки с ⏱ — можно разложить его по этапам.",
+                         action={"label": "Разложить по этапам", "cmd": {"cmd": "recognize", "id": scen.id}})
+        return {"added": [t.id for t in done], "errors": errors, "open": last.id if last is not None else ""}
 
     def _take_import(self, d) -> None:
         """Результат прежнего окна «Импорт урока» (до «Нового урока» в окне)."""

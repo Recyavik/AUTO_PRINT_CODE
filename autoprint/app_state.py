@@ -54,7 +54,16 @@ def app_state(app) -> dict:
         lessons.append(x)
     plans = [plan_state(p, len(store.topics_of(p.id))) for p in store.templates if p.kind == KIND_PLAN]
     w = app.efir.live_webinar()
-    live = {"lesson_id": app.efir.live_lesson_id(), "webinar_id": w.id, "title": w.title} if w is not None else None
+    live = None
+    if w is not None:
+        ag = app.efir.agenda()
+        segs = app.efir.segments()
+        cur = ag.current
+        live = {"lesson_id": app.efir.live_lesson_id(), "webinar_id": w.id, "title": w.title, "phase": ag.phase,
+                "index": ag.index, "count": len(segs), "name": cur.activity.name if cur is not None else "",
+                "ends_ms": int(cur.end.timestamp() * 1000) if cur is not None else 0,
+                "start_ms": int(ag.start.timestamp() * 1000) if ag.start else 0,
+                "end_ms": int(ag.end.timestamp() * 1000) if ag.end else 0}
     win = app.window
     return {
         "version": __version__,
@@ -63,7 +72,8 @@ def app_state(app) -> dict:
         "prefs": {k: getattr(s, k) for k in PREF_KEYS},
         "lessons": lessons,
         "plans": plans,
-        "continue_id": s.page_lesson if store.get(s.page_lesson) is not None else "",
+        "continue_id": next((x for x in (s.page_lesson, app.printer.focus_id)
+                             if x and store.get(x) is not None and store.get(x).kind != KIND_PLAN), ""),
         "focus_id": app.printer.focus_id,
         "live": live,
         "print": app.printer.snapshot(),

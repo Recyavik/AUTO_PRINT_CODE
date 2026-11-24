@@ -266,6 +266,55 @@ body[data-view="lesson"] #rail, body[data-view="wizard"] #rail, body.compact #ra
   .crumbs .sep { display: none; }
 }
 
+/* ---------------------------------------------------------------- «Уроки» */
+.search { display: flex; align-items: center; gap: 8px; height: 38px; padding: 0 12px; border-radius: var(--r);
+  background: var(--panel); border: 1px solid var(--line); color: var(--faint); width: 260px; max-width: 100%; }
+.search:focus-within { border-color: var(--accent); }
+.search input { background: none; border: 0; outline: 0; flex: 1; font-size: 14px; min-width: 0; color: var(--text); }
+.search input::placeholder { color: var(--faint); }
+.today { display: flex; flex-wrap: wrap; align-items: center; gap: 14px 20px; padding: 18px 20px; border-radius: var(--r-xl);
+  background: var(--panel); border: 1px solid var(--line); }
+.today .tl { display: flex; flex-direction: column; gap: 3px; flex: 1 1 300px; min-width: 0; }
+.today .tl b { font-size: 19px; font-weight: 600; }
+.today .lv { display: flex; align-items: center; gap: 8px; color: var(--live); font-weight: 600; }
+.today .lv .dot { width: 9px; height: 9px; box-shadow: 0 0 0 4px var(--live-soft); }
+.today .liveleft { color: var(--live); font-weight: 600; }
+.sect { display: flex; flex-direction: column; gap: 12px; }
+.sect h2 { font-size: 16px; font-weight: 600; display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.sect h2 .meta { font-weight: 400; }
+.plans { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 12px; }
+.pcard { padding: 14px 16px 16px; border-radius: var(--r-lg); background: var(--panel); border: 1px solid var(--line);
+  display: flex; flex-direction: column; gap: 10px; text-decoration: none; color: inherit; text-align: left;
+  cursor: pointer; min-width: 0; }
+.pcard:hover { border-color: var(--line2); }
+.pcard .pc-top { display: flex; align-items: flex-start; gap: 8px; }
+.pcard .pc-top .tt { font-size: 15.5px; font-weight: 600; flex: 1; min-width: 0; padding-top: 4px; }
+.pcard .newtopic { margin: -2px -6px 0 0; }
+.pcard.add { border: 1.5px dashed var(--line2); background: none; align-items: center; justify-content: center;
+  color: var(--dim); flex-direction: row; font-weight: 500; min-height: 96px; }
+.pcard.add:hover { color: var(--text); border-color: var(--accent-line); }
+.minibar { display: flex; gap: 2px; height: 6px; }
+.minibar i { display: block; flex: 1 1 0; border-radius: 2px; background: color-mix(in srgb, var(--accent) 45%, transparent); }
+.minibar i.ex { background: var(--tell); }
+.minibar i.br { background: var(--line2); }
+.list { display: flex; flex-direction: column; border-radius: var(--r-lg); background: var(--panel); border: 1px solid var(--line);
+  overflow: hidden; }
+.list .grp { padding: 12px 16px 8px; font-size: 13px; color: var(--faint); display: flex; gap: 8px; align-items: center;
+  font-weight: 500; }
+.list .grp:not(:first-child) { border-top: 1px solid var(--line); margin-top: 2px; }
+.lrow { display: flex; align-items: center; gap: 16px; padding: 11px 16px; color: inherit; border-top: 1px solid var(--line);
+  cursor: pointer; outline-offset: -2px; }
+.list .grp + .lrow, .list .lrow:first-child { border-top: 0; }
+.lrow:hover { background: var(--raised); }
+.lrow .lt { display: flex; flex-direction: column; gap: 1px; flex: 1; min-width: 0; }
+.lrow .tt { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lrow .lm { font-size: 13px; color: var(--faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lrow .when { white-space: nowrap; }
+.lrow .inp { height: 34px; font-size: 15px; }
+.livemark { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 600; color: var(--live);
+  white-space: nowrap; }
+.list .empty { padding: 22px 16px; color: var(--dim); }
+
 /* ---------------------------------------------------------------- витрина компонентов (#/dev/ui) */
 .devui { height: 100%; overflow: auto; padding: 24px clamp(16px, 4vw, 40px) 60px; }
 .devui .wrap { max-width: 900px; margin: 0 auto; display: flex; flex-direction: column; gap: 22px; }

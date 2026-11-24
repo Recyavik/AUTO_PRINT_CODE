@@ -93,6 +93,35 @@ class AppCommands(QObject):
     def cmd_update_open(self, _d: dict) -> None:
         self.app.open_update_dialog()
 
+    # ------------------------------------------------------------ уроки
+    def _t(self, d: dict, key: str = "id"):
+        t = self.app.store.get(str(d.get(key) or ""))
+        if t is None:
+            raise ValueError("урок не найден")
+        return t
+
+    def cmd_open(self, d: dict) -> None:
+        self.app.open_lesson(str(d.get("lesson") or d.get("id") or ""), ask=not d.get("force"))
+
+    def cmd_duplicate(self, d: dict) -> None:
+        self.app.duplicate(self._t(d))
+
+    def cmd_delete(self, d: dict) -> None:
+        """Удалить урок или план — страница уже спросила."""
+        self.app.delete_lesson(self._t(d))
+
+    def cmd_new_topic(self, d: dict) -> None:
+        self.app.new_topic(str(d.get("plan") or ""))
+
+    def cmd_recognize(self, d: dict) -> None:
+        self.app.recognize_lesson(self._t(d))
+
+    def cmd_export_all(self, _d: dict) -> None:
+        self.app.export_package_dialog(list(self.app.store.templates))
+
+    def cmd_new_lesson(self, d: dict) -> None:
+        self.app.new_template(str(d.get("structure") or "empty"))
+
     def cmd_notice_action(self, d: dict) -> None:
         """Кнопка в тосте: повторить команду из уведомления (например, «Завершить и открыть»)."""
         act = (self.app.notice or {}).get("action") or {}
@@ -115,6 +144,15 @@ class AppCommands(QObject):
 
     def call_ping(self, _d: dict):
         return "pong"
+
+    def call_rename(self, d: dict) -> bool:
+        return self.app.rename(self._t(d), str(d.get("title") or ""))
+
+    def call_import_paths(self, d: dict) -> dict:
+        paths = d.get("paths")
+        if not isinstance(paths, list):
+            raise ValueError("нет файлов")
+        return self.app.import_paths([str(p) for p in paths][:50])
 
     def call_pick_files(self, d: dict) -> list[str]:
         """Системное окно выбора файлов поверх окна программы → пути (пусто — передумали)."""

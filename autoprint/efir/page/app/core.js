@@ -31,9 +31,12 @@ function connect(channel, onState) {
 }
 
 let navSeq = -1, noticeSeq = -1, dropSeq = -1;
+export function now() { return Date.now() + (S._offset || 0); }   // часы программы
+
 function onApp(s) {
   for (const k of Object.keys(S)) if (!(k in s)) delete S[k];
   Object.assign(S, s);
+  if (s.server_now) S._offset = s.server_now - Date.now();
   window.S = S;
   if (S.nav && S.nav.seq !== navSeq) {
     const first = navSeq === -1;

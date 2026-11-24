@@ -14,8 +14,10 @@ import { views, boot } from "/static/app/main.js";
 import { mountShell } from "/static/app/shell.js";
 import { placeholders } from "/static/app/placeholders.js";
 import { devView } from "/static/app/devui.js";
+import { lessonsView } from "/static/app/library.js";
 Object.assign(views, placeholders);
 views.dev = devView;
+views.lessons = lessonsView;
 mountShell(document.getElementById("app"));
 boot();
 </script>

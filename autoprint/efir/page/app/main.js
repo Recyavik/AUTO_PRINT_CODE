@@ -69,14 +69,14 @@ function render() {
   document.body.dataset.view = "";
   current = key ? views[key](root, r) || {} : {};
   document.body.dataset.view = name;
-  if (window.__ready && current.update) current.update(S);
+  if (S.version && current.update) current.update(S);      // данные уже пришли — экран сразу с ними
   emit("view", name);
 }
 
 on("route", render);
 on("app", () => {
   applyLook();
-  if (!currentName) render();
+  if (!currentName) render();                               // первое состояние: render сам передаст его экрану
   else if (current && current.update) current.update(S);
 });
 on("notice", (n) => {
