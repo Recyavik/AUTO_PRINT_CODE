@@ -744,7 +744,7 @@ class PageV11Test(Page):
             self.assertGreater(self.js("document.querySelector('#strip .scrchip').getBoundingClientRect().height"), 0)
             self.assertIn("Приветствие", self.js("document.querySelector('#strip .prev').textContent"))
             self.assertIn("Итоги", self.js("document.querySelector('#strip .next').textContent"))
-            self.assertIn("конец", self.js("document.querySelector('#strip').textContent"))
+            self.assertIn("Конец урока", self.js("document.querySelector('#strip').textContent"))   # 0.12
             self.js("document.querySelector('#strip .more').click()")
             self.assertTrue(self.edge.wait("getComputedStyle(document.getElementById('plan')).display !== 'none'"))
             self.js("document.querySelector('#strip .more').click()")
@@ -990,6 +990,55 @@ class PageV12Test(Page):
         self.open_lesson("F")
         self.assertTrue(self.js("document.getElementById('planbanner').hidden"))
         self.assertTrue(self.js("document.getElementById('planlink').hidden"))
+
+    # ---------------------------------------------------------------- Task 6: «Закрепить сбоку», время
+    def test_pin_plan_from_overlay(self):
+        s = self.win.settings
+        s.page_plan = "strip"
+        self.republish()
+        self.mode("lesson")
+        try:
+            self.js("document.querySelector('#strip .more').click()")
+            self.assertTrue(self.edge.wait("document.body.classList.contains('plan-open')"))
+            self.assertEqual(self.js("document.querySelector('#plan .ppin').textContent"), "Закрепить сбоку")
+            self.js("document.querySelector('#plan .ppin').click()")
+            self.assertTrue(self.wait_py(lambda: s.page_plan == "side"))
+            self.assertTrue(self.edge.wait("document.querySelector('#plan .ppin').textContent === 'В строку'"))
+            self.assertFalse(self.js("document.body.classList.contains('plan-open')"))
+            self.js("document.querySelector('#plan .ppin').click()")
+            self.assertTrue(self.wait_py(lambda: s.page_plan == "strip"))
+        finally:
+            s.page_plan = "strip"
+            self.republish()
+
+    def test_time_labels(self):
+        self.mode("lesson")
+        clock = "document.querySelector('#st-ts1 .clock')"
+        self.assertTrue(self.edge.wait(f"{clock}.textContent === '0:00–0:05'"))
+        self.assertIn("От начала урока", self.js(f"{clock}.title"))
+        self.go_live(1)
+        try:
+            self.assertTrue(self.edge.wait("document.querySelector('#strip .end').textContent.startsWith('Конец урока ')"))
+            self.assertTrue(self.edge.wait(f"/^\\d{{1,2}}:\\d\\d–\\d{{1,2}}:\\d\\d$/.test({clock}.textContent) && {clock}.textContent !== '0:00–0:05'"))
+            self.assertIn("от начала урока", self.js(f"{clock}.title"))
+            self.assertRegex(self.js("document.querySelector('#pr-ts2 .t').textContent"), r"^\d{1,2}:\d\d$")
+        finally:
+            self.stop_live()
+
+    def test_start_at_button_label(self):
+        self.mode("lesson")
+        btn = "[...document.querySelectorAll('#tools button')].find(b => b.getAttribute('aria-label') === 'Начать урок в назначенное время')"
+        self.assertTrue(self.edge.wait(f"!!({btn})"))
+        self.assertEqual(self.js(f"({btn}).textContent"), "Начать в… ▾")
+        t = self.store.get("T")
+        t.start = "18:00"
+        self.republish()
+        try:
+            self.assertTrue(self.edge.wait(f"({btn}).textContent === 'Начать в 18:00 ▾'"))
+            self.assertTrue(self.edge.wait("document.querySelector('#st-ts2 .clock').textContent === '18:05–18:25'"))
+        finally:
+            t.start = ""
+            self.republish()
 
 
 if __name__ == "__main__":

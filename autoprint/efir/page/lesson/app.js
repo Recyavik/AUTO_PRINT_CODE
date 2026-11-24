@@ -629,7 +629,7 @@ export function renderTools() {
     go.title = "Урок начинается с этой минуты: этапы пойдут по часам";
     go.onclick = () => { if (mayReplace()) cmd({ cmd: "start", force: !!A.S.other_live }); };
     t.appendChild(go);
-    const at = el("button", "", "в… ▾");
+    const at = el("button", "", /^\d{1,2}:\d{2}$/.test(L.start || "") ? "Начать в " + L.start + " ▾" : "Начать в… ▾");
     at.title = "Начать урок в назначенное время: до начала таймер считает «до начала»";
     at.setAttribute("aria-label", "Начать урок в назначенное время");
     at.onclick = () => startAtMenu(at);
@@ -781,7 +781,7 @@ function renderStrip(elapsed, cur, stages) {
   }
   let endText = "";
   if (A.S && A.S.live) {
-    endText = "конец в " + clockAt(A.S.live.anchor + total * 60000);
+    endText = "Конец урока " + clockAt(A.S.live.anchor + total * 60000);
     const sh = A.S.live.shift || 0;
     if (sh) endText += (sh > 0 ? " · +" : " · −") + Math.abs(sh) + " мин";
   }
@@ -815,9 +815,30 @@ $("nowbar").addEventListener("click", () => {
 });
 window.addEventListener("scroll", () => { const c = computeCurrent(); updateNowbar(c.cur, c.stages); }, { passive: true });
 
+// время этапа: урок идёт — часы от его начала; задано «Начать в 18:00» — часы от него; иначе — от начала урока
+function lessonBase() {
+  const L = A.S && A.S.lesson;
+  if (A.S && A.S.live) return A.S.live.anchor;
+  const m = L && /^(\d{1,2}):(\d{2})$/.exec(L.start || "");
+  if (!m) return null;
+  const d = new Date(now());
+  d.setHours(+m[1], +m[2], 0, 0);
+  return d.getTime();
+}
+
+function stageClock(s, base) {
+  if (base !== null) {
+    return { from: clockAt(base + s.start * 60000), text: clockAt(base + s.start * 60000) + "–" + clockAt(base + s.end * 60000),
+      title: "С " + hm(s.start) + " до " + hm(s.end) + " от начала урока" };
+  }
+  return { from: hm(s.start), text: hm(s.start) + "–" + hm(s.end),
+    title: "От начала урока: " + (s.start ? "с " + s.start + "-й" : "с начала") + " по " + s.end + "-ю минуту" };
+}
+
 function tick() {
   const L = A.S && A.S.lesson;
   if (!L) return;
+  const base = lessonBase();
   const status = $("status");
   const { elapsed, cur, next, stages } = computeCurrent();
   if (cur !== A.curIdx) {
@@ -842,13 +863,13 @@ function tick() {
       x.classList.toggle("ending", ending);
     }
     const clock = st.querySelector(".clock");
+    const c = stageClock(s, base);
     if (clock) {
-      let txt = hm(s.start) + "–" + hm(s.end);
-      clock.textContent = txt;
-      if (A.S.live) { const sm = el("small", "", clockAt(A.S.live.anchor + s.start * 60000)); clock.appendChild(sm); }
+      if (clock.textContent !== c.text) clock.textContent = c.text;
+      clock.title = c.title;
     }
     const t = pr && pr.querySelector(".t");
-    if (t) t.textContent = hm(s.start);
+    if (t) { t.textContent = c.from; t.title = c.title; }
     const lbl = st.querySelector(".left .lbl2"), big = st.querySelector(".left .big");
     if (!lbl) continue;
     if (ph === "current") {
@@ -1145,6 +1166,10 @@ function openPlan() {
   setMode("prep", true);
 }
 window.addEventListener("suflor:open-plan", openPlan);
+window.addEventListener("suflor:pin-plan", (e) => {       // «Закрепить сбоку» / «В строку» в шапке плана
+  document.body.classList.remove("plan-open");
+  setPref("page_plan", e.detail);
+});
 $("planlink").addEventListener("click", openPlan);
 Q.Q.onResult = (res) => {
   for (const [id, it] of Object.entries(res.items || {})) {

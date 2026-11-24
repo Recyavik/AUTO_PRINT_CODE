@@ -489,6 +489,12 @@ export function renderPlan() {
   const head = el("div", "ptitle");
   head.appendChild(el("h2", "", "План урока"));
   head.appendChild(el("span", "ptotal", durText(stages.reduce((a, s) => a + s.minutes, 0))));
+  // «Урок»: план в строке выпадает поверх — его можно закрепить сбоку; закреплённый — вернуть в строку
+  const side = ((A.S && A.S.prefs && A.S.prefs.page_plan) || "strip") === "side";
+  const pin = el("button", "ppin linkbtn", side ? "В строку" : "Закрепить сбоку");
+  pin.title = side ? "План — одной строкой под шапкой, весь — по «План ▾»" : "План всегда виден слева, не поверх урока";
+  pin.onclick = () => window.dispatchEvent(new CustomEvent("suflor:pin-plan", { detail: side ? "strip" : "side" }));
+  head.appendChild(pin);
   plan.appendChild(head);
   const pn = partNumbers(stages);
   let lastPart = null;

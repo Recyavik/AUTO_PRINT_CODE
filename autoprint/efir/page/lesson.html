@@ -90,6 +90,9 @@ main { flex: 999 1 560px; min-width: 0; display: flex; flex-direction: column; g
 .ptitle { display: flex; justify-content: space-between; align-items: baseline; margin: 0 4px 6px; }
 .ptitle h2 { margin: 0; font-size: 13px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; color: var(--dim); }
 .ptitle span { font-size: 13px; color: var(--dim); font-weight: 600; }
+.ptitle .ppin { font-size: 12px; margin-left: 8px; white-space: nowrap; }
+.ptitle .ptotal { margin-left: auto; }
+body.mode-prep .ptitle .ppin, body.plan-hidden .ptitle .ppin { display: none; }   /* настройка — только для «Урока» */
 .ppart { font-size: 12px; font-weight: 700; color: var(--dim); margin: 12px 8px 4px; }
 .prow { padding: 5px 6px; border: 1px solid transparent; border-radius: 8px; }
 .prow:hover { background: var(--card); border-color: var(--stroke); }
