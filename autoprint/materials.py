@@ -120,6 +120,19 @@ def _shape_text(xml: bytes) -> str:
 
 
 def _pptx(p: Path) -> tuple[str, int]:
+    """Текст слайдов и заметок докладчика — в порядке показа (ppt/presentation.xml), номера — как в PowerPoint."""
+    from .slides import pptx_info
+    try:
+        slides, _sections = pptx_info(str(p))
+    except (KeyError, ET.ParseError):
+        slides = []
+    if slides:
+        out = []
+        for s in slides:
+            out.append(f"=== Слайд {s['n']} ===" + (" (скрытый)" if s["hidden"] else "") + f"\n{s['text']}")
+            if s["notes"]:
+                out.append(f"Заметки к слайду {s['n']}:\n{s['notes']}")
+        return "\n\n".join(out).strip(), len(slides)
     with zipfile.ZipFile(p) as z:
         names = set(z.namelist())
         slides = sorted((n for n in names if re.fullmatch(r"ppt/slides/slide\d+\.xml", n)), key=_slide_no)

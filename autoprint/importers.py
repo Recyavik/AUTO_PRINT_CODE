@@ -172,9 +172,9 @@ def python_text(text: str, title: str) -> Template:
     return _build(title, cells, "python")
 
 
-FILE_FILTER = ("Тетрадки и занятия (*.ipynb *.md *.py *.pyw *.json);;Jupyter (*.ipynb);;Markdown (*.md);;"
-               "Python (*.py *.pyw);;JSON (*.json)")
-FILE_EXTS = (".ipynb", ".md", ".py", ".pyw", ".json")
+FILE_FILTER = ("Уроки, тетрадки и презентации (*.ipynb *.md *.py *.pyw *.json *.pdf *.pptx);;Jupyter (*.ipynb);;"
+               "Markdown (*.md);;Python (*.py *.pyw);;JSON (*.json);;Презентация (*.pdf *.pptx)")
+FILE_EXTS = (".ipynb", ".md", ".py", ".pyw", ".json", ".pdf", ".pptx")
 
 
 def load_file(path: str) -> Template:
@@ -183,6 +183,9 @@ def load_file(path: str) -> Template:
     ext = Path(path).suffix.lower()
     if ext == ".ipynb":
         return import_ipynb(path)
+    if ext in (".pdf", ".pptx"):                       # презентация — урок по слайдам
+        from . import slides
+        return slides.from_pdf(path) if ext == ".pdf" else slides.from_pptx(path)[0]
     if ext == ".md":
         from . import lesson_md
         text = Path(path).read_text(encoding="utf-8-sig")

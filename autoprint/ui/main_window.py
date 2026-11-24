@@ -555,6 +555,32 @@ class MainWindow(FramelessWindow):
         self._fill_library(t.id)
         self.open_lesson(t.id)
 
+    def new_from_presentation(self, path: str = "") -> Template | None:
+        """«Новый урок → Из презентации…»: PDF или PowerPoint → урок по слайдам (заметки докладчика — плашками)."""
+        from .import_dialog import pptx_lesson
+        if not path:
+            path, _ = QFileDialog.getOpenFileName(self, "Урок из презентации", "", "Презентация (*.pdf *.pptx)")
+        if not path:
+            return None
+        notes: list[str] = []
+        try:
+            if path.lower().endswith(".pptx"):
+                t, notes = pptx_lesson(self, path)
+            else:
+                from ..slides import from_pdf
+                t = from_pdf(path)
+        except Exception as e:   # noqa: BLE001 — сказать, что не так с файлом
+            log.warning("Урок из презентации %s не создан: %s", path, e)
+            self._notify(f"Не получилось открыть презентацию: {e}", warn=True)
+            return None
+        self.store.insert(t)
+        self.touch(t)
+        self._fill_library(t.id)
+        slides_n = sum(1 for b in t.blocks if b.type == "image")
+        self._notify(f"Урок «{t.title}»: слайдов — {slides_n}. " + " ".join(notes), tray=bool(notes))
+        self.open_lesson(t.id)
+        return t
+
     def recognize_lesson(self, t: Template) -> bool:
         """Тетрадка-сценарий (⏱ 00:00–00:03 · …, 🗣 Говоришь, ✅ Ожидаемый вывод) → новый урок с этапами и плашками
         рядом с исходным (он не меняется) — и открыть его."""
@@ -631,6 +657,9 @@ class MainWindow(FramelessWindow):
         self._fill_library(last.id)
         msg = (f"Добавлен урок «{last.title}»: блоков — {len(last.blocks)}, из них кода — "
                f"{len(last.code_blocks())}." if len(d.result) == 1 else f"Добавлено уроков: {len(d.result)}.")
+        notes = getattr(d, "result_notes", [])
+        if notes:
+            msg += " " + " ".join(notes)
         mode = {STYLE_STEPS: MODE_STEPS, STYLE_COMMENTS: MODE_LINES, STYLE_PARTS: MODE_BLOCK}.get(d.result_style)
         if mode:
             # разбор нейросетью: включить подходящую печать; комментарии — читать вслух, а не печатать

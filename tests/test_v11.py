@@ -320,5 +320,212 @@ class SlideTest(Base):
         self.assertEqual(it["slide"], 2)
 
 
+# ================================================================ Task 9: импорт презентаций
+
+def make_pdf(path: Path, pages: list[str]) -> str:
+    from PySide6.QtCore import QRect
+    from PySide6.QtGui import QFont, QPageSize, QPainter, QPdfWriter
+    w = QPdfWriter(str(path))
+    w.setPageSize(QPageSize(QPageSize.PageSizeId.A5))
+    p = QPainter(w)
+    p.setFont(QFont("Segoe UI", 28))
+    for i, text in enumerate(pages):
+        if i:
+            w.newPage()
+        p.drawText(QRect(200, 200, 4000, 3000), 0, text)
+    p.end()
+    return str(path)
+
+
+P_NS = 'xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" ' \
+       'xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" ' \
+       'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"'
+
+
+def _sp(text: str, ph: str = "") -> str:
+    paras = "".join(f"<a:p><a:r><a:t>{t}</a:t></a:r></a:p>" for t in text.split("\n"))
+    nv = f'<p:nvSpPr><p:cNvPr id="1" name="x"/><p:cNvSpPr/><p:nvPr>{f"<p:ph type={chr(34)}{ph}{chr(34)}/>" if ph else ""}</p:nvPr></p:nvSpPr>'
+    return f"<p:sp>{nv}<p:txBody>{paras}</p:txBody></p:sp>"
+
+
+def make_pptx(path: Path, slides: list[dict], sections: list[tuple[str, list[int]]] | None = None) -> str:
+    """slides: [{"file": 3, "title": …, "body": …, "notes": …, "hidden": bool}] в порядке показа."""
+    import zipfile
+    ids = [256 + i for i in range(len(slides))]
+    rels = "".join(f'<Relationship Id="rId{i + 10}" Target="slides/slide{s["file"]}.xml" '
+                   f'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide"/>'
+                   for i, s in enumerate(slides))
+    sld = "".join(f'<p:sldId id="{ids[i]}" r:id="rId{i + 10}"/>' for i in range(len(slides)))
+    sect = ""
+    if sections:
+        sect = ('<p:extLst><p:ext uri="{521415D9-36F7-43E2-AB2F-B90AF26B5E84}">'
+                '<p14:sectionLst xmlns:p14="http://schemas.microsoft.com/office/powerpoint/2010/main">'
+                + "".join(f'<p14:section name="{name}" id="{{S{k}}}"><p14:sldIdLst>'
+                          + "".join(f'<p14:sldId id="{ids[i]}"/>' for i in idx) + "</p14:sldIdLst></p14:section>"
+                          for k, (name, idx) in enumerate(sections))
+                + "</p14:sectionLst></p:ext></p:extLst>")
+    with zipfile.ZipFile(path, "w") as z:
+        z.writestr("ppt/presentation.xml", f"<p:presentation {P_NS}><p:sldIdLst>{sld}</p:sldIdLst>{sect}</p:presentation>")
+        z.writestr("ppt/_rels/presentation.xml.rels",
+                   f'<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">{rels}</Relationships>')
+        for s in slides:
+            f = s["file"]
+            show = ' show="0"' if s.get("hidden") else ""
+            z.writestr(f"ppt/slides/slide{f}.xml", f"<p:sld {P_NS}{show}><p:cSld><p:spTree>"
+                       + _sp(s["title"], "title") + _sp(s.get("body", "")) + "</p:spTree></p:cSld></p:sld>")
+            if s.get("notes"):
+                z.writestr(f"ppt/slides/_rels/slide{f}.xml.rels",
+                           '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+                           f'<Relationship Id="rId2" Target="../notesSlides/notesSlide{f}.xml" Type="x"/></Relationships>')
+                z.writestr(f"ppt/notesSlides/notesSlide{f}.xml", f"<p:notes {P_NS}><p:cSld><p:spTree>"
+                           + _sp("", "sldImg") + _sp(s["notes"], "body") + _sp(str(f), "sldNum")
+                           + "</p:spTree></p:cSld></p:notes>")
+    return str(path)
+
+
+class PresentationTest(unittest.TestCase):
+    def test_pdf(self):
+        from autoprint import slides
+        pdf = make_pdf(TMP / "deck.pdf", ["Функции в Python", "Что такое аргумент", "Итоги урока"])
+        t = slides.from_pdf(pdf)
+        self.assertEqual(t.title, "deck")
+        st = [b for b in t.blocks if b.type == BLOCK_STAGE]
+        self.assertEqual([(b.title, b.minutes) for b in st], [("Презентация", 45)])
+        imgs = [b for b in t.blocks if b.type == BLOCK_IMAGE]
+        self.assertEqual([b.slide for b in imgs], [1, 2, 3])
+        self.assertTrue(all(storage.media_path(b.text) is not None for b in imgs))
+        self.assertIn("Функции", imgs[0].title)
+
+    def test_pptx_order_sections_notes(self):
+        from autoprint import slides
+        deck = make_pptx(TMP / "deck.pptx", [
+            {"file": 3, "title": "Титул", "notes": "Скажи: Добрый день, сегодня функции.\nЭто тема всего урока."},
+            {"file": 1, "title": "Вопрос", "notes": "Спроси: Что такое функция?\n→ блок кода с именем\n→ команда"},
+            {"file": 2, "title": "Практика", "notes": "Сделай: открой редактор.\n\nТермин: Аргумент — значение в скобках\n"
+                                                         "Важно: отступ 4 пробела.\nЗадание: напишите функцию."},
+        ], sections=[("Введение", [0]), ("Работа", [1, 2])])
+        pdf = make_pdf(TMP / "deck-pages.pdf", ["Титул", "Вопрос", "Практика"])
+        t, warns, need = slides.from_pptx(deck, pdf=pdf)
+        self.assertFalse(need)
+        self.assertEqual(warns, [])
+        st = [(b.title, b.minutes) for b in t.blocks if b.type == BLOCK_STAGE]
+        self.assertEqual(st, [("Введение", 15), ("Работа", 30)])
+        imgs = [(b.slide, b.title) for b in t.blocks if b.type == BLOCK_IMAGE]
+        self.assertEqual(imgs, [(1, "Титул"), (2, "Вопрос"), (3, "Практика")])
+        notes = [(b.role, b.text) for b in t.blocks if b.type == BLOCK_MARKDOWN]
+        self.assertEqual(notes, [("say", "Добрый день, сегодня функции."), ("tell", "Это тема всего урока."),
+                                 ("ask", "Что такое функция?\n→ блок кода с именем\n→ команда"),
+                                 ("do", "открой редактор."), ("term", "Аргумент\nзначение в скобках"),
+                                 ("important", "отступ 4 пробела."), ("task", "напишите функцию.")])
+        kinds = [b.type for b in t.blocks]
+        self.assertEqual(kinds.index(BLOCK_IMAGE), 1)                  # слайд — сразу после этапа, заметки — под ним
+
+    def test_hidden_slide(self):
+        from autoprint import slides
+        deck = make_pptx(TMP / "hidden.pptx", [{"file": 1, "title": "Один", "notes": "раз"},
+                                               {"file": 2, "title": "Скрытый", "notes": "два", "hidden": True},
+                                               {"file": 3, "title": "Три", "notes": "три"}])
+        pdf = make_pdf(TMP / "hidden.pdf", ["Один", "Три"])
+        t, warns, _ = slides.from_pptx(deck, pdf=pdf)
+        imgs = [(b.slide, b.title, bool(b.text)) for b in t.blocks if b.type == BLOCK_IMAGE]
+        self.assertEqual(imgs, [(1, "Один", True), (3, "Три", True)])
+        self.assertTrue(any("2" in w and "скрыт" in w.lower() for w in warns), warns)
+
+    def test_page_count_mismatch(self):
+        from autoprint import slides
+        deck = make_pptx(TMP / "mism.pptx", [{"file": i, "title": f"С{i}", "notes": ""} for i in (1, 2, 3)])
+        pdf = make_pdf(TMP / "mism.pdf", ["С1", "С2"])
+        t, warns, _ = slides.from_pptx(deck, pdf=pdf)
+        imgs = [(b.slide, bool(b.text)) for b in t.blocks if b.type == BLOCK_IMAGE]
+        self.assertEqual(imgs, [(1, True), (2, True), (3, False)])
+        self.assertTrue(any("2" in w and "3" in w for w in warns), warns)
+
+    def test_no_pdf_needs_pdf(self):
+        from autoprint import slides
+        deck = make_pptx(TMP / "nopdf.pptx", [{"file": 1, "title": "Один", "notes": "Скажи: привет"}])
+        old = slides.export_pdf
+        slides.export_pdf = lambda p: None
+        try:
+            t, warns, need = slides.from_pptx(deck)
+        finally:
+            slides.export_pdf = old
+        self.assertTrue(need)
+        self.assertEqual([(b.role, b.text) for b in t.blocks if b.type == BLOCK_MARKDOWN], [("say", "привет")])
+
+    def test_export_pdf_mocked(self):
+        import subprocess
+        from autoprint import slides
+        deck = make_pptx(TMP / "com.pptx", [{"file": 1, "title": "Один"}])
+        calls = []
+
+        def fake_run(args, **kw):
+            calls.append((args, kw))
+            Path(kw["env"]["AP_OUT"]).write_bytes(b"%PDF-1.4 fake")
+            return subprocess.CompletedProcess(args, 0, "", "")
+
+        old_run, old_pp = slides.subprocess.run, slides.powerpoint_installed
+        slides.subprocess.run, slides.powerpoint_installed = fake_run, lambda: True
+        try:
+            out = slides.export_pdf(deck)
+        finally:
+            slides.subprocess.run, slides.powerpoint_installed = old_run, old_pp
+        self.assertTrue(out and out.endswith(".pdf"))
+        args, kw = calls[0]
+        self.assertIn("-NonInteractive", args)
+        self.assertTrue(kw["creationflags"] & 0x08000000)              # CREATE_NO_WINDOW — без окна
+        script = args[-1]
+        self.assertIn("SaveAs", script)
+        self.assertIn("32", script)                                     # ppSaveAsPDF
+        self.assertIn("Quit", script)
+        self.assertIn("POWERPNT", script)                               # был открыт у учителя — не закрывать
+        self.assertEqual(kw["env"]["AP_SRC"], str(Path(deck).resolve()))
+
+    def test_load_file_pdf(self):
+        from autoprint.importers import FILE_EXTS, load_file
+        self.assertIn(".pdf", FILE_EXTS)
+        self.assertIn(".pptx", FILE_EXTS)
+        pdf = make_pdf(TMP / "lf.pdf", ["Один", "Два"])
+        t = load_file(pdf)
+        self.assertEqual(sum(b.type == BLOCK_IMAGE for b in t.blocks), 2)
+
+    def test_import_dialog_pptx_with_pdf(self):
+        from autoprint.ui.import_dialog import ImportDialog
+        deck = make_pptx(TMP / "pair.pptx", [{"file": 1, "title": "Раз", "notes": "Скажи: привет"},
+                                             {"file": 2, "title": "Два", "notes": "", "hidden": True},
+                                             {"file": 3, "title": "Три", "notes": ""}])
+        pdf = make_pdf(TMP / "pair.pdf", ["Раз", "Три"])
+        d = ImportDialog(None, storage.Settings())
+        try:
+            d._take_files([deck, pdf])                              # PDF той же презентации — картинки, не урок
+            self.assertEqual(len(d.result), 1)
+            imgs = [(b.slide, bool(b.text)) for b in d.result[0].blocks if b.type == BLOCK_IMAGE]
+            self.assertEqual(imgs, [(1, True), (3, True)])
+            self.assertTrue(any("скрыт" in n.lower() for n in d.result_notes), d.result_notes)
+        finally:
+            d.close()
+            d.deleteLater()
+
+    def test_new_lesson_from_presentation(self):
+        win = make_window([lesson_with_stages()], port=18976)
+        win.lesson.open_page = lambda: None
+        try:
+            t = win.new_from_presentation(make_pdf(TMP / "newdeck.pdf", ["Один", "Два", "Три"]))
+            self.assertIsNotNone(t)
+            self.assertIn(t, win.store.templates)
+            self.assertEqual(win.printer.focus_id, t.id)
+            self.assertEqual(sum(b.type == BLOCK_IMAGE and b.slide > 0 for b in t.blocks), 3)
+        finally:
+            win._quitting = True
+            win.close()
+            pump()
+
+    def test_materials_pptx_order(self):
+        from autoprint import materials
+        deck = make_pptx(TMP / "mat.pptx", [{"file": 2, "title": "Первый"}, {"file": 1, "title": "Второй"}])
+        text = materials.extract(deck).text
+        self.assertLess(text.index("Первый"), text.index("Второй"))
+        self.assertIn("=== Слайд 1 ===\nПервый", text)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

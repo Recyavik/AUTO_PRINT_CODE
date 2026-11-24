@@ -31,6 +31,18 @@ from .widgets import Card, Note, Row, Segmented, Switch, Toast, accent_button, b
 
 TAB_FILE, TAB_PASTE, TAB_AI = "file", "paste", "ai"
 
+
+def pptx_lesson(parent, path: str, pdf: str | None = None) -> tuple[Template, list[str]]:
+    """PowerPoint → урок по слайдам. Картинок нет (PowerPoint не сохранил PDF) — попросить PDF этой презентации."""
+    from .. import slides
+    t, warns, need = slides.from_pptx(path, pdf=pdf)
+    if need:
+        pick, _ = QFileDialog.getOpenFileName(parent, f"PDF презентации «{Path(path).stem}» — для картинок слайдов",
+                                              str(Path(path).parent), "PDF (*.pdf)")
+        if pick:
+            t, warns, _need = slides.from_pptx(path, pdf=pick, export=False)
+    return t, warns
+
 log = logging.getLogger("autoprint.ai")
 
 STYLE_HINTS = {
@@ -69,6 +81,7 @@ class ImportDialog(QDialog):
         self.settings = settings or Settings.load()
         self.open_ai_settings = open_ai_settings      # «Подключить нейросеть…» — открыть ⚙ → Нейросеть
         self.result: list[Template] = []
+        self.result_notes: list[str] = []        # замечания импорта (презентация: скрытые слайды, нет PDF)
         self.result_style = ""
         self._paste_parsed: Template | None = None
         self._ai_parsed: L.Parsed | None = None
@@ -140,7 +153,7 @@ class ImportDialog(QDialog):
         t = label("Перетащите сюда файлы", "dropTitle")
         t.setAlignment(Qt.AlignmentFlag.AlignCenter)
         dl.addWidget(t)
-        s = label(".ipynb (Jupyter) · .md (Markdown) · .py · .json (урок или ответ нейросети)", "dropSub")
+        s = label(".ipynb (Jupyter) · .md (Markdown) · .py · .json · презентация .pdf или .pptx (урок по слайдам)", "dropSub")
         s.setAlignment(Qt.AlignmentFlag.AlignCenter)
         dl.addWidget(s)
         pick = button("Выбрать файлы…", "import")
@@ -409,10 +422,18 @@ QScrollArea#importScroll, QScrollArea#importScroll > QWidget > QWidget {{ backgr
         self._take_files(paths)
 
     def _take_files(self, paths: list[str]) -> None:
-        done, errors = [], []
+        done, errors, notes = [], [], []
+        pdfs = {Path(p).stem.lower(): p for p in paths if p.lower().endswith(".pdf")}
+        pptx = {Path(p).stem.lower() for p in paths if p.lower().endswith(".pptx")}
         for p in paths:
+            if p.lower().endswith(".pdf") and Path(p).stem.lower() in pptx:
+                continue                         # PDF той же презентации — картинки к слайдам PPTX
             try:
-                t = load_file(p)
+                if p.lower().endswith(".pptx"):
+                    t, warns = pptx_lesson(self, p, pdfs.get(Path(p).stem.lower()))
+                    notes += warns
+                else:
+                    t = load_file(p)
             except Exception as e:   # noqa: BLE001 — показать причину по каждому файлу
                 errors.append(f"{Path(p).name}: {e}")
                 continue
@@ -424,6 +445,7 @@ QScrollArea#importScroll, QScrollArea#importScroll > QWidget > QWidget {{ backgr
             self.toast.show_message("Не импортировано — " + "; ".join(errors)[:400], warn=True, ms=9000)
         if done:
             self.result = done
+            self.result_notes = notes
             self.accept()
 
     def dragEnterEvent(self, e) -> None:
