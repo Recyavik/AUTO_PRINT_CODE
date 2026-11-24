@@ -545,5 +545,67 @@ class ExerciseTest(unittest.TestCase):
             lesson_edit.apply(p, [{"op": "set", "block": "p5", "fields": {"exercise": "x" * 201}}])
 
 
+# ================================================================ Task 8: промпт урока
+
+class PromptTest(unittest.TestCase):
+    def test_plan_stages_in_prompt(self):
+        from autoprint import lesson_ai as L
+        p = plan90()
+        p.blocks.append(stage("Зарядка для глаз", 3, stage_kind="exercise", exercise="Глаза"))
+        s = L.lesson_prompt(L.Options(style=L.STYLE_SCENARIO, cls="5 класс", break_min=10), plan=p, exercises=["Глаза", "Шея"])
+        self.assertIn("строго по плану учителя", s)
+        for line in ("## Приветствие · 5 мин", "## Перерыв · 10 мин · перерыв", "## Зарядка для глаз · 3 мин · зарядка: Глаза"):
+            self.assertIn(line, s)
+        self.assertIn("ровно 68", s)                                  # минуты — из плана (65 + 3)
+        self.assertNotIn("отдельным этапом в середине", s)
+        self.assertIn("Класс / возраст учеников: 5 класс", s)
+        self.assertIn("«Глаза», «Шея»", s)
+        self.assertIn("![что должно быть на картинке](фото)", s)
+        self.assertIn("приложен к сообщению", s)
+        self.assertNotIn("Добавь зарядку", s)                         # с планом зарядку решает план
+
+    def test_no_plan_no_videos(self):
+        from autoprint import lesson_ai as L
+        s = L.lesson_prompt(L.Options(style=L.STYLE_SCENARIO, minutes=90, break_min=10))
+        self.assertIn("распиши упражнения в [!say]", s)
+        self.assertIn("Добавь зарядку 3–5 минут", s)
+        self.assertIn("___ (если не указан", s)
+        self.assertIn("перерыв 10 мин отдельным этапом в середине", s)
+        s45 = L.lesson_prompt(L.Options(style=L.STYLE_SCENARIO, minutes=45))
+        self.assertNotIn("Добавь зарядку", s45)
+        with_material = L.lesson_prompt(L.Options(style=L.STYLE_SCENARIO), material="Тема: циклы")
+        self.assertIn("Тема: циклы", with_material)
+        self.assertNotIn("приложен к сообщению", with_material)
+        self.assertEqual(L.chat_prompt("", L.Options(style=L.STYLE_SCENARIO, minutes=45)),
+                         L.lesson_prompt(L.Options(style=L.STYLE_SCENARIO, minutes=45)))
+
+    def test_builtin_scenario_is_markdown(self):
+        from autoprint import lesson_ai as L
+        sys_ = L.instruction(L.Options(style=L.STYLE_SCENARIO))
+        self.assertIn("~~~markdown", sys_)
+        self.assertNotIn('"blocks"', sys_)
+        self.assertIn("следующим сообщением", sys_)
+        self.assertNotIn("приложен к сообщению", sys_)
+        self.assertIn("Методичка", L.material_for("Методичка", L.Options(style=L.STYLE_SCENARIO)))
+
+    def test_page_prompt_uses_topic_plan(self):
+        from PySide6.QtGui import QGuiApplication
+        p = plan90()
+        t = plans.new_topic(p, "Функции")
+        win = window([p, t], 18911)
+        try:
+            win.printer.set_focus(t.id)
+            win.lesson.command({"cmd": "chat_prompt"})
+            text = QGuiApplication.clipboard().text()
+            self.assertIn("## Теория · 20 мин", text)
+            self.assertIn("строго по плану учителя", text)
+            win.printer.set_focus("P")
+            QGuiApplication.clipboard().setText("")
+            win.lesson.command({"cmd": "chat_prompt"})
+            self.assertIn("## Практика · 30 мин", QGuiApplication.clipboard().text())
+        finally:
+            close(win)
+
+
 if __name__ == "__main__":
     unittest.main()

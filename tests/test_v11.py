@@ -217,8 +217,8 @@ class RolesV11Test(unittest.TestCase):
     def test_ai_knows_new_roles(self):
         from autoprint import lesson_ai as L
         prompt = L.build_prompt("материал", L.Options(style=L.STYLE_SCENARIO))
-        for word in ('"homework"', "Домашнее задание", '"goal"', "Цель урока", "Если застрял", "Типичные ошибки"):
-            self.assertIn(word, prompt)
+        for word in ("[!homework]", "Домашнее задание", "[!goal]", "Цель урока", "Если застрял", "Типичные ошибки"):
+            self.assertIn(word, prompt, msg=word)      # 0.12: Markdown, как свой чат
         self.assertEqual(L._TYPE_ROLE.get("домашнее задание"), "homework")
         self.assertEqual(L._TYPE_ROLE.get("цель"), "goal")
 

@@ -1051,9 +1051,9 @@ class AiTest(unittest.TestCase):
         from autoprint import lesson_ai as L
         opt = L.Options(style=L.STYLE_SCENARIO)
         text = L.build_prompt("Материал урока", opt)
-        self.assertIn('"term"', text)
-        self.assertIn('"output"', text)
-        self.assertIn("печатается только код", text)
+        self.assertIn("[!term]", text)                 # 0.12: Markdown, как свой чат
+        self.assertIn("[!output]", text)
+        self.assertIn("печатает только код", text)
         self.assertIn("обязательно и дословно", text)
         self.assertIn("своими словами", text)
         self.assertNotIn("Условие", text)

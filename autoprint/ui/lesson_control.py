@@ -210,11 +210,14 @@ class LessonController(QObject):
         from PySide6.QtGui import QGuiApplication
         from .. import lesson_ai as L
         from ..storage import BLOCK_IMAGE, BLOCK_STAGE
-        if any(b.type == BLOCK_IMAGE and b.slide for b in t.blocks):
-            text = L.slides_prompt(t)
+        plan = t if t.kind == KIND_PLAN else (self.main.store.get(t.plan_id) if t.plan_id else None)
+        exercises = self.main.exercise_titles(t)
+        if any(b.type == BLOCK_IMAGE and b.slide and b.text for b in t.blocks):
+            text = L.slides_prompt(t, plan=plan, exercises=exercises)
         else:
             total = sum(b.minutes for b in t.blocks if b.type == BLOCK_STAGE) or 45
-            text = L.chat_prompt("", L.Options(style=L.STYLE_SCENARIO, minutes=total))
+            text = L.lesson_prompt(L.Options(style=L.STYLE_SCENARIO, minutes=total, cls=self.main.settings.lesson_class),
+                                   plan=plan, exercises=exercises)
         QGuiApplication.clipboard().setText(text)
         self.main._notify("Промпт скопирован: вставьте его в ChatGPT, GigaChat, Алису или DeepSeek и приложите файл "
                           "презентации или методички. Ответ — «⋯ → Вставить ответ нейросети».")

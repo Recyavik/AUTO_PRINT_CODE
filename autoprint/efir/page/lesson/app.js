@@ -322,7 +322,8 @@ function moreMenu(anchor) {
   items.push({ label: "Разложить по этапам (⏱ этапы, 🗣 реплики)…", hint: "копия урока", on: () => cmd({ cmd: "recognize" }) });
   const hasSlides = A.items.some((x) => x.type === "image" && x.slide);
   items.push({ head: "Нейросеть в своём чате" });
-  items.push({ label: hasSlides ? "Промпт для слайдов…" : "Промпт для своего чата…", hint: "ChatGPT, GigaChat, Алиса, DeepSeek",
+  items.push({ label: L.kind === "plan" ? "Промпт для нового урока по этому плану…" : hasSlides ? "Промпт для слайдов…" : "Промпт для своего чата…",
+    hint: "ChatGPT, GigaChat, Алиса, DeepSeek",
     on: () => cmd({ cmd: "chat_prompt" }) });
   items.push({ label: "Вставить ответ нейросети…", hint: "копия урока", on: answerBox });
   // план урока: открыть / отвязать; обычный урок — сделать из этапов план или привязать к плану

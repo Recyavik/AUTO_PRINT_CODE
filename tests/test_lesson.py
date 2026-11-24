@@ -289,9 +289,10 @@ class ScenarioAiTest(unittest.TestCase):
         from autoprint import lesson_ai as L
         opt = L.Options(style=L.STYLE_SCENARIO, minutes=80, break_min=10)
         p = L.build_prompt("Методичка: тёмная тема", opt)
-        for word in ('"stage"', '"say"', '"ask"', '"answer"', '"do"', '"show"', '"image"', '"slide"', "80",
-                     '"kind": "break"', "10 мин", "Методичка: тёмная тема"):
-            self.assertIn(word, p)
+        # 0.12: встроенная нейросеть отвечает уроком в Markdown, как свой чат
+        for word in ("## Название этапа · 10 мин", "[!say]", "[!ask]", "→", "[!do]", "[!show]", "slide:N", "80",
+                     "· перерыв", "10 мин", "Методичка: тёмная тема"):
+            self.assertIn(word, p, msg=word)
         self.assertIn("Сценарий урока", L.STYLES.values())
 
     def test_parse_scenario(self):
