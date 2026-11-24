@@ -83,6 +83,8 @@ class App(QObject):
         self._migrated = apply_migrations(settings, store)
         self.notice = {"seq": 0, "text": "", "warn": False, "action": None}
         self.view = ""                      # последний запрошенный экран (hash)
+        self.nav = {"seq": 0, "hash": ""}   # просьба странице открыть экран (seq растёт)
+        self.drop_info = {"seq": 0, "files": []}   # файлы, перетащенные в окно
         self.update_info: dict | None = None
         self.jobs = None                    # фоновые работы (jobs.py) — Task 11
 
@@ -123,6 +125,12 @@ class App(QObject):
         self.tray = Tray(self)
         self.window = AppWindow(self, web=web)
         self.window.close_handler = self.on_window_close
+        from .app_cmd import AppCommands
+        self.commands = AppCommands(self)   # команды страницы окна (/app/cmd, /app/call)
+        self._pub_timer = QTimer(self, singleShot=True, interval=150, timeout=self.publish_now)
+        self.changed.connect(self._schedule_publish)
+        self.navigate.connect(self._on_navigate)
+        self.efir.ensure_server()
         theme.changed.connect(self._on_theme)
         self._apply_settings()
         self._apply_hotkeys()
@@ -139,6 +147,33 @@ class App(QObject):
             system.pin_tray_icon(True)
         if settings.autostart:          # путь программы мог измениться — обновить запись автозапуска
             system.set_autostart(True)
+
+    # ================================================================ состояние окна (канал app)
+    def _schedule_publish(self, _topic: str = "") -> None:
+        """Изменений бывает много подряд (ход печати, правки) — странице уходит не чаще раза в 150 мс."""
+        if not self._pub_timer.isActive():
+            self._pub_timer.start()
+
+    def publish_now(self) -> None:
+        from .app_state import app_state
+        self._pub_timer.stop()
+        if self.efir.server.running:
+            self.efir.server.publish(app_state(self), channel="app")
+
+    def _on_navigate(self, hash_: str) -> None:
+        self.nav = {"seq": self.nav["seq"] + 1, "hash": hash_}
+        self.publish_now()
+
+    def drop(self, paths: list[str]) -> None:
+        """Файлы перетащили в окно — страница решает, что с ними делать (импорт, материал, картинка, видео)."""
+        files = []
+        for p in paths:
+            f = Path(p)
+            if f.is_file():
+                files.append({"path": str(f), "name": f.name, "size": f.stat().st_size, "ext": f.suffix.lower()})
+        if files:
+            self.drop_info = {"seq": self.drop_info["seq"] + 1, "files": files}
+            self.publish_now()
 
     # ================================================================ экраны и окно
     def show_view(self, hash_: str) -> None:

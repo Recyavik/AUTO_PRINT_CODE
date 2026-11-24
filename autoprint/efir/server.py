@@ -57,7 +57,7 @@ mimetypes.add_type("image/svg+xml", ".svg")
 # app — окно программы (1.0): список уроков, эфир, настройки, состояние набора и окна
 CHANNELS = ("screen", "lesson", "preview", "app")
 _LANG_ICON = re.compile(r"/static/lang/([a-z0-9+#-]+\.svg)")
-_STATIC = re.compile(r"/static/(lesson|vendor)/([a-z0-9-]+\.(js|css|txt))")
+_STATIC = re.compile(r"/static/(lesson|vendor|app)/([a-z0-9-]+\.(js|css|txt))")
 _STATIC_TYPES = {"js": "text/javascript; charset=utf-8", "css": "text/css; charset=utf-8",
                  "txt": "text/plain; charset=utf-8"}
 BODY_LIMIT = 2 * 1024 * 1024          # команды и правки урока
@@ -279,7 +279,7 @@ class _Handler(BaseHTTPRequestHandler):
             # сервер останавливается (выход, перезапуск): правку не терять — страница повторит её позже
             self.close_connection = True
             return self._json({"ok": False, "retry": True}, 503)
-        if path.startswith("/lesson/") and (self.headers.get("X-Suflor") != "1" or not self._origin_ok()):
+        if path.startswith(("/lesson/", "/app/")) and (self.headers.get("X-Suflor") != "1" or not self._origin_ok()):
             self.close_connection = True
             return self._json({"ok": False}, 403)
         try:
@@ -308,6 +308,12 @@ class _Handler(BaseHTTPRequestHandler):
         if path == "/lesson/cmd":
             owner._on_command(data)
             return self._json({"ok": True})
+        if path == "/app/cmd":
+            owner._on_app_cmd(data)
+            return self._json({"ok": True})
+        if path == "/app/call":
+            code, res = owner._on_app_call(data)
+            return self._json(res, code)
         if path == "/report":
             if data.get("type") == "key" and not self._origin_ok():
                 return self._json({"ok": False}, 403)      # листать слайды может только своя вкладка учеников
@@ -334,6 +340,9 @@ class BroadcastServer:
         # правка и загрузка: вызываются в потоке сервера и возвращают (код ответа, JSON)
         self.on_edit: Callable[[dict], tuple[int, dict]] | None = None
         self.on_upload: Callable[[dict], tuple[int, dict]] | None = None
+        # окно программы (1.0): команды без ответа и вызовы с ответом (ждут поток интерфейса)
+        self.on_app_cmd: Callable[[dict], None] | None = None
+        self.on_app_call: Callable[[dict], tuple[int, dict]] | None = None
         self.stopping = False
         self._httpd: _Server | None = None
         self._thread: threading.Thread | None = None
@@ -458,6 +467,22 @@ class BroadcastServer:
                 self.on_command(data)
             except Exception:
                 log.exception("on_command")
+
+    def _on_app_cmd(self, data: dict) -> None:
+        if self.on_app_cmd:
+            try:
+                self.on_app_cmd(data)
+            except Exception:
+                log.exception("on_app_cmd")
+
+    def _on_app_call(self, data: dict) -> tuple[int, dict]:
+        if not self.on_app_call:
+            return 503, {"ok": False, "retry": True, "error": "Программа ещё запускается"}
+        try:
+            return self.on_app_call(data)
+        except Exception:
+            log.exception("on_app_call")
+            return 500, {"ok": False, "error": "Внутренняя ошибка программы"}
 
     def _on_edit(self, data: dict) -> tuple[int, dict]:
         if not self.on_edit:

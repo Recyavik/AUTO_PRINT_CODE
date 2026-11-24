@@ -115,6 +115,18 @@ class AppCoreTest(unittest.TestCase):
                                                "Обновление…", "Настройки…", "Выход"])
         self.assertFalse(self.a.tray.update_action.isVisible())
 
+    def test_app_state_keys(self):
+        from autoprint.app_state import app_state
+        s = app_state(self.a)
+        for k in ("version", "dark", "zoom", "prefs", "lessons", "plans", "continue_id", "live", "print", "update",
+                  "ai", "jobs", "notice", "window", "drop", "nav", "efir", "settings"):
+            self.assertIn(k, s)
+        self.assertEqual([x["id"] for x in s["lessons"]], ["LA", "LB"])
+        self.assertEqual(s["lessons"][0]["meta"], "5 мин · 1 этап · без кода")
+        self.assertEqual(set(s["ai"]["cli"]), {"claude", "codex"})
+        import json
+        json.dumps(s)                                   # уходит в страницу как есть
+
     def test_show_view_emits_navigate(self):
         self.a.show_view("#/lesson/LA")
         self.assertEqual(self.nav[-1], "#/lesson/LA")

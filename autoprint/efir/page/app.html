@@ -8,8 +8,9 @@
 </head>
 <body>
 <div id="app"></div>
-<script>
-fetch("/state?ch=app").then((r) => r.json()).then((s) => { window.__state = s; window.__ready = true; });
+<script type="module">
+import { start } from "/static/app/core.js";
+start();
 </script>
 </body>
 </html>
