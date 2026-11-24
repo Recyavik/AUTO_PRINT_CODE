@@ -79,6 +79,7 @@ class ImportDialog(QDialog):
         self.result: list[Template] = []
         self.result_notes: list[str] = []        # замечания импорта (презентация: скрытые слайды, нет PDF)
         self.live_check = lambda: False          # идёт эфир — презентации не импортируем (окно программы задаёт)
+        self.result_looks: list = []             # урок одним файлом: оформления экрана учеников с видео
         self.result_style = ""
         self._paste_parsed: Template | None = None
         self._ai_parsed: L.Parsed | None = None
@@ -457,7 +458,23 @@ QScrollArea#importScroll, QScrollArea#importScroll > QWidget > QWidget {{ backgr
         self._take_files(paths)
 
     def _take_files(self, paths: list[str]) -> None:
+        from .. import package
+        from ..importers import PACKAGE_EXTS
         done, errors, notes = [], [], []
+        looks = []
+        for p in [x for x in paths if x.lower().endswith(PACKAGE_EXTS)]:      # урок одним файлом (.autoprint, .zip)
+            try:
+                pkg = package.read_package(p)
+            except (OSError, ValueError, KeyError) as e:
+                errors.append(f"{Path(p).name}: {e}")
+                continue
+            done += pkg.plans + pkg.lessons
+            looks += pkg.looks
+            notes += pkg.notes
+            parts = [f"уроков: {len(pkg.lessons)}"] + ([f"планов: {len(pkg.plans)}"] if pkg.plans else []) + \
+                    ([f"оформлений экрана учеников: {len(pkg.looks)}"] if pkg.looks else [])
+            notes.append(f"Из {Path(p).name}: " + ", ".join(parts) + ".")
+        paths = [x for x in paths if not x.lower().endswith(PACKAGE_EXTS)]
         pdfs = {Path(p).stem.lower(): p for p in paths if p.lower().endswith(".pdf")}
         pptx = {Path(p).stem.lower() for p in paths if p.lower().endswith(".pptx")}
         for p in paths:
@@ -484,6 +501,7 @@ QScrollArea#importScroll, QScrollArea#importScroll > QWidget > QWidget {{ backgr
         if done:
             self.result = done
             self.result_notes = notes
+            self.result_looks = looks
             self.accept()
 
     def dragEnterEvent(self, e) -> None:
@@ -499,7 +517,7 @@ QScrollArea#importScroll, QScrollArea#importScroll > QWidget > QWidget {{ backgr
         paths = [u.toLocalFile() for u in e.mimeData().urls() if u.isLocalFile()]
         files = [p for p in paths if Path(p).suffix.lower() in FILE_EXTS]
         if not files:
-            self.toast.show_message("Подходят файлы .ipynb, .md, .py и .json.", warn=True)
+            self.toast.show_message("Подходят файлы .autoprint, .zip, .ipynb, .md, .py, .json, .pdf и .pptx.", warn=True)
             return
         self._take_files(files)
 

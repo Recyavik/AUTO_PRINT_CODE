@@ -61,7 +61,7 @@ export function newId() {
 }
 
 // команды, которые открывают окно программы: оно может оказаться под экраном урока — сказать, где его искать
-const OPENS_WINDOW = new Set(["export", "look_edit", "look_new", "fill_slides", "settings"]);
+const OPENS_WINDOW = new Set(["export", "look_edit", "look_new", "fill_slides", "settings"]);   // export — и .autoprint
 
 export async function cmd(data) {
   if (OPENS_WINDOW.has(data && data.cmd)) toast("Открываю окно AutoPrintCode — если его не видно, оно на панели задач");

@@ -264,6 +264,9 @@ class MainWindow(FramelessWindow):
         t = self._selected()
         if t is not None:
             self._export_menu(m.addMenu(icons.icon("export"), "Экспорт урока"), t)
+        if self.store.templates:
+            m.addAction(icons.icon("export"), "Все уроки одним файлом (.autoprint)…",
+                        lambda: self.export_package_dialog(list(self.store.templates)))
         m.addSeparator()
         m.addAction(icons.icon("presentation"), "Экран урока", self._open_selected)
         m.addAction(icons.icon("radio"), "Эфир — шаблоны вебинаров…", self.efir.show_window)
@@ -274,6 +277,7 @@ class MainWindow(FramelessWindow):
         m.addAction(icons.icon("logout"), "Выход\tCtrl+Q", self.quit_app)
 
     def _export_menu(self, m: QMenu, t: Template) -> None:
+        m.addAction("Урок одним файлом — с картинками и видео (.autoprint)…", lambda: self.export_template(t, "package"))
         m.addAction("Урок в Markdown (.md, с картинками рядом)…", lambda: self.export_template(t, "md"))
         m.addAction("Урок в .ipynb…", lambda: self.export_template(t, "ipynb"))
         m.addAction("Тетрадка для учеников (.ipynb, только код)…", lambda: self.export_template(t, "students"))
@@ -805,10 +809,14 @@ class MainWindow(FramelessWindow):
 
     def _take_import(self, d) -> None:
         from ..lesson_ai import STYLE_COMMENTS, STYLE_PARTS, STYLE_STEPS
+        for look in getattr(d, "result_looks", []):     # урок одним файлом: оформление с видео — к себе (если ещё нет)
+            if self.efir.store.look(look.id) is None:
+                self.efir.save_look(look)
         last = None
         for t in d.result:
             self.store.insert(t)
-            last = t
+            if t.kind != KIND_PLAN or last is None:      # открыть — урок, а не план (план — только если уроков нет)
+                last = t
         if last is None:
             return
         self.touch(last)
@@ -828,9 +836,75 @@ class MainWindow(FramelessWindow):
         self.toast.show_message(msg, ms=9000)
         self.open_lesson(last.id)
 
+    # ---------------------------------------------------------------- урок одним файлом (.autoprint)
+    def _package_parts(self, templates: list[Template], include_plans: bool, include_looks: bool):
+        lessons = [t for t in templates if t.kind != KIND_PLAN]
+        plans_ = [t for t in templates if t.kind == KIND_PLAN]
+        if include_plans:
+            for t in lessons:
+                p = self.store.get(t.plan_id) if t.plan_id else None
+                if p is not None and p not in plans_:
+                    plans_.append(p)
+        looks = []
+        if include_looks:                      # оформление уроков; у плана — только своё (без «по умолчанию»)
+            owners = lessons + [p for p in plans_ if p.look] + ([] if lessons else plans_)
+            for t in owners:
+                lk = self.efir.lesson_look(t)
+                if lk is not None and lk not in looks:
+                    looks.append(lk)
+        return lessons, plans_, looks
+
+    def package_media_size(self, templates: list[Template], include_looks: bool = True) -> int:
+        """Сколько байт займут картинки уроков и (если с оформлением) фон, заставка и видео зарядок."""
+        from .. import package
+        lessons, plans_, looks = self._package_parts(templates, True, include_looks)
+        files = {p.resolve() for t in lessons + plans_ for p in package.lesson_files(t)}
+        files |= {p.resolve() for lk in looks for p in package.look_files(lk)}
+        return sum(p.stat().st_size for p in files if p.is_file())
+
+    def export_package(self, templates: list[Template], path, include_plans: bool = True,
+                       include_looks: bool = True) -> dict:
+        """Урок (уроки) одним файлом: картинки внутри; план и оформление с видео — по галочкам."""
+        import copy as _copy
+        from .. import package
+        lessons, plans_, looks = self._package_parts(templates, include_plans, include_looks)
+        if include_looks:                      # урок без своего оформления — с тем, что у него на экране сейчас
+            lessons = [_copy.copy(t) for t in lessons]
+            for t in lessons:
+                lk = self.efir.lesson_look(t)
+                if lk is not None and not t.look:
+                    t.look = lk.id
+        return package.export_package(path, lessons=lessons, plans=plans_, looks=looks)
+
+    def export_package_dialog(self, templates: list[Template]) -> None:
+        """Окно «Урок одним файлом»: галочки — план, оформление с видео (с размером), потом — куда сохранить."""
+        from .export_package import ExportPackageDialog
+        if not templates:
+            return
+        d = ExportPackageDialog(self, templates, self)
+        if d.exec() != d.DialogCode.Accepted:
+            return
+        name = templates[0].title if len(templates) == 1 else "Уроки AutoPrint"
+        safe = "".join(c for c in name if c not in '\\/:*?"<>|').strip() or "урок"
+        path, _ = QFileDialog.getSaveFileName(self, "Урок одним файлом", safe + ".autoprint",
+                                              "Урок AutoPrint (*.autoprint)")
+        if not path:
+            return
+        try:
+            s = self.export_package(templates, path, d.include_plans(), d.include_looks())
+        except OSError as e:
+            QMessageBox.warning(self, "Экспорт", str(e))
+            return
+        mb = s["bytes"] / 1024 / 1024
+        self._notify(f"Сохранено одним файлом: уроков — {s['lessons']}, планов — {s['plans']}, оформлений — "
+                     f"{s['looks']}, файлов внутри — {s['files']} ({mb:.1f} МБ). {path}")
+
     def export_template(self, t: Template, fmt: str) -> None:
-        """fmt: md (урок в Markdown, картинки — папкой рядом) | ipynb | students (тетрадка для учеников —
-        только код) | json."""
+        """fmt: package (урок одним файлом, .autoprint) | md (урок в Markdown, картинки — папкой рядом) | ipynb |
+        students (тетрадка для учеников — только код) | json."""
+        if fmt == "package":
+            self.export_package_dialog([t])
+            return
         safe = "".join(c for c in t.title if c not in '\\/:*?"<>|').strip() or "template"
         flt = {"md": "Markdown (*.md)", "ipynb": "Jupyter (*.ipynb)", "students": "Jupyter (*.ipynb)"}.get(
             fmt, "JSON (*.json)")

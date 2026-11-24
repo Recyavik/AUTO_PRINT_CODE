@@ -191,9 +191,11 @@ def python_text(text: str, title: str) -> Template:
     return _build(title, cells, "python")
 
 
-FILE_FILTER = ("Уроки, тетрадки и презентации (*.ipynb *.md *.py *.pyw *.json *.pdf *.pptx);;Jupyter (*.ipynb);;"
+FILE_FILTER = ("Уроки, тетрадки и презентации (*.autoprint *.zip *.ipynb *.md *.py *.pyw *.json *.pdf *.pptx);;"
+               "Урок AutoPrint одним файлом (*.autoprint *.zip);;Jupyter (*.ipynb);;"
                "Markdown (*.md);;Python (*.py *.pyw);;JSON (*.json);;Презентация (*.pdf *.pptx)")
-FILE_EXTS = (".ipynb", ".md", ".py", ".pyw", ".json", ".pdf", ".pptx")
+FILE_EXTS = (".autoprint", ".zip", ".ipynb", ".md", ".py", ".pyw", ".json", ".pdf", ".pptx")
+PACKAGE_EXTS = (".autoprint", ".zip")      # урок одним файлом (package.py)
 
 
 def load_file(path: str) -> Template:

@@ -183,7 +183,7 @@ def _role(name: str) -> str:
     return _ROLE_BY_NAME.get(n.lower(), "")
 
 
-def _resolve_image(src: str, base: Path | None, local: bool = True) -> str:
+def _resolve_image(src: str, base: Path | None, local: bool = True, root: Path | None = None) -> str:
     if src.startswith("<") and src.endswith(">"):
         src = src[1:-1]
     if re.match(r"https?://", src, re.I) or not local:
@@ -191,16 +191,21 @@ def _resolve_image(src: str, base: Path | None, local: bool = True) -> str:
     if src.startswith(("\\\\", "//")):
         return src                   # сетевой путь — не открываем (Windows пошла бы по SMB)
     rel = unquote(src)
-    for cand in ([base / rel] if base is not None else []) + [Path(rel)]:
+    for cand in ([base / rel] if base is not None else []) + ([Path(rel)] if root is None else []):
         try:
+            if root is not None and not cand.resolve().is_relative_to(root.resolve()):
+                continue             # архив: только файлы из самого архива, не с компьютера и не «наружу»
             if cand.is_file():
                 return storage.import_media(cand)
         except OSError:
             continue
+    if root is not None:
+        return ""                    # архив: картинки нет в самом архиве — место «Нужна картинка», не путь с компьютера
     return rel                       # файла нет — блок останется, суфлёр покажет «нет файла»
 
 
-def parse(text: str, base: Path | None, title: str, local_images: bool = True) -> Template:
+def parse(text: str, base: Path | None, title: str, local_images: bool = True, root: Path | None = None) -> Template:
+    """root — картинки только из этой папки (распакованный архив): ни файлов с компьютера, ни путей «наружу»."""
     lines = text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
     t = Template(title=title)
     i = 0
@@ -313,7 +318,7 @@ def parse(text: str, base: Path | None, title: str, local_images: bool = True) -
             elif src.strip().casefold() in PHOTO_SRC:     # ![Кот у ноутбука](фото) — место: «Нужна картинка»
                 blocks.append(Block(BLOCK_IMAGE, "", title=cap, slide=slide_no))
             else:
-                blocks.append(Block(BLOCK_IMAGE, _resolve_image(im.group(2), base, local_images), title=cap,
+                blocks.append(Block(BLOCK_IMAGE, _resolve_image(im.group(2), base, local_images, root), title=cap,
                                     slide=slide_no))
             i += 1
             continue

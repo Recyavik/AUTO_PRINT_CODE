@@ -310,6 +310,7 @@ function moreMenu(anchor) {
     { label: $("legend").hidden ? "Показать обозначения" : "Скрыть обозначения", on: () => { $("legend").hidden = !$("legend").hidden; } },
     { label: "Распечатать или PDF…", hint: "размер, ответы, код, слайды", on: printBox },
     { head: "Экспорт урока" },
+    { label: "Урок одним файлом (.autoprint)…", hint: "с картинками, планом и видео зарядок", on: () => cmd({ cmd: "export", fmt: "package" }) },
     { label: "Урок в Markdown (.md)…", on: () => cmd({ cmd: "export", fmt: "md" }) },
     { label: "Урок в .ipynb…", on: () => cmd({ cmd: "export", fmt: "ipynb" }) },
     { label: "Тетрадка учеников (только код)…", on: () => cmd({ cmd: "export", fmt: "students" }) },

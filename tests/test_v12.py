@@ -1202,6 +1202,135 @@ class ExerciseSoundTest(unittest.TestCase):
         self.assertIn("unlock", html)
 
 
+class PackageTest(unittest.TestCase):
+    """Урок одним файлом (.autoprint): уроки, план, оформление с видео зарядок и все картинки — внутри."""
+
+    def lesson_with_media(self):
+        png = TMP / "pkg-cat.png"
+        png.write_bytes(PNG)
+        p = plan90()
+        t = plans.new_topic(p, "Функции")
+        t.blocks.append(Block(BLOCK_IMAGE, storage.import_media(png), title="Кот", id="img1"))
+        return p, t
+
+    def look_with_media(self):
+        from autoprint.efir.model import Exercise, Look
+        vid = TMP / "pkg-eyes.mp4"
+        vid.write_bytes(b"\x00\x01" * 50)
+        bg = TMP / "pkg-break.png"
+        bg.write_bytes(PNG)
+        return Look(title="Кабинет", break_background="image:" + str(bg), exercises=[Exercise("Глаза", str(vid))])
+
+    def test_roundtrip_lesson_plan_look(self):
+        import zipfile
+        from autoprint import package
+        p, t = self.lesson_with_media()
+        look = self.look_with_media()
+        t.look = look.id
+        f = TMP / "урок.autoprint"
+        summary = package.export_package(f, lessons=[t], plans=[p], looks=[look])
+        self.assertEqual((summary["lessons"], summary["plans"], summary["looks"]), (1, 1, 1))
+        with zipfile.ZipFile(f) as z:
+            names = z.namelist()
+        self.assertIn("manifest.json", names)
+        self.assertTrue(any(n.startswith("media/") for n in names))
+        self.assertTrue(any(n.startswith("looks_media/") and n.endswith(".mp4") for n in names))
+        self.assertTrue(any(n.endswith(".md") for n in names))                      # и для людей — урок .md
+        pkg = package.read_package(f)
+        self.assertEqual([x.title for x in pkg.plans], ["Онлайн 90"])
+        new = pkg.lessons[0]
+        newp = pkg.plans[0]
+        self.assertNotEqual(new.id, t.id)
+        self.assertEqual(new.plan_id, newp.id)                                    # связь сохранена
+        self.assertEqual([b.link for b in stages_of(new)], [b.id for b in stages_of(newp)])
+        self.assertFalse(plans.sync_topic(new, newp))
+        img = next(b for b in new.blocks if b.type == BLOCK_IMAGE)
+        self.assertEqual(storage.media_path(img.text).read_bytes(), PNG)          # картинка внутри файла
+        lk = pkg.looks[0]
+        self.assertEqual((lk.id, new.look), (look.id, look.id))
+        self.assertTrue(Path(lk.exercises[0].path).is_file())
+        self.assertTrue(Path(lk.break_background[6:]).is_file())
+
+    def test_ai_zip_with_md_and_images(self):
+        """Архив от нейросети: .md и картинки рядом; пути наружу и файлы с компьютера — не берём."""
+        import zipfile
+        from autoprint import package
+        secret = TMP / "secret-photo.png"
+        secret.write_bytes(PNG)
+        f = TMP / "от-нейросети.zip"
+        with zipfile.ZipFile(f, "w") as z:
+            z.writestr("lesson/урок.md", "---\ntitle: Циклы\n---\n\n## Тема · 10 мин\n\n![Кот](images/cat.png)\n\n"
+                                         f"![Чужое]({secret.as_posix()})\n\n> [!say]\n> Привет\n")
+            z.writestr("lesson/images/cat.png", PNG)
+        pkg = package.read_package(f)
+        t = pkg.lessons[0]
+        self.assertEqual(t.title, "Циклы")
+        imgs = [b for b in t.blocks if b.type == BLOCK_IMAGE]
+        self.assertEqual(storage.media_path(imgs[0].text).read_bytes(), PNG)
+        self.assertIsNone(storage.media_path(imgs[1].text))                        # файл с компьютера не взят
+
+    def test_zip_slip_refused(self):
+        import zipfile
+        from autoprint import package
+        f = TMP / "злой.autoprint"
+        with zipfile.ZipFile(f, "w") as z:
+            z.writestr("manifest.json", '{"format": "autoprintcode-package", "version": 1}')
+            z.writestr("../evil.txt", "x")
+        with self.assertRaises(ValueError):
+            package.read_package(f)
+
+    def test_import_through_dialog_and_window(self):
+        from autoprint import package
+        from autoprint.ui.import_dialog import ImportDialog
+        p, t = self.lesson_with_media()
+        look = self.look_with_media()
+        t.look = look.id
+        f = TMP / "в-окно.autoprint"
+        package.export_package(f, lessons=[t], plans=[p], looks=[look])
+        win = window([Template("Мой", [stage("А", 5)], id="M")], 18928)
+        try:
+            d = ImportDialog(win, win.settings)
+            d._take_files([str(f)])
+            self.assertEqual(len(d.result), 2)
+            win._take_import(d)
+            self.assertEqual(len(win.store.plans()), 1)
+            lesson = next(x for x in win.store.templates if x.title == "Функции")
+            self.assertEqual(lesson.plan_id, win.store.plans()[0].id)
+            self.assertIsNotNone(win.efir.store.look(look.id))                     # оформление с видео — у получателя
+            d.deleteLater()
+        finally:
+            close(win)
+
+    def test_window_export_options(self):
+        """Экспорт из окна: галочки «план» и «оформление с видео» решают, что попадёт в файл."""
+        import zipfile
+        p, t = self.lesson_with_media()
+        win = window([p, t], 18929)
+        try:
+            t = win.store.get(t.id)
+            look = self.look_with_media()
+            win.efir.save_look(look)
+            t.look = look.id
+            f = TMP / "из-окна.autoprint"
+            s = win.export_package([t], f, include_plans=False, include_looks=False)
+            self.assertEqual((s["plans"], s["looks"]), (0, 0))
+            with zipfile.ZipFile(f) as z:
+                self.assertFalse(any(n.startswith("looks_media/") for n in z.namelist()))
+            s = win.export_package([t], f, include_plans=True, include_looks=True)
+            self.assertEqual((s["plans"], s["looks"]), (1, 1))
+            self.assertGreater(win.package_media_size([t], include_looks=True), 100)
+            from autoprint.ui.export_package import ExportPackageDialog
+            d = ExportPackageDialog(win, [t], win)
+            self.assertTrue(d.include_plans() and d.include_looks())
+            self.assertIn("видео зарядок", d.cb_look.text())
+            self.assertIn("КБ", d.cb_look.text())
+            d.cb_look.setChecked(False)
+            self.assertFalse(d.include_looks())
+            d.deleteLater()
+        finally:
+            close(win)
+
+
 class LiveSafetyTest(unittest.TestCase):
     def test_timer_close_hides_for_lesson(self):
         """× мини-таймера во время урока — только прячет таймер; урок идёт дальше, таймер открывается снова."""

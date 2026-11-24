@@ -590,7 +590,7 @@ class LessonController(QObject):
                 self.main.unlink_plan(t)
             elif cmd == "delete_lesson" and t is not None:
                 self.main.delete_lesson(t, ask=False)
-            elif cmd == "export" and t is not None and d.get("fmt") in ("md", "ipynb", "students", "json"):
+            elif cmd == "export" and t is not None and d.get("fmt") in ("package", "md", "ipynb", "students", "json"):
                 self.main.export_template(t, str(d["fmt"]))
             elif cmd == "slide" and t is not None:
                 self._show_slide(t, str(d.get("block") or ""))
