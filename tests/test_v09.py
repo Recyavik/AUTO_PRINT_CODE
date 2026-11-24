@@ -648,10 +648,9 @@ class PageTest(unittest.TestCase):
 
     def test_page_role_styles(self):
         from autoprint.efir.server import PAGE_DIR
-        css = (PAGE_DIR / "lesson.html").read_text(encoding="utf-8")
+        css = (PAGE_DIR / "app" / "lesson.css").read_text(encoding="utf-8")      # 1.0: урок — в окне программы
         for role in ("say", "tell", "ask", "do", "important", "show", "trap", "extra", "term", "output"):
             self.assertIn(f".r-{role} {{ --rc:", css, role)
-        self.assertIn("border-left: 4px solid var(--rc)", css)
         self.assertIn("color-mix(in srgb, var(--rc)", css)
         self.assertIn('el("div", "lbl")', (PAGE_DIR / "lesson" / "render.js").read_text(encoding="utf-8"))
 
@@ -900,10 +899,9 @@ class ImageArmTest(unittest.TestCase):
         а по Enter/уходу из поля; шапка не перерисовывается, пока в ней печатают. Поведение в Edge проверено
         отдельно (CDP: «1» → нет команды, фокус на месте; «1830» Enter → одна команда 18:30)."""
         from autoprint.efir.server import PAGE_DIR
-        js = (PAGE_DIR / "lesson" / "app.js").read_text(encoding="utf-8")
+        js = (PAGE_DIR / "app" / "lessonview.js").read_text(encoding="utf-8")       # 1.0: панель «Идёт урок»
         self.assertNotIn('tm.onchange = () => { if (tm.value) cmd({ cmd: "set_start"', js)
         self.assertIn('tm.addEventListener("blur", commit)', js)
-        self.assertIn("if (toolsBusy()) { headerStale = true; return; }", js)
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

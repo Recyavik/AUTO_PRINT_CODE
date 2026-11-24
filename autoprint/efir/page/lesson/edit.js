@@ -7,6 +7,7 @@ import { nodeOf, stageOfBlock, exerciseList, videoKey } from "./render.js";
 import { beginCode, endCode } from "./code.js";
 import { mdHtml, askParts, escapeHtml } from "./md.js";
 import { toMarkdown, cleanPaste } from "./richtext.js";
+import { ask } from "../app/ui.js";               // вопросы — листом окна программы, не confirm() браузера
 
 const refresh = () => window.dispatchEvent(new Event("suflor:refresh"));
 export const item = (id) => A.byId.get(id);
@@ -568,8 +569,9 @@ export function stageMenu(anchor, it) {
     menu(anchor, [
       { label: "Изменить в плане «" + L.plan.title + "»", hint: "этапы и минуты — у всех уроков по плану",
         on: () => window.dispatchEvent(new Event("suflor:open-plan")) },
-      { label: "Отвязать урок от плана…", hint: "этапы останутся, их можно будет править здесь", on: () => {
-        if (confirm("Отвязать урок «" + L.title + "» от плана «" + L.plan.title + "»? Этапы останутся, но правка плана их больше не изменит.")) {
+      { label: "Отвязать урок от плана…", hint: "этапы останутся, их можно будет править здесь", on: async () => {
+        if (await ask("Отвязать урок «" + L.title + "» от плана «" + L.plan.title + "»? Этапы останутся, но правка плана их больше не изменит.",
+          { title: "Отвязать от плана", ok: "Отвязать" })) {
           cmd({ cmd: "unlink_plan" });
         }
       } },
@@ -580,13 +582,14 @@ export function stageMenu(anchor, it) {
     { label: it.part ? "Раздел: " + it.part : "Раздел…", hint: "группа этапов в плане", on: () => askText(anchor, "Раздел (часть урока)", it.part || "", (v) => setFields(it.id, { part: v })) },
     { label: it.note ? "Пометка: " + it.note : "Пометка…", hint: "строка под названием", on: () => askText(anchor, "Пометка этапа", it.note || "", (v) => setFields(it.id, { text: v })) },
     { sep: true },
-    { label: "Удалить этап", hint: "блоки останутся", danger: true, on: () => {
+    { label: "Удалить этап", hint: "блоки останутся", danger: true, on: async () => {
       const use = (L.kind === "plan" && L.stage_use && L.stage_use[it.id]) || 0;
       if (use) {                              // план: заметки этого этапа в уроках переедут в соседний этап
         const st = A.items.filter((x) => x.type === "stage");
         const i = st.findIndex((x) => x.id === it.id);
         const y = (st[i - 1] || st[i + 1] || {}).title || "Этап";
-        if (!confirm("В уроках по этому плану (" + use + ") заметки этапа «" + (it.title || "Этап") + "» переедут в «" + y + "». Удалить этап?")) return;
+        if (!(await ask("В уроках по этому плану (" + use + ") заметки этапа «" + (it.title || "Этап") + "» переедут в «" + y + "». Удалить этап?",
+          { title: "Удалить этап плана", ok: "Удалить", danger: true }))) return;
       }
       deleteBlock(it.id);
     } },
@@ -608,6 +611,11 @@ export async function uploadImage(blob, after, replaceId) {
     toast("Нет связи с AutoPrintCode — картинка не добавлена");
     return;
   }
+  imageAdded(res, id, after, replaceId);
+}
+
+// картинка добавлена программой (вставка, перетаскивание, файл с диска): отмена, замена места
+function imageAdded(res, id, after, replaceId) {
   Q.Q.recent.push({ edits: res.edits || 0, ops: [{ op: "insert", after: after || "", block: { id, type: "image", text: "" } }] });
   if (res.item) A.fresh.set(id, res.item);
   A.undo.push({ op: "delete", block: id });
@@ -619,12 +627,25 @@ export async function uploadImage(blob, after, replaceId) {
   refresh();
 }
 
-export function pickImage(target, replace) {
-  const inp = el("input");
-  inp.type = "file";
-  inp.accept = "image/png,image/jpeg,image/gif,image/webp";
-  inp.onchange = () => { const f = inp.files && inp.files[0]; if (f) uploadImage(f, replace ? target : target, replace ? target : null); };
-  inp.click();
+// картинка с диска по пути (системное окно выбора файла, файл, брошенный на окно): копию делает программа
+export async function placeImageFile(path, after, replaceId) {
+  const lid = A.S && A.S.lesson && A.S.lesson.id;
+  if (!lid || !path || !window.appCore) return;
+  const id = newId();
+  try {
+    const res = await window.appCore.call({ cmd: "place_image", lesson: lid, after: after || "", id, path });
+    imageAdded(res, id, after, replaceId);
+  } catch (e) {
+    toast(String(e.message || e) || "Картинка не добавлена");
+  }
+}
+
+// «Выбрать файл…»: системное окно выбора поверх окна программы; replace — картинка встаёт на место target
+export async function pickImage(target, replace) {
+  if (!window.appCore) return;
+  let paths = [];
+  try { paths = await window.appCore.call({ cmd: "pick_files", purpose: "image" }); } catch (e) { toast(String(e.message || e)); return; }
+  if (paths && paths.length) placeImageFile(paths[0], target, replace ? target : null);
 }
 
 // куда вставить картинку из буфера: после выделенного блока, под мышью, иначе в конец видимого этапа

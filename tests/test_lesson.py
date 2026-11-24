@@ -401,8 +401,9 @@ class LessonServerTest(unittest.TestCase):
         s.close()
 
     def test_lesson_page(self):
-        html = self.get("/lesson").read().decode("utf-8")
-        self.assertIn("Экран урока", html)
+        r = self.get("/lesson")                         # старый адрес суфлёра → урок в окне программы
+        self.assertTrue(r.geturl().endswith("/app#/lesson") or r.geturl().endswith("/app"), r.geturl())
+        self.assertIn("AutoPrintCode", r.read().decode("utf-8"))
 
     def test_static_lang(self):
         import urllib.error

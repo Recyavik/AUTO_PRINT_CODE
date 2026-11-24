@@ -174,9 +174,9 @@ function buildBlock(it) {
       box.appendChild(el("div", "ptxt", it.place === "slide" ? "Слайд " + it.slide + " — картинки нет"
         : "Нужна картинка: " + (it.title || "без подписи")));
       const acts = el("div", "pacts");
-      const ins = el("button", "pins", "Вставить картинку…");
+      const ins = el("button", "pins", "Выбрать файл…");
       ins.dataset.act = "place-insert";
-      ins.title = "Выбрать файл — или выделите это место и нажмите Ctrl+V";
+      ins.title = "Картинка с диска — или выделите это место и нажмите Ctrl+V";
       acts.appendChild(ins);
       if (it.place === "slide") {
         const fs = el("button", "fillslides", "Подставить слайды из презентации…");
@@ -350,6 +350,7 @@ function stageHead(art, it, info, pn) {
   const ed = el("div", "sedit");
   const mins = el(fixed ? "span" : "button", fixed ? "mins fixed" : "mins", String(it.minutes || 0));
   mins.title = fixed ? "Минуты — из плана «" + L.plan.title + "»" : "Минуты этапа — щёлкните и наберите";
+  if (fixed) { const lk = icon("lock", "Из плана «" + L.plan.title + "»"); lk.classList.add("lockic"); ed.appendChild(lk); }
   ed.appendChild(mins);
   ed.appendChild(el("span", "minsu", "мин"));
   const kind = el("button", "kindbtn");
@@ -556,13 +557,7 @@ export function renderPlan() {
   const head = el("div", "ptitle");
   head.appendChild(el("h2", "", "План урока"));
   head.appendChild(el("span", "ptotal", durText(stages.reduce((a, s) => a + s.minutes, 0))));
-  // «Урок»: план в строке выпадает поверх — его можно закрепить сбоку; закреплённый — вернуть в строку
-  const side = ((A.S && A.S.prefs && A.S.prefs.page_plan) || "strip") === "side";
-  const pin = el("button", "ppin linkbtn", side ? "В строку" : "Закрепить сбоку");
-  pin.title = side ? "План — одной строкой под шапкой, весь — по «План ▾»" : "План всегда виден слева, не поверх урока";
-  pin.onclick = () => window.dispatchEvent(new CustomEvent("suflor:pin-plan", { detail: side ? "strip" : "side" }));
-  head.appendChild(pin);
-  plan.appendChild(head);
+  plan.appendChild(head);                 // где план (сбоку, сверху, скрыт) — переключатель в полосе урока
   const pn = partNumbers(stages);
   let lastPart = null;
   for (const s of stages) {
@@ -601,14 +596,15 @@ export function renderPlan() {
   }
   if (fixed) {
     const h = el("p", "phint", "Этапы и минуты — из плана «" + L.plan.title + "». ");
-    const b = el("button", "linkbtn openplan", "Открыть план");
+    const b = el("button", "linkbtn openplan", "Изменить план");
+    b.title = "Открыть план «" + L.plan.title + "»: этапы и минуты меняются у всех уроков по нему";
     b.onclick = () => window.dispatchEvent(new Event("suflor:open-plan"));
     h.appendChild(b);
     plan.appendChild(h);
     return;
   }
   plan.appendChild(el("p", "phint", A.mode === "prep" ? "Минуты правятся прямо здесь." :
-    (A.S.live ? "Щёлкните по этапу — перейти к нему. Сдвинуть время — «Урок идёт ▾»." : "Щёлкните по этапу — перейти к нему.")));
+    (A.S.live ? "Щёлкните по этапу — перейти к нему. Сдвинуть время — щелчок по времени урока наверху." : "Щёлкните по этапу — перейти к нему.")));
 }
 
 export function stageOfBlock(bid) {

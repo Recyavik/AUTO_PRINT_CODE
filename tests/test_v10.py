@@ -1275,7 +1275,7 @@ class EditServerTest(unittest.TestCase):
         self.assertEqual(code_, 415)
 
     def test_static(self):
-        st, ctype, body = get(self.port, "/static/lesson/app.js")
+        st, ctype, body = get(self.port, "/static/lesson/render.js")
         self.assertEqual(st, 200)
         self.assertIn("javascript", ctype)
         self.assertEqual(get(self.port, "/static/lesson/../server.py")[0], 404)

@@ -448,6 +448,7 @@ function updateNowbar(cur, stages) {
 let lastLessonId = null;
 function apply(state) {
   if (!state || !V) return;
+  const t0 = performance.now();
   A.offset = (state.server_now || Date.now()) - Date.now();
   const prev = A.S;
   A.S = state;
@@ -467,6 +468,7 @@ function apply(state) {
     if (id && location.hash !== "#/lesson/" + id) history.replaceState(null, "", "#/lesson/" + id);
   }
   if (state.live && !(prev && prev.live)) setMode("lesson");
+  else if (!state.live && prev && prev.live && prev.lesson && state.lesson && prev.lesson.id === state.lesson.id) setMode("prep");   // урок завершили — снова правка
   const sb = state.efir && state.efir.mode === "slide" ? state.efir.slide_bid : "";
   if (sb && sb !== A.slideBid && A.mode === "lesson") {
     const owner = stageOfBlock(sb);
@@ -477,7 +479,7 @@ function apply(state) {
   for (const f of hooks.apply) f(state, prev);
   refresh();
   for (const f of hooks.strip) f();
-  window.__applyMs = 0;
+  window.__applyMs = performance.now() - t0;      // проверка скорости: урок на 90 блоков — быстрее 300 мс
   window.__lessonReady = true;
 }
 

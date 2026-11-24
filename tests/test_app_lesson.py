@@ -388,5 +388,38 @@ class ScreenCtlTest(AppPage):
         self.app.printer.set_option("mode", "block")
 
 
+class ScreenImageTest(AppPage):
+    """Экран учеников: картинка-заставка (фон, перерыв) видна целиком в окне любой формы, поля — размытой копией."""
+    port = 18998
+    route = "#/lesson/L1"
+
+    def test_break_image_fits_whole(self):
+        import base64
+        from pathlib import Path
+        from autoprint import storage
+        from autoprint.efir.model import Look
+        from cdp import Edge
+        png = Path(storage.DATA_DIR) / "brk-test.png"
+        png.write_bytes(base64.b64decode(PNG_1x1_B64))
+        look = Look(title="С заставкой", break_background="image:" + str(png), background="image:" + str(png))
+        self.app.efir.save_look(look)
+        self.app.printer.set_focus("L1")
+        self.store.get("L1").look = look.id
+        screen = Edge.start(f"http://127.0.0.1:{self.app.efir.server.port}/", pump=lambda: pump(5), width=1000, height=900)
+        try:
+            self.app.lesson.command({"cmd": "break", "stage": "", "minutes": 5})
+            self.assertTrue(screen.wait("!!document.querySelector('#brk.on .bgwrap .bg-image')", 10))
+            for host in ("#brk .bgwrap", "#bgs"):
+                fit = screen.eval(f"getComputedStyle(document.querySelector('{host} .bg-image .fit')).backgroundSize")
+                fill = screen.eval(f"getComputedStyle(document.querySelector('{host} .bg-image .fill')).backgroundSize")
+                self.assertEqual((fit, fill), ("contain", "cover"), host)
+        finally:
+            screen.close()
+            self.app.efir.show_background()
+
+
+PNG_1x1_B64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

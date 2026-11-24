@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import concurrent.futures
 import logging
+from pathlib import Path
 
 from PySide6.QtCore import QObject, Signal
 from PySide6.QtWidgets import QFileDialog
@@ -168,6 +169,22 @@ class AppCommands(QObject):
             return [str(p) for p in paths]
         path, _ = QFileDialog.getOpenFileName(self.app.window, title, str(d.get("dir") or ""), flt)
         return [str(path)] if path else []
+
+    def call_place_image(self, d: dict) -> dict:
+        """Картинка с диска в урок (место «Нужна картинка», «Выбрать файл…», файл на окне): копия в data/media,
+        блок-картинка после after. Как вставка со страницы, только файл читает программа."""
+        from .efir.server import UPLOAD_LIMIT
+        p = Path(str(d.get("path") or ""))
+        ext = p.suffix.lower()
+        if ext not in (".png", ".jpg", ".jpeg", ".gif", ".webp"):
+            raise ValueError("Это не картинка: подойдут PNG, JPG, GIF или WebP")
+        if not p.is_file():
+            raise ValueError(f"Файла нет: {p}")
+        if p.stat().st_size > UPLOAD_LIMIT:
+            raise ValueError("Картинка слишком большая")
+        return self.app.lesson.add_image({"lesson": str(d.get("lesson") or ""), "after": str(d.get("after") or ""),
+                                          "id": str(d.get("id") or ""), "ext": ".jpg" if ext == ".jpeg" else ext,
+                                          "data": p.read_bytes()})
 
     def call_pick_save(self, d: dict) -> str:
         """Куда сохранить: системное окно → путь или "" (передумали)."""

@@ -7,7 +7,7 @@
 - GET  /media/<id>/<имя> — видео, картинки, шрифты (с Range — для перемотки видео);
 - POST /report        — страница сообщает: подключилась, звук разрешён, ход видео, видео кончилось;
 - POST /pick          — выбран фон в галерее.
-- GET  /lesson        — страница суфлёра урока (свой канал состояния: /events?ch=lesson);
+- GET  /lesson        — старый адрес суфлёра: 302 на /app#/lesson (урок — в окне программы, канал lesson);
 - GET  /static/lang/<язык>.svg — значки языков программирования для кода на странице суфлёра;
 - POST /lesson/cmd    — команды со страницы суфлёра (начать урок, начать с этапа, печатать этот блок…);
 - POST /lesson/edit   — правки урока с экрана урока (autoprint/lesson_edit.py), ответ — новый HTML блоков;
@@ -143,9 +143,8 @@ class _Handler(BaseHTTPRequestHandler):
             if path in ("/", "/gallery", "/index.html"):
                 body = (PAGE_DIR / "screen.html").read_bytes()
                 return self._send(200, body, "text/html; charset=utf-8")
-            if path == "/lesson":
-                body = (PAGE_DIR / "lesson.html").read_bytes()
-                return self._send(200, body, "text/html; charset=utf-8")
+            if path == "/lesson":                 # старый адрес суфлёра (закладки, 0.12) — урок в окне программы
+                return self._send(302, b"", "text/plain", {"Location": "/app#/lesson"})
             if path == "/app":
                 body = (PAGE_DIR / "app.html").read_bytes()
                 return self._send(200, body, "text/html; charset=utf-8")

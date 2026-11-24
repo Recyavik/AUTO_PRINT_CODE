@@ -199,6 +199,8 @@ body.mode-prep .sedit { display: flex; }
   background: var(--raised); color: var(--text); cursor: pointer; display: inline-flex; align-items: center; justify-content: center; }
 .sedit .mins { font-family: var(--mono); font-weight: 600; min-width: 2.6em; }
 .sedit .minsu { font-size: 13px; color: var(--dim); margin-right: 6px; }
+.sedit .lockic { color: var(--faint); margin-right: -2px; }
+.sedit .lockic svg { width: 14px; height: 14px; }
 .sedit .kindbtn.on { color: var(--accent); border-color: var(--accent-line); }
 .sedit .mins.fixed { display: inline-flex; align-items: center; justify-content: flex-end; color: var(--dim); font-family: var(--mono); }
 .sedit .kindbtn:disabled { opacity: .45; cursor: default; }
@@ -235,7 +237,14 @@ body.typing .blk.busy .say { display: none; }      /* «Скажи: …» во �
 
 /* план урока (документ): кто по нему и что такое заготовки */
 #planbanner { padding: 12px 16px; border: 1px solid var(--accent-line); border-radius: var(--r-lg); background: var(--panel);
-  font-size: 14px; line-height: 1.5; }
+  font-size: 14px; line-height: 1.5; display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+#planbanner[hidden] { display: none; }
+#planbanner .pbtext { flex: 1 1 320px; min-width: 0; }
+/* «Правка» и «Сохранено» в полосе урока */
+#onair .edittoggle[aria-pressed="true"] { color: var(--accent); background: var(--accent-soft); border-color: var(--accent-line); }
+#onair .savechip { font-size: 12.5px; color: var(--dim); white-space: nowrap; }
+#onair .savechip.warn { color: var(--live); font-weight: 600; }
+#onair .savechip[hidden] { display: none; }
 #planbanner b { font-weight: 600; }
 #planbanner .linkbtn { margin: 0 2px; }
 #planbanner small { display: block; color: var(--dim); font-size: 13px; margin-top: 2px; }
