@@ -715,7 +715,7 @@ def lesson_sample_added() -> None:
     store.save()
     win, s, store = make_window(PROFILE_PLAIN)   # своя база, а в настройках урок ещё не показывали
     check("после обновления: образцовый урок добавлен наверх и в фокусе", store.templates[0].title == LESSON_TITLE
-          and win.printer.focus() is store.templates[0] and "lesson_v2" in s.samples_seen)
+          and win.printer.focus() is store.templates[0] and "lesson_v3" in s.samples_seen)
     win.close()
     pump()
 

@@ -48,7 +48,7 @@ def main() -> int:
     store.save()
     s = Settings()
     s.efir_port = 18994
-    s.samples_seen = ["steps_v1", "tour_v1", "lesson_v1", "lesson_v2"]
+    s.samples_seen = ["steps_v1", "tour_v1", "lesson_v1", "lesson_v2", "lesson_v3"]
     s.migrations = ["tray_v1", "window_v10", "roles_v10", "samples_v10"]
     s.update_auto_check = False
     win = MainWindow(s, store)

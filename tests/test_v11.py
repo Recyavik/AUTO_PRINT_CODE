@@ -679,5 +679,46 @@ class StructureTest(Base):
             self.assertIn(x, texts)
 
 
+# ================================================================ Task 13: образцовый урок v3
+
+class SampleV3Test(unittest.TestCase):
+    def test_sample_v3(self):
+        from autoprint.samples_lesson import LESSON_SAMPLE_ID, lesson_sample
+        self.assertEqual(LESSON_SAMPLE_ID, "lesson_v3")
+        t = lesson_sample()
+        notes = [b for b in t.blocks if b.type == BLOCK_MARKDOWN]
+        self.assertEqual(t.blocks[0].role, "goal")
+        roles = {b.role for b in notes}
+        self.assertTrue(set(storage.ROLE_ORDER) <= roles, set(storage.ROLE_ORDER) - roles)
+        self.assertFalse(any("Как читать" in (b.title + b.text) for b in notes))
+        self.assertTrue(any(b.role == "ask" and b.title == "Рефлексия" for b in notes))
+        stages = [b for b in t.blocks if b.type == BLOCK_STAGE]
+        self.assertEqual((len(stages), sum(b.minutes for b in stages)), (12, 90))
+        # «Спроси» после теории: в этапах «Что такое функция» и «Разбор 3» есть вопрос на понимание
+        for name in ("Что такое функция", "Разбор 3"):
+            i = next(k for k, b in enumerate(t.blocks) if b.type == BLOCK_STAGE and b.title.startswith(name))
+            j = next((k for k in range(i + 1, len(t.blocks)) if t.blocks[k].type == BLOCK_STAGE), len(t.blocks))
+            self.assertTrue(any(b.role == "ask" for b in t.blocks[i + 1:j] if b.type == BLOCK_MARKDOWN), name)
+
+    def test_samples_v11_migration(self):
+        from autoprint import migrations
+        self.assertIn("f7db1365fceef3c9d1c6497df2017ed05c2a8b96", migrations.SAMPLE_V2_FINGERPRINTS)
+        store = storage.TemplateStore.__new__(storage.TemplateStore)
+        old = Template("Пример урока: функции и надёжный пароль", [stage("A", 5), note("x")])
+        mine = Template("Мой урок", [stage("B", 5), note("y")])
+        store.templates = [old, mine]
+        store.save = lambda: None
+        s = storage.Settings()
+        s.migrations = ["tray_v1", "window_v10", "roles_v10", "samples_v10"]
+        keep = migrations.SAMPLE_V2_FINGERPRINTS
+        migrations.SAMPLE_V2_FINGERPRINTS = keep | {migrations.fingerprint(old)}
+        try:
+            migrations.apply(s, store)
+        finally:
+            migrations.SAMPLE_V2_FINGERPRINTS = keep
+        self.assertEqual(store.templates, [mine])
+        self.assertIn("samples_v11", s.migrations)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

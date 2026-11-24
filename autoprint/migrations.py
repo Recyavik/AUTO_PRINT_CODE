@@ -36,6 +36,10 @@ SAMPLE_FINGERPRINTS = frozenset({
 })
 
 
+# 0.11: образцовый урок v2 (0.10) заменён на v3 — его неизменённая копия убирается, v3 добавится сам
+SAMPLE_V2_FINGERPRINTS = frozenset({"f7db1365fceef3c9d1c6497df2017ed05c2a8b96"})
+
+
 def fingerprint(t) -> str:
     """Отпечаток урока по содержанию блоков (без id, указателя, выделения, масштаба)."""
     rows = [(b.type, b.role, b.text, b.lang, b.title, int(b.minutes or 0), b.stage_kind, b.part) for b in t.blocks]
@@ -85,5 +89,10 @@ def apply(settings, store=None) -> bool:
         _samples_v10(store)
         store.save()
         done.append("samples_v10")
+        changed = True
+    if "samples_v11" not in done:
+        store.templates = [t for t in store.templates if fingerprint(t) not in SAMPLE_V2_FINGERPRINTS]
+        store.save()
+        done.append("samples_v11")
         changed = True
     return changed

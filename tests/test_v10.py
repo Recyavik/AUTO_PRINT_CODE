@@ -161,7 +161,7 @@ class MigrationTest(unittest.TestCase):
 
 # ================================================================ Task 2, 3, 5: печать, окно, экран урока
 
-SEEN = ["steps_v1", "tour_v1", "lesson_v1", "lesson_v2"]     # встроенные примеры уже добавлены — не мешают
+SEEN = ["steps_v1", "tour_v1", "lesson_v1", "lesson_v2", "lesson_v3"]     # встроенные примеры уже добавлены — не мешают
 
 
 def make_window(templates: list[Template], port: int = 18961):
@@ -878,7 +878,7 @@ class SampleLessonTest(unittest.TestCase):
         from autoprint import scenario
         from autoprint.samples_lesson import LESSON_SAMPLE_ID, LESSON_TITLE, lesson_sample
         from autoprint.storage import ROLE_ORDER, media_path
-        self.assertEqual(LESSON_SAMPLE_ID, "lesson_v2")
+        self.assertEqual(LESSON_SAMPLE_ID, "lesson_v3")
         t = lesson_sample()
         self.assertEqual(t.title, LESSON_TITLE)
         self.assertEqual(scenario.total_minutes(t), 90)
@@ -887,7 +887,7 @@ class SampleLessonTest(unittest.TestCase):
         self.assertEqual(sorted(b.stage_kind for b in stages if b.stage_kind), ["break", "exercise"])
         self.assertEqual({b.part for b in stages}, {"Первая половина", "Вторая половина"})
         roles = {b.role for b in t.blocks if b.type == BLOCK_MARKDOWN}
-        self.assertTrue(set(ROLE_ORDER) - {"goal", "homework", "hint"} <= roles, set(ROLE_ORDER) - roles)   # v3 — test_v11
+        self.assertTrue(set(ROLE_ORDER) <= roles, set(ROLE_ORDER) - roles)
         codes = [i for i, b in enumerate(t.blocks) if b.type == BLOCK_CODE]
         self.assertGreaterEqual(len(codes), 5)
         imgs = [b for b in t.blocks if b.type == BLOCK_IMAGE]
