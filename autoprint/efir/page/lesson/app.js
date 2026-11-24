@@ -306,11 +306,13 @@ function liveMenu(anchor) {
   tm.value = hhmm(A.S.live.anchor);
   tm.title = "Начало идущего урока: наберите время и нажмите Enter — время этапов сдвинется (Esc — отмена)";
   const was = tm.value;
-  const commit = () => { if (tm.value && tm.value !== was) cmd({ cmd: "set_start", start: tm.value }); };
+  let sent = false;
+  // по Enter или уходу из поля — не на каждую цифру (набрали «1» поверх 17:30 — это не 01:30)
+  const commit = () => { if (!sent && tm.value && tm.value !== was) { sent = true; cmd({ cmd: "set_start", start: tm.value }); } };
   tm.addEventListener("keydown", (e) => {
     if (e.key === "Enter") { e.preventDefault(); commit(); closeMenu(); } else if (e.key === "Escape") { tm.value = was; closeMenu(); }
   });
-  tm.addEventListener("change", commit);
+  tm.addEventListener("blur", commit);
   row.appendChild(tm);
   box.appendChild(row);
   menu(anchor, [{ node: box },
