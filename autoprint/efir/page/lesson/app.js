@@ -390,7 +390,7 @@ function screenText() {
   }
   if (ef.mode === "exercise") return ["У учеников: зарядка", "warn"];
   if (ef.mode === "slide") return ["У учеников: слайд " + (ef.slide_n || "") + " ▾", "ok"];
-  if (!ef.tab_open) return ["Экран учеников не открыт ▾", "dim"];
+  if (!ef.tab_open) return ["Экран учеников ▾", "dim"];
   return ["У учеников: фон ▾", ""];
 }
 
@@ -399,6 +399,8 @@ function screenChip() {
   if (!c) return;
   const [text, cls] = screenText();
   if (c.textContent !== text) c.textContent = text;
+  c.title = cls === "dim" ? "Вкладка экрана учеников не открыта — щёлкните: открыть, фон, перерыв, зарядка"
+    : "Экран учеников: что у них сейчас и что показать";
   c.className = "chip scrchip" + (cls ? " " + cls : "");
 }
 
@@ -651,7 +653,7 @@ function goStage(id) {
 function stripEl() {
   const s = $("strip");
   if (!s.firstChild) {
-    for (const [cls, tag] of [["prev", "button"], ["cur", "button"], ["next", "button"], ["end", "span"], ["screen", "span"], ["more", "button"]]) {
+    for (const [cls, tag] of [["prev", "button"], ["cur", "button"], ["next", "button"], ["end", "span"], ["more", "button"], ["screen", "span"]]) {
       s.appendChild(el(tag, cls));
     }
     const more = s.querySelector(".more");

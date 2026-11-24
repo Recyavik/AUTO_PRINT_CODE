@@ -647,7 +647,7 @@ class PageV11Test(Page):
         chip = "document.querySelector('#strip .scrchip')"
         btn = "[...document.querySelectorAll('header button')].find(b => b.textContent.trim() === '{}')"
         try:
-            self.assertTrue(self.edge.wait(f"!!{chip} && {chip}.textContent.includes('Экран учеников не открыт')"))
+            self.assertTrue(self.edge.wait(f"!!{chip} && {chip}.textContent.includes('Экран учеников')"))
             self.assertFalse(self.js(f"!!{btn.format('Перерыв')}"))     # в уроке нет этапа-перерыва — кнопки нет
             self.js(f"{chip}.click()")
             self.assertTrue(self.edge.wait("!!document.querySelector('.menu')"))

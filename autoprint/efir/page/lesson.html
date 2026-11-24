@@ -415,7 +415,8 @@ body.mode-lesson #status.ok { cursor: pointer; }
 .tmin { font: 600 15px var(--ui); color: var(--text); background: var(--card); border: 1px solid var(--stroke2); border-radius: 8px;
   padding: 4px 8px; }
 #strip button { min-height: 34px; padding: 0 14px; border-radius: 999px; font-size: 15px; }
-#strip .prev, #strip .next { background: transparent; color: var(--dim); }
+#strip .prev, #strip .next { background: transparent; color: var(--dim); max-width: 26ch; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap; }
 #strip .cur { background: var(--accent-soft); border-color: var(--accent-line); font-weight: 800; color: var(--text);
   font-variant-numeric: tabular-nums; }
 #strip .end { color: var(--dim); font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums; }
