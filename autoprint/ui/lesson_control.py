@@ -105,6 +105,10 @@ class LessonController(QObject):
                         "slide_bid": (self.efir.slide or {}).get("bid", "") if self.efir.mode == "slide" else "",
                         "ex_index": self.efir.ex_index if self.efir.mode == "exercise" else -1,
                         "break_paused": self.efir.mode == "break" and self.efir.brk_left_paused is not None,
+                        "break_left": int((self.efir.brk_left_paused or 0) * 1000) if self.efir.mode == "break" else 0,
+                        "ex_paused": self.efir.mode == "exercise" and self.efir.ex_paused,
+                        # фон экрана учеников по оформлению урока — миниатюра в полосе показывает его
+                        "screen_bg": self.efir._bg(preset.background) if preset is not None else None,
                         "ex_muted": self.efir.mode == "exercise" and (self.efir.video_muted or self.efir.video_waiting),
                         "ex_waiting": self.efir.mode == "exercise" and self.efir.video_waiting},
             armed=t.active_block if t is not None else "",
@@ -120,6 +124,7 @@ class LessonController(QObject):
             topics=self.main.store.topics_of(t.id) if t is not None and t.kind == KIND_PLAN else (),
             plans=self.main.store.plans())
         state["notice"] = dict(self._notice)
+        state["button_countdown"] = self._countdown()      # «Набрать»: через сколько секунд начнётся набор
         # видео зарядок, файлов которых нет (удалили, переместили) — этап-зарядка предупредит заранее
         state["exercises_missing"] = [e.title for e in (preset.exercises if preset is not None else [])
                                       if not Path(e.path).is_file()]
@@ -490,6 +495,14 @@ class LessonController(QObject):
                 self._start_stage_now(t, int(d.get("index")))
             elif cmd == "arm" and t is not None:
                 self._arm(t, str(d.get("block") or ""))
+            elif cmd == "type" and t is not None:
+                self._type(str(d.get("block") or ""))
+            elif cmd == "typing":
+                self._typing(str(d.get("op") or ""))
+            elif cmd == "exercise_pause":
+                self.efir.exercise_pause()
+            elif cmd == "exercise_restart":
+                self.efir.exercise_restart()
             elif cmd == "break" and t is not None:
                 self._break(t, str(d.get("stage") or ""), d.get("minutes"))
             elif cmd == "print_settings":
@@ -624,6 +637,31 @@ class LessonController(QObject):
 
     def _arm(self, t: Template, bid: str) -> None:
         self.main.printer.arm(bid)       # только код: заметку или картинку печатать нельзя
+
+    def _countdown(self) -> int:
+        """Набор кнопкой в окне — с отсчётом: учитель успевает перейти в окно, где курсор (Jupyter, VS Code)."""
+        return max(1, int(self.main.settings.button_countdown_s or 0))
+
+    def _type(self, bid: str) -> None:
+        """«Набрать» на блоке кода: блок — следующим и сразу набор с отсчётом. Этот блок уже набирается —
+        ничего (пауза — кнопкой в полосе набора); стоит на паузе или ждёт Enter — продолжить."""
+        p = self.main.printer
+        if not p.arm(bid) or p.engine.active:
+            return
+        p.toggle(countdown=self._countdown())
+
+    def _typing(self, op: str) -> None:
+        """Полоса набора: pause | resume | next | stop. Своя команда на каждое действие — щелчок по окну
+        (сам он ставит набор на паузу) не превращает «Пауза» в «Продолжить»."""
+        from ..typer import LINE_WAIT, PAUSED
+        p = self.main.printer
+        st = p.engine.state
+        if op == "stop":
+            p.stop()
+        elif op == "pause":
+            p.engine.pause()
+        elif op == "resume" and st == PAUSED or op == "next" and st == LINE_WAIT:
+            p.toggle(countdown=self._countdown())
 
     def _break(self, t: Template, sid: str, minutes) -> None:
         """Перерыв ученикам (E6): с карточки этапа-перерыва, который идёт сейчас, — до планового конца этапа;

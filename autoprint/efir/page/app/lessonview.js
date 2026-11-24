@@ -570,7 +570,8 @@ export function lessonView(root, r) {
     if (L) menu(menuBtn, lessonMenuItems(L.id, renameLesson), { align: "left" });
   }, { kind: "ghost", size: "sm" });
   menuBtn.id = "lessonMenuBtn";
-  const view = h("div", { class: "lview" }, st.strip, line, ribbon, h("div", { class: "lbody" }, plan, content), nowbar, viewer, toastEl);
+  // «↓ Идёт: …» — над текстом урока (в .lbody): полоса набора под ним его не закрывает
+  const view = h("div", { class: "lview" }, st.strip, line, ribbon, h("div", { class: "lbody" }, plan, content, nowbar), viewer, toastEl);
   root.append(view);
   V = { st, ribbon, line, plan, banner, main, content, nowbar, viewer, menuBtn };
   main.addEventListener("click", onMainClick);

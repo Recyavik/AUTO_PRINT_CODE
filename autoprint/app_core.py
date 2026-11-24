@@ -91,6 +91,7 @@ class App(QObject):
         self.guard = InputGuard()
         self.printer = PrintController(settings, store, self.guard, self)
         self.engine = self.printer.engine
+        self._min_for_type = ""          # окно свернули на время набора: "normal" | "max" — каким вернуть
         self.printer.notify.connect(lambda text, warn, quiet: self._notify(text, warn=warn, quiet=quiet))
         self.printer.state.connect(self._on_state)
         self.printer.changed.connect(self._on_print_changed)
@@ -811,7 +812,22 @@ class App(QObject):
         if hasattr(self, "tray"):
             self.tray.set_state(logo.STATE_KIND.get(st, logo.IDLE), f"{APP_NAME}: {STATE_TEXT.get(st, st)}")
         self._set_title_status()
+        self._minimize_for_typing(st)
         self.changed.emit("print")
+
+    def _minimize_for_typing(self, st: str) -> None:
+        """«Сворачивать окно на время набора»: отсчёт или набор — окно вниз (фокус уходит в окно, где курсор);
+        набор кончился или остановлен — окно снова как было. Пауза окно не разворачивает."""
+        w = getattr(self, "window", None)
+        if w is None:
+            return
+        if st in (COUNTDOWN, RUNNING):
+            if self.settings.minimize_on_type and not self._min_for_type and w.isVisible() and not w.isMinimized():
+                self._min_for_type = "max" if w.isMaximized() else "normal"
+                w.showMinimized()
+        elif st in (IDLE, FINISHED) and self._min_for_type:
+            was, self._min_for_type = self._min_for_type, ""
+            w.showMaximized() if was == "max" else w.showNormal()
 
     def _on_print_changed(self) -> None:
         self._set_title_status()

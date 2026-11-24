@@ -218,6 +218,17 @@ function decorateCode(n, it) {
   n.classList.toggle("armed", on);
   n.classList.toggle("busy", busy);
   const slot = n.querySelector(".armslot");
+  if (decor.code) decor.code(slot, it, P, on, busy);       // окно программы: «Набрать», «▾» и состояние набора
+  else oldArmSlot(slot, it, P, hk, on, busy, st);
+  const bar = n.querySelector(".pbar i");
+  bar.style.width = busy ? ((P.progress || 0) * 100).toFixed(1) + "%" : "0";
+  decorateLines(n, it, P, on);
+}
+
+// шапка блока кода для окна программы (screenctl.js ставит свою); null — «Следующим», как в суфлёре 0.12
+export const decor = { code: null };
+
+function oldArmSlot(slot, it, P, hk, on, busy, st) {
   let text = "", cls = "armed-chip";
   if (busy) {
     const pct = Math.round((P.progress || 0) * 100);
@@ -240,8 +251,9 @@ function decorateCode(n, it) {
       slot.appendChild(b);
     }
   }
-  const bar = n.querySelector(".pbar i");
-  bar.style.width = busy ? ((P.progress || 0) * 100).toFixed(1) + "%" : "0";
+}
+
+function decorateLines(n, it, P, on) {
   // подсветка строк: следующий шаг или строка
   const hls = n.querySelector(".hls");
   const lines = on && !(P.step && P.step.done) ? (P.next_lines || []) : [];

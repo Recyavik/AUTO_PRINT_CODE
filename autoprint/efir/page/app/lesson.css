@@ -51,6 +51,61 @@
 #onair .screenctl:empty { display: none; }
 #onair .stools { display: flex; align-items: center; gap: 8px; }
 #onair .sact { display: flex; align-items: center; gap: 8px; }
+
+/* экран учеников: миниатюра (что у учеников, точка вкладки) и значки «Фон / Зарядка / Перерыв / Слайд» */
+.screenctl .thumb { position: relative; width: 58px; height: 36px; padding: 0; border-radius: 7px; cursor: pointer; flex: none;
+  background: #000; border: 1px solid var(--line2); box-shadow: inset 0 0 0 2px var(--panel); color: #fff; }
+.screenctl .thumb:hover { border-color: var(--accent-line); }
+.screenctl .thumb .scr { position: absolute; inset: 3px; border-radius: 4px; display: flex; align-items: center; justify-content: center;
+  background: center / cover no-repeat; }
+.screenctl .thumb .scr .i { width: 16px; height: 16px; }
+.screenctl .thumb[data-mode="break"] .scr { background-color: color-mix(in srgb, var(--accent) 35%, #000); }
+.screenctl .thumb[data-mode="exercise"] .scr { background-color: color-mix(in srgb, var(--ok) 35%, #000); }
+.screenctl .thumb .tdot { position: absolute; right: -4px; top: -4px; width: 11px; height: 11px; border-radius: 50%;
+  background: var(--ok); border: 2px solid var(--panel); }
+.screenctl .thumb.closed { background: var(--sunken); border-style: dashed; }
+.screenctl .thumb.closed .tdot { background: var(--faint); }
+.scricons { display: flex; align-items: center; gap: 2px; padding: 3px; border-radius: 11px; background: var(--sunken); border: 1px solid var(--line); }
+.scricons .scrbtn { position: relative; border-color: transparent; background: transparent; color: var(--dim); }
+.scricons .scrbtn:hover:not(:disabled) { color: var(--text); background: var(--raised); }
+.scricons .scrbtn[aria-pressed="true"] { color: var(--on-accent); background: var(--accent); border-color: var(--accent); }
+.scricons .scrbtn.warn[aria-pressed="true"] { background: var(--live); border-color: var(--live); color: #fff; }
+.scricons .scrbtn:disabled { opacity: .35; cursor: default; }
+.scricons .scrbtn.timed { width: auto; padding: 0 9px 0 7px; gap: 5px; }
+.scricons .badge { font-size: 12.5px; font-weight: 600; }
+.scricons .badge:empty { display: none; }
+.scricons .scrbtn.pulse::after { content: ""; position: absolute; inset: -3px; border-radius: inherit; pointer-events: none;
+  box-shadow: 0 0 0 2px var(--accent); animation: scrpulse 1.4s ease-out 4; }
+.scricons .scrbtn.pulse { color: var(--accent); }
+@keyframes scrpulse { 0% { opacity: 1; transform: scale(1); } 100% { opacity: 0; transform: scale(1.35); } }
+@media (prefers-reduced-motion: reduce) { .scricons .scrbtn.pulse::after { animation: none; opacity: 1; } }
+.slidenav { display: inline-flex; align-items: center; gap: 2px; margin-left: 2px; }
+.slidenav[hidden] { display: none; }
+.slidenav button { width: 26px; height: 30px; border: 0; border-radius: 7px; background: transparent; color: var(--text); font-size: 20px;
+  line-height: 1; cursor: pointer; }
+.slidenav button:hover { background: var(--raised); }
+.slidenav .n { min-width: 1.6em; text-align: center; font-weight: 600; font-size: 13.5px; }
+
+/* полоса набора кода — внизу урока, пока идёт набор */
+#typingBar { flex: none; border-top: 1px solid var(--line); background: var(--panel); padding: 8px 18px 10px; }
+#typingBar[hidden] { display: none; }
+#typingBar .tsay { margin: 0 0 8px; padding: 7px 12px; border-radius: var(--r-sm); background: color-mix(in srgb, var(--say) 12%, var(--panel));
+  font-size: 16px; white-space: pre-wrap; }
+#typingBar .tsay b { color: var(--say); }
+#typingBar .trow { display: flex; align-items: center; gap: 14px; }
+#typingBar .tkey { width: 36px; height: 36px; border-radius: 10px; display: flex; align-items: center; justify-content: center; flex: none;
+  background: var(--accent-soft); color: var(--accent); }
+#typingBar .ttext { display: flex; flex-direction: column; min-width: 0; flex: 0 1 auto; }
+#typingBar .tl1 { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#typingBar .tinfo { color: var(--dim); }
+#typingBar .tprog { flex: 1; min-width: 80px; height: 6px; border-radius: 3px; background: var(--line2); overflow: hidden; }
+#typingBar .tprog i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .3s linear; }
+.typepanel { display: flex; flex-direction: column; gap: 10px; width: 340px; padding: 4px 6px 6px; }
+.typepanel .phead { padding: 0; }
+.typepanel .meta { margin: -2px 0 0; font-size: 12.5px; }
+.typepanel .trange { display: flex; align-items: center; gap: 10px; font-size: 14px; }
+.typepanel .trange input { flex: 1; }
+.typepanel .trow2 { display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
 .startpanel, .statuspanel { display: flex; flex-direction: column; gap: 8px; min-width: 260px; }
 .startpanel .zrow, .statuspanel .zrow { display: flex; align-items: center; gap: 8px; padding: 2px 8px 6px; }
 .statuspanel .zrow .inp { width: 120px; }
@@ -174,7 +229,9 @@ body.mode-lesson .stage.past:not(.collapsed):hover { opacity: 1; }
 #nowbar { position: absolute; left: 50%; bottom: 76px; transform: translateX(-50%); z-index: 30; height: 40px; padding: 0 18px;
   border-radius: 999px; background: var(--accent); color: var(--on-accent); border: none; font-weight: 600; font-size: 15px;
   box-shadow: var(--shadow); cursor: pointer; }
-.lview { position: relative; }
+.lview, .lbody { position: relative; }
+#nowbar[hidden] { display: none; }
+body.typing .blk.busy .say { display: none; }      /* «Скажи: …» во время набора — в полосе набора */
 
 /* план урока (документ): кто по нему и что такое заготовки */
 #planbanner { padding: 12px 16px; border: 1px solid var(--accent-line); border-radius: var(--r-lg); background: var(--panel);
@@ -261,7 +318,10 @@ body.mode-lesson .r-image figure img { max-height: min(calc(var(--vh) * 40), 520
 
 /* ---------------------------------------------------------------- код */
 .r-code .lbl { color: var(--faint); }
-.r-code .armslot { margin-left: 8px; font-variant-caps: normal; letter-spacing: 0; }
+.r-code .armslot { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; font-variant-caps: normal; letter-spacing: 0;
+  text-transform: none; }
+.r-code .armslot .typeBtn { height: 30px; }
+.r-code .armslot .typeOpts { width: 30px; height: 30px; }
 .armed-chip { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 999px; background: var(--accent-soft);
   color: var(--accent); font-size: 12.5px; font-weight: 600; }
 .armbtn { height: 26px; padding: 0 10px; font-size: 12.5px; border-radius: 999px; background: transparent; color: var(--dim);

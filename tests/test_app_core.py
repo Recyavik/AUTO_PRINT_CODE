@@ -127,6 +127,32 @@ class AppCoreTest(unittest.TestCase):
         import json
         json.dumps(s)                                   # уходит в страницу как есть
 
+    def test_minimize_on_type(self):
+        calls = []
+        w = self.a.window
+        w.isVisible = lambda: True
+        w.isMinimized = lambda: False
+        w.showMinimized = lambda: calls.append("min")
+        w.showNormal = lambda: calls.append("normal")
+        eng = self.a.engine
+
+        def to(st):
+            eng.state = st
+            self.a._on_state()
+        self.assertFalse(self.a.settings.minimize_on_type)          # по умолчанию окно остаётся
+        to("countdown")
+        to("idle")
+        self.assertEqual(calls, [])
+        self.a.settings.minimize_on_type = True
+        to("countdown")
+        to("running")
+        to("paused")                                                # пауза — окно ещё свёрнуто
+        self.assertEqual(calls, ["min"])
+        to("finished")
+        self.assertEqual(calls, ["min", "normal"])
+        to("idle")
+        self.assertEqual(calls, ["min", "normal"])
+
     def test_show_view_emits_navigate(self):
         self.a.show_view("#/lesson/LA")
         self.assertEqual(self.nav[-1], "#/lesson/LA")
