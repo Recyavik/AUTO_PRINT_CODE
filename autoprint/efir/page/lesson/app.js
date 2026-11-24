@@ -257,7 +257,7 @@ function moreMenu(anchor) {
   }
   items.push(
     { label: $("legend").hidden ? "Показать обозначения" : "Скрыть обозначения", on: () => { $("legend").hidden = !$("legend").hidden; } },
-    { label: "Распечатать или PDF", on: () => window.print() },
+    { label: "Распечатать или PDF…", hint: "размер, ответы, код, слайды", on: printBox },
     { head: "Экспорт урока" },
     { label: "Урок в Markdown (.md)…", on: () => cmd({ cmd: "export", fmt: "md" }) },
     { label: "Урок в .ipynb…", on: () => cmd({ cmd: "export", fmt: "ipynb" }) },
@@ -328,6 +328,67 @@ function screenMenu(anchor) {
   items.push({ sep: true });
   items.push({ label: "Мини-таймер «Эфира»", hint: "окно поверх всех", on: () => cmd({ cmd: "timer" }) });
   menu(anchor, items);
+}
+
+// печать: размер текста, ответы к вопросам, код, слайды — классы на <body> только на время печати
+const PRINT_DEF = { size: "normal", answers: true, code: true, slides: "big" };
+function printPrefs() {
+  try { return Object.assign({}, PRINT_DEF, JSON.parse(localStorage.getItem("suflor.print") || "{}")); } catch (e) { return { ...PRINT_DEF }; }
+}
+function printBox() {
+  const pr = printPrefs();
+  const ov = el("div", "modal");
+  const box = el("div", "mbox printbox");
+  box.setAttribute("role", "dialog");
+  box.setAttribute("aria-label", "Печать урока");
+  box.appendChild(el("h3", "", "Печать урока или PDF"));
+  const seg = (title, key, opts) => {
+    box.appendChild(el("div", "mlabel", title));
+    const s = el("div", "seg");
+    for (const [v, n] of opts) {
+      const b = el("button", "", n);
+      b.setAttribute("aria-pressed", pr[key] === v ? "true" : "false");
+      b.onclick = () => { pr[key] = v; s.querySelectorAll("button").forEach((x) => x.setAttribute("aria-pressed", x === b ? "true" : "false")); };
+      s.appendChild(b);
+    }
+    box.appendChild(s);
+  };
+  seg("Размер текста", "size", [["small", "Мелко"], ["normal", "Обычно"], ["large", "Крупно"]]);
+  seg("Слайды и картинки", "slides", [["big", "Крупно"], ["thumbs", "Миниатюрами"], ["none", "Без"]]);
+  for (const [k, n] of [["answers", "Ответы к вопросам"], ["code", "Код"]]) {
+    const lab = el("label", "ptog");
+    const c = el("input");
+    c.type = "checkbox";
+    c.name = k;
+    c.checked = !!pr[k];
+    c.onchange = () => { pr[k] = c.checked; };
+    lab.appendChild(c);
+    lab.appendChild(el("b", "", n));
+    box.appendChild(lab);
+  }
+  box.appendChild(el("p", "phelp", "Для PDF в окне печати выберите принтер «Сохранить как PDF». Цвет плашек печатается, "
+    + "если принтер цветной."));
+  const row = el("div", "mrow");
+  const no = el("button", "", "Отмена");
+  const ok = el("button", "primary", "Печать");
+  no.onclick = () => ov.remove();
+  ok.onclick = () => {
+    for (const k of ["answers", "code"]) pr[k] = box.querySelector(`input[name=${k}]`).checked;
+    try { localStorage.setItem("suflor.print", JSON.stringify(pr)); } catch (e) { /* нет хранилища */ }
+    ov.remove();
+    const cls = ["print-size-" + pr.size, "print-slides-" + pr.slides];
+    if (!pr.answers) cls.push("print-no-answers");
+    if (!pr.code) cls.push("print-no-code");
+    document.body.classList.add(...cls);
+    try { window.print(); } finally { document.body.classList.remove(...cls); }
+  };
+  ov.addEventListener("keydown", (e) => { if (e.key === "Escape") ov.remove(); });
+  row.appendChild(no);
+  row.appendChild(ok);
+  box.appendChild(row);
+  ov.appendChild(box);
+  document.body.appendChild(ov);
+  ok.focus();
 }
 
 // ответ своего чата — вставить сюда, получится копия урока (слайды — по номерам)

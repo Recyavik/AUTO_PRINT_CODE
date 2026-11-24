@@ -631,6 +631,30 @@ class PageV11Test(Page):
             self.win.lesson.publish()
             self.assertTrue(self.edge.wait(f"document.getElementById('titleText').textContent === '{self.t.title}'"))
 
+    # ---------------------------------------------------------------- Task 11: печать
+    def test_print_options(self):
+        more = "[...document.querySelectorAll('#tools .iconbtn.only')].find(b => b.getAttribute('aria-label') === 'Ещё')"
+        self.js(f"{more}.click()")
+        self.assertTrue(self.edge.wait("!!document.querySelector('.menu')"))
+        self.js("[...document.querySelectorAll('.menu .mi')].find(b => b.textContent.includes('Распечатать')).click()")
+        self.assertTrue(self.edge.wait("!!document.querySelector('.modal .printbox')"))
+        pick = "[...document.querySelectorAll('.printbox button')].find(b => b.textContent === '{}').click()"
+        self.js(pick.format("Крупно"))
+        self.js(pick.format("Миниатюрами"))
+        self.js("{ const c = document.querySelector('.printbox input[name=answers]'); c.checked = false; }")
+        self.js("{ const c = document.querySelector('.printbox input[name=code]'); c.checked = false; }")
+        self.js("window.__printed = null; window.__print = window.print; window.print = () => { window.__printed = document.body.className; }")
+        try:
+            self.js("[...document.querySelectorAll('.modal button')].find(b => b.textContent === 'Печать').click()")
+            self.assertTrue(self.edge.wait("window.__printed !== null"))
+            cls = self.js("window.__printed").split()
+            for c in ("print-size-large", "print-no-answers", "print-no-code", "print-slides-thumbs"):
+                self.assertIn(c, cls)
+            self.assertFalse(self.js("!!document.querySelector('.modal')"))
+            self.assertFalse(self.js("document.body.className.includes('print-size-large')"))   # после печати — как было
+        finally:
+            self.js("window.print = window.__print")
+
     # ---------------------------------------------------------------- Task 3: план строкой
     def test_plan_strip(self):
         self.mode("lesson")

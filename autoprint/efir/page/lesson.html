@@ -442,6 +442,13 @@ body.mode-lesson.plan-strip.plan-open nav#plan { display: block; position: fixed
   body.mode-prep .body { padding-left: 20px; } .prow .m { display: inline !important; }
   .stage.past.collapsed { opacity: 1; } .sh { break-after: avoid; break-inside: avoid; } .row { break-inside: avoid; }
   .bar { display: none !important; } .left { display: none; } figure img { max-height: 200px; } .blk.is-empty { display: none; }
+  * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }    /* цвет плашек — на цветном принтере */
+  body.print-size-small { zoom: .85; } body.print-size-large { zoom: 1.25; }
+  body.print-no-answers .r-ask .ans { display: none !important; }
+  body.print-no-code .blk[data-type=code] { display: none !important; }
+  body.print-slides-big figure img { max-height: 120mm; } body.print-slides-thumbs figure img { max-height: 32mm; }
+  body.print-slides-none .blk[data-type=image] { display: none !important; }
+  .modal { display: none !important; }
 }
 </style>
 </head>
