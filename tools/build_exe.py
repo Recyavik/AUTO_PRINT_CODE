@@ -74,7 +74,7 @@ REQUIRED = [
     "_internal/autoprint/efir/page/lesson.html", "_internal/autoprint/efir/page/favicon.svg",
     "_internal/autoprint/samples/lesson-example.md", "_internal/autoprint/samples/lesson-example_files/func-scheme.png",
     "_internal/autoprint/efir/page/lang/python.svg",
-    "_internal/autoprint/efir/page/lesson/app.js",
+    "_internal/autoprint/efir/page/lesson/app.js", "_internal/autoprint/efir/page/lesson/richtext.js",
     "_internal/PySide6/Qt6Pdf.dll",
 ]
 
