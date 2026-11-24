@@ -135,7 +135,7 @@ body.mode-lesson .sh { cursor: pointer; }
 .stage.current .clock { background: var(--accent); color: var(--on-accent); }
 .clock small { font-weight: 600; opacity: .75; margin-left: 6px; font-size: 12px; }
 .sht { flex: 1 1 240px; min-width: 0; }
-.meta { font-size: 13px; color: var(--dim); font-weight: 600; }
+.meta { font-size: 14px; color: var(--dim); font-weight: 600; }
 .sht h2 { margin: 2px 0 0; font-size: 21px; font-weight: 800; line-height: 1.25; overflow-wrap: anywhere; }
 body.mode-prep .sht h2 { cursor: text; border-radius: 6px; }
 body.mode-prep .sht h2:hover { background: var(--card2); }
@@ -161,6 +161,11 @@ body.mode-prep .left { display: none; }
 .stage.collapsed .sh { padding: 12px 20px; }
 .stage.collapsed .sht h2 { font-size: 16px; }
 .stage.past.collapsed { opacity: .72; }
+body.mode-lesson .stage.past:not(.collapsed) { opacity: .78; }
+body.mode-lesson .stage.past:not(.collapsed):hover { opacity: 1; }
+#nowbar { position: fixed; left: 50%; bottom: 76px; transform: translateX(-50%); z-index: 70; min-height: 40px; padding: 0 18px;
+  border-radius: 999px; background: var(--accent); color: var(--on-accent); border: none; font-weight: 700; font-size: 15px;
+  box-shadow: var(--shadow); cursor: pointer; }
 .empty-stage { color: var(--dim); font-size: 14px; padding: 10px 0; }
 .hello { background: var(--panel); border: 1px dashed var(--stroke2); border-radius: 16px; padding: 40px 24px; text-align: center; color: var(--dim); font-size: 16px; }
 
@@ -382,7 +387,7 @@ input.inl-h1 { font: 800 20px/1.25 var(--ui); width: min(32em, 60vw); }
     --show:#6B2FB0; --extra:#6B2FB0; --term:#0E7C6E; --output:#237A32;
     --t-c:#777; --t-k:#9A5500; --t-b:#0F6A85; --t-f:#1F5FBF; --t-cl:#7A4E00; --t-d:#7A4E00; --t-t:#B00020; --t-a:#8A4513;
     --t-s:#1E6B2B; --t-n:#6B2FB0; --t-o:#555; font-size: 12px; }
-  header { position: static; border: none; padding: 0 0 8px; } .tools, #legend, #offline, #toast, .armbtn, .efirbtn, .phint, .ins,
+  header { position: static; border: none; padding: 0 0 8px; } .tools, #legend, #offline, #toast, #nowbar, .armbtn, .efirbtn, .phint, .ins,
   .blk > .tools, .sedit, #lessonsBtn, .pmin { display: none !important; }
   #wrap { display: block; padding: 0; } nav#plan { position: static; max-height: none; overflow: visible; margin-bottom: 14px; }
   .stage { break-inside: auto; margin-bottom: 10px; } .stage .body, .stage.collapsed .body { display: block !important; }
@@ -410,6 +415,7 @@ input.inl-h1 { font: 800 20px/1.25 var(--ui); width: min(32em, 60vw); }
 </div>
 <div id="viewer" hidden><img alt=""><div class="cap"></div></div>
 <div id="toast" role="status" hidden></div>
+<button id="nowbar" hidden></button>
 <div id="offline" hidden>Нет связи с AutoPrintCode — переподключаюсь…</div>
 <script type="module" src="/static/lesson/app.js"></script>
 </body>

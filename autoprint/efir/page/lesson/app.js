@@ -246,7 +246,15 @@ function printMenu(anchor) {
 function moreMenu(anchor) {
   const L = A.S.lesson;
   const presets = (L && L.presets) || [];
-  const items = [
+  const items = [];
+  if (A.mode === "lesson" && stagesOf(A.items).length) {
+    items.push({ head: "Этапы" });
+    items.push({ label: "Свернуть пройденные", on: () => collapseStages("past") });
+    items.push({ label: "Свернуть все этапы", on: () => collapseStages("all") });
+    items.push({ label: "Развернуть все этапы", on: () => collapseStages("none") });
+    items.push({ sep: true });
+  }
+  items.push(
     { label: $("legend").hidden ? "Показать обозначения" : "Скрыть обозначения", on: () => { $("legend").hidden = !$("legend").hidden; } },
     { label: "Распечатать или PDF", on: () => window.print() },
     { head: "Экспорт урока" },
@@ -254,7 +262,7 @@ function moreMenu(anchor) {
     { label: "Урок в .ipynb…", on: () => cmd({ cmd: "export", fmt: "ipynb" }) },
     { label: "Тетрадка учеников (только код)…", on: () => cmd({ cmd: "export", fmt: "students" }) },
     { label: "Урок в .json…", on: () => cmd({ cmd: "export", fmt: "json" }) },
-  ];
+  );
   if (presets.length) {
     items.push({ head: "Оформление экрана эфира" });
     for (const p of presets) items.push({ label: p.title, checked: p.id === L.preset, on: () => cmd({ cmd: "preset", id: p.id }) });
@@ -409,22 +417,58 @@ function computeCurrent() {
   return { elapsed, cur, next, stages };
 }
 
+// «Урок» ничего не сворачивает сам: все этапы раскрыты; свернуть — щелчком по этапу, «⋯ → Свернуть все этапы»
+// или настройкой «Пройденные этапы: сворачивать»
 function applyCollapse() {
-  const { elapsed, cur, next, stages } = computeCurrent();
+  const { elapsed, stages } = computeCurrent();
+  const pastCollapse = prefs().page_past === "collapse";
   for (const s of stages) {
     const st = $("st-" + s.id);
     if (!st) continue;
     let open = true;
-    if (A.mode === "lesson" && elapsed !== null) {
-      const ph = phaseOf(s, elapsed);
-      open = ph === "current" || s.i === next || (cur < 0 && elapsed < 0 && s.i === 0);
+    if (A.mode === "lesson") {
       if (s.id in A.userOpen) open = A.userOpen[s.id];
-    } else if (A.mode === "lesson" && s.id in A.userOpen) {
-      open = A.userOpen[s.id];
+      else if (pastCollapse && elapsed !== null && phaseOf(s, elapsed) === "past") open = false;
     }
     st.classList.toggle("collapsed", !open);
   }
 }
+
+export function collapseStages(which) {
+  const { elapsed, stages } = computeCurrent();
+  for (const s of stages) {
+    if (which === "all") A.userOpen[s.id] = false;
+    else if (which === "none") A.userOpen[s.id] = true;
+    else if (which === "past" && elapsed !== null && phaseOf(s, elapsed) === "past") A.userOpen[s.id] = false;
+  }
+  applyCollapse();
+}
+
+// текущий этап вне экрана — плашка «↓ Идёт: …» (лента сама не прокручивается: учитель может дочитывать)
+function updateNowbar(cur, stages) {
+  const bar = $("nowbar");
+  if (!bar) return;
+  const s = cur >= 0 && A.mode === "lesson" ? stages[cur] : null;
+  const st = s && $("st-" + s.id);
+  let dir = "";
+  if (st) {
+    const r = st.getBoundingClientRect(), top = document.querySelector("header").offsetHeight;
+    if (r.top > innerHeight - 40) dir = "↓";
+    else if (r.bottom < top + 40) dir = "↑";
+  }
+  bar.hidden = !dir;
+  if (dir) {
+    const text = dir + " Идёт: " + (s.item.title || "Этап");
+    if (bar.textContent !== text) bar.textContent = text;
+    bar.dataset.id = s.id;
+  }
+}
+$("nowbar").addEventListener("click", () => {
+  const st = $("st-" + $("nowbar").dataset.id);
+  if (st) { A.userOpen[st.id.slice(3)] = true; applyCollapse(); st.scrollIntoView({ behavior: "smooth", block: "start" }); }
+  $("nowbar").hidden = true;
+});
+window.addEventListener("scroll", () => { const c = computeCurrent(); updateNowbar(c.cur, c.stages); }, { passive: true });
 
 function tick() {
   const L = A.S && A.S.lesson;
@@ -432,15 +476,13 @@ function tick() {
   const status = $("status");
   const { elapsed, cur, next, stages } = computeCurrent();
   if (cur !== A.curIdx) {
-    const first = A.curIdx === -2;
     A.curIdx = cur;
-    A.userOpen = {};
-    applyCollapse();
-    if (cur >= 0 && !first && A.mode === "lesson") {
-      const s = stages[cur];
-      $("st-" + s.id)?.scrollIntoView({ behavior: "smooth", block: "start" });
+    if (prefs().page_past === "collapse") {     // этап закончился — пройденные сворачиваются, даже если их раскрывали
+      for (const s of stages) if (phaseOf(s, elapsed) === "past") delete A.userOpen[s.id];
     }
+    applyCollapse();            // без «сворачивать пройденные» раскрытое учителем не трогаем
   }
+  updateNowbar(cur, stages);
   for (const s of stages) {
     const st = $("st-" + s.id), pr = $("pr-" + s.id);
     if (!st) continue;
@@ -464,16 +506,14 @@ function tick() {
     if (!lbl) continue;
     if (ph === "current") {
       const left = (s.end - elapsed) * 60;
-      lbl.textContent = ending ? "Осталось меньше минуты" : "Сейчас · осталось";
-      big.textContent = mmss(left);
+      const timer = prefs().page_stage_timer !== false;
+      lbl.textContent = !timer ? "Сейчас" : ending ? "Осталось меньше минуты" : "Сейчас · осталось";
+      big.textContent = timer ? mmss(left) : "";
       const frac = Math.min(1, Math.max(0, (elapsed - s.start) / (s.end - s.start)));
       const bi = st.querySelector(":scope > .bar i");
       if (bi) bi.style.width = (frac * 100).toFixed(1) + "%";
       const pi = pr && pr.querySelector(".pbar2 i");
       if (pi) pi.style.width = (frac * 100).toFixed(1) + "%";
-    } else if (s.i === next) {
-      lbl.textContent = "Следующий · через";
-      big.textContent = mmss((s.start - elapsed) * 60);
     } else if (ph === "past") {
       lbl.textContent = "Пройдено";
       big.textContent = "";

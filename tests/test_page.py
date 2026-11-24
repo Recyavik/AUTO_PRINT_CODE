@@ -423,6 +423,73 @@ class PageV11Test(Page):
         self.assertTrue(self.wait_py(lambda: s.page_zoom == 110))
         self.js("document.body.dispatchEvent(new MouseEvent('mousedown', {bubbles: true}))")
 
+    # ---------------------------------------------------------------- Task 2: «Урок» ничего не делает сам
+    def go_live(self, minutes_ago: float = 0):
+        from datetime import timedelta
+        ef = self.win.efir
+        ef.launch_lesson(self.t, start="")
+        live = ef.store.live
+        ef.store.set_live(live.webinar_id, live.anchor - timedelta(minutes=minutes_ago))
+        ef.live_changed.emit()
+        self.win.lesson.publish()
+
+    def stop_live(self):
+        self.win.efir.stop_live()
+        self.win.lesson.publish()
+        pump(200)
+
+    def test_no_auto_collapse(self):
+        self.mode("lesson")
+        try:
+            self.go_live(1)
+            self.assertTrue(self.edge.wait("document.getElementById('st-s1').classList.contains('current')"))
+            self.js("window.scrollTo(0, 120)")
+            y0 = self.js("scrollY")
+            self.go_live(6)                                                          # «Приветствие» (5 мин) прошло
+            self.assertTrue(self.edge.wait("document.getElementById('st-s2').classList.contains('current')"))
+            pump(1500)
+            self.assertEqual(self.js("document.querySelectorAll('.stage.collapsed').length"), 0)
+            self.assertEqual(self.js("scrollY"), y0)
+            self.assertEqual(self.js("document.querySelector('#st-s2 .left .lbl2').textContent"), "Сейчас · осталось")
+            self.assertEqual(self.js("document.querySelector('#st-s3 .left .lbl2').textContent"), "")   # без «через»
+        finally:
+            self.stop_live()
+
+    def test_now_banner(self):
+        self.mode("lesson")
+        self.edge.call("Emulation.setDeviceMetricsOverride", {"width": 1360, "height": 320, "deviceScaleFactor": 1, "mobile": False})
+        try:
+            self.go_live(6)
+            self.assertTrue(self.edge.wait("document.getElementById('st-s2').classList.contains('current')"))
+            self.js("window.scrollTo(0, document.body.scrollHeight)")
+            self.assertTrue(self.edge.wait("!document.getElementById('nowbar').hidden && "
+                                           "document.getElementById('nowbar').textContent.includes('Разбор')", 5))
+            self.js("document.getElementById('nowbar').click()")
+            self.assertTrue(self.edge.wait("document.getElementById('nowbar').hidden", 5))
+        finally:
+            self.edge.call("Emulation.clearDeviceMetricsOverride")
+            self.stop_live()
+
+    def test_collapse_all_and_past(self):
+        self.mode("lesson")
+        more = "[...document.querySelectorAll('#tools .iconbtn.only')].find(b => b.getAttribute('aria-label') === 'Ещё')"
+        item = "[...document.querySelectorAll('.menu .mi')].find(b => b.textContent.includes('{}'))"
+        self.js(f"{more}.click()")
+        self.assertTrue(self.edge.wait("!!document.querySelector('.menu')"))
+        self.js(item.format("Свернуть все этапы") + ".click()")
+        self.assertTrue(self.edge.wait("document.querySelectorAll('.stage.collapsed').length === 3"))
+        self.js(f"{more}.click()")
+        self.js(item.format("Развернуть все этапы") + ".click()")
+        self.assertTrue(self.edge.wait("document.querySelectorAll('.stage.collapsed').length === 0"))
+        self.win.settings.page_past = "collapse"
+        try:
+            self.go_live(6)
+            self.assertTrue(self.edge.wait("document.getElementById('st-s1').classList.contains('collapsed') && "
+                                           "!document.getElementById('st-s2').classList.contains('collapsed')"))
+        finally:
+            self.win.settings.page_past = "dim"
+            self.stop_live()
+
 
 def big_lesson() -> list[Template]:
     blocks = []
