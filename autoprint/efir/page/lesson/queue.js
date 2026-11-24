@@ -153,7 +153,7 @@ function fromBlock(b) {
   const it = { id: b.id, type: b.type, v: 0, text: b.text || "", title: b.title || "", local: true };
   if (b.type === "markdown") { it.role = b.role || "say"; it.html = ""; }
   if (b.type === "code") { it.lang = b.lang || "python"; it.steps = b.steps || []; it.sel = b.sel || []; it.profile = b.profile || ""; it.html = ""; }
-  if (b.type === "stage") { it.minutes = b.minutes === undefined ? 5 : b.minutes; it.kind = b.stage_kind || ""; it.part = b.part || ""; it.note = (b.text || "").trim(); }
+  if (b.type === "stage") { it.minutes = b.minutes === undefined ? 5 : b.minutes; it.kind = b.stage_kind || ""; it.part = b.part || ""; it.note = (b.text || "").trim(); it.exercise = b.exercise || ""; }
   if (b.type === "image") { it.url = ""; it.missing = !b.text; }
   return it;
 }

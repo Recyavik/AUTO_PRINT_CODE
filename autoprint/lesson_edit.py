@@ -29,7 +29,7 @@ _LANG = re.compile(r"[\w+#.-]{1,30}")
 _FIELDS = {
     BLOCK_MARKDOWN: {"text", "title", "role"},
     BLOCK_CODE: {"text", "title", "lang", "profile", "steps", "sel"},
-    BLOCK_STAGE: {"text", "title", "minutes", "stage_kind", "part"},
+    BLOCK_STAGE: {"text", "title", "minutes", "stage_kind", "part", "exercise"},
     BLOCK_IMAGE: {"text", "title", "slide"},
 }
 
@@ -50,6 +50,8 @@ def _field(b: Block, key: str, v):
         return _str(v, "text")
     if key in ("title", "part"):
         return _str(v, key, 300)
+    if key == "exercise":                       # название видео зарядки из оформления
+        return _str(v, key, 200)
     if key == "role":
         if v not in ROLES:
             raise ValueError(f"Нет роли {v!r}")
@@ -112,7 +114,8 @@ def _new_block(d) -> Block:
         raise ValueError("Неверный тип блока")
     b = _block_from({k: v for k, v in d.items() if k in Block.__dataclass_fields__})
     # поля, которые задаёт страница, — с той же проверкой, что и при правке
-    for key in ("text", "title", "role", "lang", "profile", "minutes", "stage_kind", "part", "steps", "sel", "slide"):
+    for key in ("text", "title", "role", "lang", "profile", "minutes", "stage_kind", "part", "steps", "sel", "slide",
+                "exercise"):
         if key in d and key in _FIELDS[b.type]:
             setattr(b, key, _field(b, key, d[key]))
     if b.type == BLOCK_MARKDOWN and b.role not in ROLES:

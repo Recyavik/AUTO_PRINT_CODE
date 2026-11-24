@@ -3,7 +3,7 @@
 "use strict";
 import { A, $, el, icon, menu, closeMenu, toast, newId, isTyping, cmd } from "./state.js";
 import * as Q from "./queue.js";
-import { nodeOf, stageOfBlock } from "./render.js";
+import { nodeOf, stageOfBlock, exerciseList } from "./render.js";
 import { beginCode, endCode } from "./code.js";
 import { mdHtml, askParts, escapeHtml } from "./md.js";
 import { toMarkdown, cleanPaste } from "./richtext.js";
@@ -530,8 +530,20 @@ export function editStageMinutes(btn, it) {
 }
 
 export function kindMenu(anchor, it) {
-  const kinds = [["", "Обычный этап"], ["break", "Перерыв — экран перерыва ученикам"], ["exercise", "Зарядка — видео ученикам"]];
-  menu(anchor, kinds.map(([k, n]) => ({ label: n, checked: (it.kind || "") === k, on: () => setFields(it.id, { stage_kind: k }) })));
+  if (A.S.lesson && A.S.lesson.fixed) return;          // урок по плану: вид этапа — в плане
+  const kinds = [["", "Обычный этап"], ["break", "Перерыв — экран перерыва ученикам"]];
+  const items = kinds.map(([k, n]) => ({ label: n, checked: (it.kind || "") === k, on: () => setFields(it.id, { stage_kind: k }) }));
+  const ex = exerciseList().filter(Boolean);
+  if (ex.length) {                                      // зарядка: какое видео включать ученикам
+    const cur = it.kind === "exercise" ? (ex.find((t) => t.toLowerCase() === (it.exercise || "").toLowerCase()) || ex[0]) : null;
+    items.push({ head: "Зарядка — видео ученикам" });
+    for (const title of ex) {
+      items.push({ label: title, checked: cur === title, on: () => setFields(it.id, { stage_kind: "exercise", exercise: title }) });
+    }
+  } else {
+    items.push({ label: "Зарядка — видео ученикам", checked: it.kind === "exercise", on: () => setFields(it.id, { stage_kind: "exercise" }) });
+  }
+  menu(anchor, items);
 }
 
 function askText(anchor, title, value, onCommit) {

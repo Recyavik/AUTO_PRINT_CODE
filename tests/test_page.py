@@ -898,7 +898,8 @@ def plan_lessons() -> list[Template]:
     t.id = "T"
     for i, b in enumerate(b for b in t.blocks if b.type == BLOCK_STAGE):
         b.id = f"ts{i + 1}"
-    return [t, p, Template("Свободный", [stage("А", 5, id="fa"), note("Текст", id="fn")], id="F")]
+    return [t, p, Template("Свободный", [stage("А", 5, id="fa"), note("Текст", id="fn"),
+                                         stage("Зарядка", 3, id="fz", stage_kind="exercise")], id="F")]
 
 
 class PageV12Test(Page):
@@ -1024,6 +1025,24 @@ class PageV12Test(Page):
             self.assertRegex(self.js("document.querySelector('#pr-ts2 .t').textContent"), r"^\d{1,2}:\d\d$")
         finally:
             self.stop_live()
+
+    # ---------------------------------------------------------------- Task 7: видео зарядки у этапа
+    def test_exercise_choice_in_kind_menu(self):
+        from autoprint.efir.model import Exercise, Look
+        video = Path(storage.DATA_DIR) / "zaryadka-test.mp4"
+        video.write_bytes(b"\x00" * 16)
+        look = Look(title="С зарядками", exercises=[Exercise("Глаза", str(video)), Exercise("Шея", str(video))])
+        self.win.efir.save_look(look)
+        self.store.get("F").look = look.id
+        self.open_lesson("F")
+        self.mode("prep")
+        self.assertTrue(self.edge.wait("!!document.querySelector('#st-fz .efirbtn')"))
+        self.assertIn("Глаза", self.js("document.querySelector('#st-fz .efirbtn').textContent"))   # не выбрано — первое
+        self.js("document.querySelector('#st-fz .kindbtn').click()")
+        self.assertTrue(self.edge.wait("!!document.querySelector('.menu')"))
+        self.js("[...document.querySelectorAll('.menu .mi')].find(b => b.textContent.includes('Шея')).click()")
+        self.assertTrue(self.wait_py(lambda: self.store.get("F").find_block("fz").exercise == "Шея"))
+        self.assertTrue(self.edge.wait("document.querySelector('#st-fz .efirbtn').textContent.includes('Шея')"))
 
     def test_start_at_button_label(self):
         self.mode("lesson")

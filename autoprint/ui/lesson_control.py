@@ -175,12 +175,15 @@ class LessonController(QObject):
             efir_extra={"break_ends": int(self.efir.brk_ends * 1000) if self.efir.mode == "break" else 0,
                         "tab_open": bool(self.efir.server.running and self.efir.clients > 0),
                         "slide_n": (self.efir.slide or {}).get("n", 0) if self.efir.mode == "slide" else 0,
-                        "slide_bid": (self.efir.slide or {}).get("bid", "") if self.efir.mode == "slide" else ""}, armed=t.active_block if t is not None else "",
+                        "slide_bid": (self.efir.slide or {}).get("bid", "") if self.efir.mode == "slide" else "",
+                        "ex_index": self.efir.ex_index if self.efir.mode == "exercise" else -1},
+            armed=t.active_block if t is not None else "",
             media_url=self.efir.server.media_url, presets=[(lk.id, lk.title) for lk in self.efir.store.looks],
             preset=preset.id if preset is not None else "", dark=theme.dark, efir_mode=self.efir.mode,
             tab=self.efir.tab_status()[0], hotkey=self.main.settings.hotkey_toggle,
             printer=self.main.printer.snapshot(), lessons=scenario.lessons_state(self.main.store.templates),
-            exercises=bool(preset is not None and preset.exercises), edits=self.edits, other_live=other_live,
+            exercises=[e.title for e in preset.exercises] if preset is not None else [], edits=self.edits,
+            other_live=other_live,
             prefs={k: getattr(self.main.settings, k) for k in PREFS},
             structures=[{"key": k, "title": v[0], "minutes": sum(s[1] for s in v[1])} for k, v in STRUCTURES.items()],
             plan=self.main.store.get(t.plan_id) if t is not None and t.plan_id else None,
@@ -522,7 +525,7 @@ class LessonController(QObject):
                 self.main.recognize_lesson(t)
             elif cmd == "exercise" and t is not None:
                 self._ensure_screen(t)
-                self.efir.start_exercise(int(d.get("index") or 0))
+                self.efir.start_exercise(self._exercise_index(t, str(d.get("stage") or ""), d.get("index")))
             elif cmd == "background":
                 self.efir.show_background()
             elif cmd == "preset" and t is not None:
@@ -598,6 +601,16 @@ class LessonController(QObject):
             return
         w = self.efir.webinar or self.efir.live_webinar()
         self.efir.start_break(int(minutes or 0) or (w.break_min if w else 10))
+
+    def _exercise_index(self, t: Template, stage_id: str, index) -> int:
+        """Какое видео зарядки включить: этапа — по названию видео (не нашлось — первое), иначе — index."""
+        st = t.find_block(stage_id) if stage_id else None
+        if st is None:
+            return int(index or 0)
+        w = self.efir.webinar or self.efir.live_webinar()
+        titles = [e.title.casefold() for e in (w.exercises if w is not None else [])]
+        want = (st.exercise or "").strip().casefold()
+        return titles.index(want) if want and want in titles else 0
 
     def _ensure_screen(self, t: Template) -> None:
         """Перерыв или зарядка до «Начать урок»: оформление экрана — из пресета урока."""

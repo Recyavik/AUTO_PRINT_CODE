@@ -503,5 +503,47 @@ class StateTest(unittest.TestCase):
             close(win)
 
 
+# ================================================================ Task 7: зарядка — видео по этапу
+
+class ExerciseTest(unittest.TestCase):
+    def test_exercise_by_stage_title_and_fallback(self):     # Review Focus 6
+        from autoprint.efir.model import Exercise, Look
+        video = TMP / "zaryadka.mp4"
+        video.write_bytes(b"\x00" * 16)
+        t = Template("У", [stage("Зарядка", 3, id="z", stage_kind="exercise", exercise="Шея")], id="U")
+        win = window([t], 18910)
+        try:
+            t = win.store.get("U")
+            look = Look(title="С зарядками", exercises=[Exercise("Глаза", str(video)), Exercise("Шея", str(video))])
+            win.efir.save_look(look)
+            t.look = look.id
+            win.printer.set_focus("U")
+            win.lesson.command({"cmd": "exercise", "stage": "z"})
+            self.assertEqual(win.efir.ex_index, 1)
+            t.blocks[0].exercise = "Нет такого"
+            win.lesson.command({"cmd": "exercise", "stage": "z"})
+            self.assertEqual(win.efir.ex_index, 0)
+            self.assertEqual(win.exercise_titles(t), ["Глаза", "Шея"])
+            from autoprint import scenario
+            st = scenario.item_state(t.blocks[0], lambda p: "")
+            self.assertEqual(st["exercise"], "Нет такого")
+            win.lesson._last = None
+            win.lesson.publish()
+            self.assertEqual(win.efir.server._states["lesson"]["exercises"], ["Глаза", "Шея"])
+        finally:
+            win.efir.show_background()
+            close(win)
+
+    def test_exercise_field_editable_and_synced(self):
+        from autoprint import lesson_edit
+        p = plan90()
+        p.blocks.append(stage("Зарядка", 3, id="p5", stage_kind="exercise"))
+        lesson_edit.apply(p, [{"op": "set", "block": "p5", "fields": {"exercise": "Глаза"}}], keep_one_stage=True)
+        t = plans.new_topic(p)
+        self.assertEqual(stages_of(t)[-1].exercise, "Глаза")
+        with self.assertRaises(ValueError):
+            lesson_edit.apply(p, [{"op": "set", "block": "p5", "fields": {"exercise": "x" * 201}}])
+
+
 if __name__ == "__main__":
     unittest.main()

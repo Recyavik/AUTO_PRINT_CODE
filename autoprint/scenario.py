@@ -291,7 +291,8 @@ def item_state(b: Block, media_url) -> dict:
         d.update(url=url, missing=missing, name=Path(src).name if src and not url.startswith("http") else "",
                  slide=int(b.slide or 0))
     elif b.type == BLOCK_STAGE:
-        d.update(minutes=max(0, int(b.minutes or 0)), kind=b.stage_kind, part=b.part, note=b.text.strip())
+        d.update(minutes=max(0, int(b.minutes or 0)), kind=b.stage_kind, part=b.part, note=b.text.strip(),
+                 exercise=b.exercise)
     else:
         role = b.role if b.role in ROLES else "text"
         d["role"] = role

@@ -3,7 +3,7 @@
 import { A, $, el, icon, menu, closeMenu, toast, cmd, now, mmss, hm, hhmm, clockAt, nextHalfHour, durText, plural,
   isTyping } from "./state.js";
 import * as Q from "./queue.js";
-import { renderMain, renderPlan, legend, stagesOf, nodeOf, stageOfBlock, markOnScreen } from "./render.js";
+import { renderMain, renderPlan, legend, stagesOf, nodeOf, stageOfBlock, markOnScreen, exerciseList } from "./render.js";
 import * as E from "./edit.js";
 import { beginCode, released, endCode } from "./code.js";
 
@@ -468,7 +468,14 @@ function screenMenu(anchor) {
   items.push({ label: "Фон", checked: !ef.mode || ef.mode === "idle", on: () => cmd({ cmd: "background" }) });
   items.push({ label: `Перерыв по плану · ${planned} мин`, checked: ef.mode === "break", on: () => cmd({ cmd: "break", stage: currentBreakStage(), minutes: planned }) });
   for (const m of [5, 10, 15, 20].filter((x) => x !== planned)) items.push({ label: `Перерыв ${m} мин`, on: () => cmd({ cmd: "break", minutes: m }) });
-  if (A.S.exercises) items.push({ label: "Зарядка", checked: ef.mode === "exercise", on: () => cmd({ cmd: "exercise", index: 0 }) });
+  const exl = exerciseList();
+  if (exl.length > 1) {                        // несколько видео — выбрать, какое
+    items.push({ head: "Зарядка" });
+    exl.forEach((title, i) => items.push({ label: title || "Зарядка", checked: ef.mode === "exercise" && ef.ex_index === i,
+      on: () => cmd({ cmd: "exercise", index: i }) }));
+  } else if (exl.length) {
+    items.push({ label: "Зарядка", checked: ef.mode === "exercise", on: () => cmd({ cmd: "exercise", index: 0 }) });
+  }
   items.push({ sep: true });
   items.push({ label: "Мини-таймер «Эфира»", hint: "окно поверх всех", on: () => cmd({ cmd: "timer" }) });
   menu(anchor, items);
@@ -935,7 +942,7 @@ $("main").addEventListener("click", (e) => {
     if (a === "break") {
       const it = A.byId.get(actBtn.dataset.stage);
       cmd({ cmd: "break", stage: actBtn.dataset.stage, minutes: it ? it.minutes : 10 });
-    } else if (a === "exercise") cmd({ cmd: "exercise", index: 0 });
+    } else if (a === "exercise") cmd({ cmd: "exercise", stage: actBtn.dataset.stage || "", index: 0 });
     else if (a === "slide") cmd({ cmd: "slide", block: actBtn.closest(".blk").dataset.id });
     else if (a === "clear-sel") { const b = actBtn.closest(".blk"); E.setFields(b.dataset.id, { sel: [] }); }
     return;

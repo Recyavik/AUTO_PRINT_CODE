@@ -686,6 +686,11 @@ class MainWindow(FramelessWindow):
         self._fill_library(c.id)
 
     # ================================================================ планы уроков
+    def exercise_titles(self, t: Template | None = None) -> list[str]:
+        """Названия видео зарядок: из оформления урока или плана; None — из оформления по умолчанию."""
+        look = self.efir.lesson_look(t)
+        return [e.title for e in look.exercises] if look is not None else []
+
     def plan_changed(self, plan: Template) -> list[Template]:
         """План правили — уроки по нему приводятся к нему (идущий урок — тоже: таймер подстроит publish)."""
         from .. import plans
