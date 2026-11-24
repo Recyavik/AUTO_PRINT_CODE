@@ -362,6 +362,14 @@ input.inl-h1 { font: 800 20px/1.25 var(--ui); width: min(32em, 60vw); }
   padding: 8px 8px 8px 16px; border-radius: 12px; background: var(--menu); border: 1px solid var(--stroke2); box-shadow: var(--shadow); font-size: 14px; }
 #toast button { min-height: 32px; }
 
+/* ---------------- «Мои настройки» */
+.prefsbtn { font-weight: 800; letter-spacing: -.02em; min-width: 40px; }
+.prefs .zrow { display: flex; align-items: center; gap: 8px; margin: 4px 0 2px; }
+.prefs .zrow > span { flex: 1; }
+.prefs .zrow button { min-width: 36px; }
+.prefs .zrow .zval { min-width: 4.2em; text-align: center; font-variant-numeric: tabular-nums; }
+.prefs .mlabel { font-size: 13px; color: var(--dim); font-weight: 600; margin: 12px 0 6px; }
+
 @media (max-width: 760px) {
   nav#plan { position: static; max-height: none; } header { padding: 10px 16px; } #wrap { padding: 16px; }
   body.mode-prep .body { padding-left: 20px; } body.mode-prep .blk[data-id] > .tools { left: auto; right: -8px; flex-direction: row; top: -6px; }

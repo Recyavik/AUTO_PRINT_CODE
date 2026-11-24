@@ -46,6 +46,96 @@ export function refresh() {
 }
 window.addEventListener("suflor:refresh", refresh);
 
+// ---------------------------------------------------------------- «Мои настройки»: размер, план, этапы
+const ZOOM_MIN = 80, ZOOM_MAX = 200;
+export function prefs() { return (A.S && A.S.prefs) || {}; }
+
+function applyPrefs() {
+  const p = prefs();
+  const z = String(Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, p.page_zoom || 100)) / 100);
+  if (document.documentElement.style.zoom !== z) document.documentElement.style.zoom = z;
+  const b = document.body.classList;
+  for (const v of ["strip", "side", "hidden"]) b.toggle("plan-" + v, (p.page_plan || "strip") === v);
+  b.toggle("past-collapse", p.page_past === "collapse");
+  b.toggle("no-stage-timer", p.page_stage_timer === false);
+}
+
+export function setPref(key, value) {
+  if (!A.S) return;
+  A.S.prefs = Object.assign({}, A.S.prefs, { [key]: value });
+  applyPrefs();
+  cmd({ cmd: "prefs", key, value });
+  refresh();
+}
+
+function zoomBy(d) {
+  const z = prefs().page_zoom || 100;
+  setPref("page_zoom", d === 0 ? 100 : Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, z + d)));
+}
+
+// Ctrl+= / Ctrl+− / Ctrl+0 и Ctrl+колесо — размер текста (а не масштаб браузера: он не запоминается)
+document.addEventListener("keydown", (e) => {
+  if (!(e.ctrlKey || e.metaKey) || e.altKey || e.shiftKey && e.key !== "+") return;
+  if (e.key === "=" || e.key === "+") { e.preventDefault(); zoomBy(10); }
+  else if (e.key === "-" || e.key === "_") { e.preventDefault(); zoomBy(-10); }
+  else if (e.key === "0") { e.preventDefault(); zoomBy(0); }
+}, true);
+let wheelAcc = 0;
+window.addEventListener("wheel", (e) => {
+  if (!e.ctrlKey) return;
+  e.preventDefault();
+  wheelAcc += e.deltaY;
+  if (Math.abs(wheelAcc) >= 80) { zoomBy(wheelAcc < 0 ? 10 : -10); wheelAcc = 0; }
+}, { passive: false });
+
+function prefsMenu(anchor) {
+  const p = prefs();
+  const box = el("div", "pmenu prefs");
+  box.appendChild(el("div", "mhead", "Мои настройки"));
+  const zr = el("div", "zrow");
+  zr.appendChild(el("span", "", "Размер текста"));
+  const minus = el("button", "", "−"), val = el("b", "zval"), plus = el("button", "", "+"), reset = el("button", "ghost", "Обычный");
+  minus.setAttribute("aria-label", "Мельче");
+  plus.setAttribute("aria-label", "Крупнее");
+  const upd = () => { val.textContent = (prefs().page_zoom || 100) + " %"; };
+  upd();
+  minus.onclick = () => { zoomBy(-10); upd(); };
+  plus.onclick = () => { zoomBy(10); upd(); };
+  reset.onclick = () => { zoomBy(0); upd(); };
+  for (const x of [minus, val, plus, reset]) zr.appendChild(x);
+  box.appendChild(zr);
+  box.appendChild(el("div", "phelp", "Ещё: Ctrl + колесо мыши, Ctrl+= и Ctrl+− (Ctrl+0 — обычный)."));
+  const seg = (title, key, opts, cls, def) => {
+    box.appendChild(el("div", "mlabel", title));
+    const s = el("div", "seg " + cls);
+    for (const [v, n] of opts) {
+      const b = el("button", "", n);
+      b.setAttribute("aria-pressed", (p[key] || def) === v ? "true" : "false");
+      b.onclick = () => { setPref(key, v); s.querySelectorAll("button").forEach((x) => x.setAttribute("aria-pressed", x === b ? "true" : "false")); };
+      s.appendChild(b);
+    }
+    box.appendChild(s);
+  };
+  seg("План в «Уроке»", "page_plan", [["strip", "Строкой"], ["side", "Сбоку"], ["hidden", "Скрыть"]], "plan", "strip");
+  seg("Пройденные этапы", "page_past", [["dim", "Приглушать"], ["collapse", "Сворачивать"]], "past", "dim");
+  for (const [k, n, h] of [["page_stage_timer", "Таймер на текущем этапе", "«осталось» на карточке этапа"],
+    ["start_timer", "При начале урока — мини-таймер", "маленькое окно «Эфира» поверх всех окон"],
+    ["start_screen", "При начале урока — экран учеников", "вкладка, которую показывают ученикам"]]) {
+    const lab = el("label", "ptog");
+    const c = el("input");
+    c.type = "checkbox";
+    c.checked = k === "page_stage_timer" ? p[k] !== false : !!p[k];
+    c.onchange = () => setPref(k, c.checked);
+    lab.appendChild(c);
+    const t = el("span");
+    t.appendChild(el("b", "", n));
+    t.appendChild(el("small", "", h));
+    lab.appendChild(t);
+    box.appendChild(lab);
+  }
+  menu(anchor, [{ node: box }], { right: true, cls: "wide", focus: false });
+}
+
 // ---------------------------------------------------------------- режим
 function setMode(m, user = false) {
   if (A.S && A.S.live && m === "prep" && !user) m = "lesson";
@@ -263,6 +353,11 @@ export function renderTools() {
       t.appendChild(stop);
     }
   }
+  const zb = el("button", "iconbtn only prefsbtn", "Аа");
+  zb.title = "Мои настройки: размер текста, план, этапы";
+  zb.setAttribute("aria-label", "Мои настройки");
+  zb.onclick = () => prefsMenu(zb);
+  t.appendChild(zb);
   const pb = el("button", "iconbtn");
   pb.title = "Печать: режим, скорость, «как человек»";
   pb.appendChild(icon("gear"));
@@ -663,6 +758,7 @@ function apply(state) {
     window.scrollTo(0, 0);
   }
   if (state.live && !(prev && prev.live) && A.mode !== "lesson") setMode("lesson");
+  applyPrefs();
   rebuildItems();
   const key = JSON.stringify([A.title, state.live, state.efir, state.print && [state.print.state, state.print.block, Math.round((state.print.progress || 0) * 50)],
     state.lessons && state.lessons.length, A.mode, state.lesson && state.lesson.presets, state.lesson && state.lesson.preset, A.items.length]);

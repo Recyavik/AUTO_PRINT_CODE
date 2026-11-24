@@ -227,6 +227,13 @@ class Settings:
     lesson_look: str = ""              # оформление эфира урока — последнее выбранное (efir/looks.json)
     page_open: bool = False            # экран урока был открыт при выходе — открыть снова при запуске
     page_lesson: str = ""              # какой урок был на экране урока
+    # «Мои настройки» экрана урока
+    page_zoom: int = 100               # размер текста страницы, % (80…200)
+    page_plan: str = "strip"           # план в «Уроке»: strip — строкой сверху, side — сбоку, hidden — скрыт
+    page_past: str = "dim"             # пройденные этапы: dim — приглушать, collapse — сворачивать
+    page_stage_timer: bool = True      # «осталось» на текущем этапе
+    start_timer: bool = False          # «Начать урок» открывает мини-таймер «Эфира»
+    start_screen: bool = False         # «Начать урок» открывает экран учеников (вкладку)
     step_nav: str = "arrows"           # шаги: arrows — стрелками от курсора (код — продолжение файла)
                                        #       | home — от начала документа (Ctrl+Home)
 

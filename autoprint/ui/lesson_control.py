@@ -25,6 +25,10 @@ from .theme import theme
 
 log = logging.getLogger(__name__)
 
+# «Мои настройки» экрана урока: поле Settings → допустимые значения
+PREFS = {"page_zoom": "zoom", "page_plan": ("strip", "side", "hidden"), "page_past": ("dim", "collapse"),
+         "page_stage_timer": "bool", "start_timer": "bool", "start_screen": "bool"}
+
 
 def _edge_path() -> str | None:
     for base in (os.environ.get("ProgramFiles(x86)"), os.environ.get("ProgramFiles"), os.environ.get("LOCALAPPDATA")):
@@ -169,7 +173,8 @@ class LessonController(QObject):
             preset=preset.id if preset is not None else "", dark=theme.dark, efir_mode=self.efir.mode,
             tab=self.efir.tab_status()[0], hotkey=self.main.settings.hotkey_toggle,
             printer=self.main.printer.snapshot(), lessons=scenario.lessons_state(self.main.store.templates),
-            exercises=bool(preset is not None and preset.exercises), edits=self.edits, other_live=other_live)
+            exercises=bool(preset is not None and preset.exercises), edits=self.edits, other_live=other_live,
+            prefs={k: getattr(self.main.settings, k) for k in PREFS})
         # во время зарядки экран эфира шлёт ход видео раз в секунду: странице суфлёра от этого ничего не
         # меняется — не перерисовывать её (иначе пересоздаются кнопки и теряются щелчки)
         key = json.dumps(state, ensure_ascii=False, sort_keys=True)
@@ -177,6 +182,29 @@ class LessonController(QObject):
             return
         self._last = key
         self.efir.server.publish(state, channel="lesson")
+
+    def _set_pref(self, key: str, value) -> None:
+        """«Мои настройки» со страницы: только поля из PREFS и только допустимые значения."""
+        kind = PREFS.get(key)
+        s = self.main.settings
+        if kind is None:
+            return
+        if kind == "zoom":
+            try:
+                v = max(80, min(200, int(value)))
+            except (TypeError, ValueError):
+                return
+        elif kind == "bool":
+            v = bool(value)
+        elif value in kind:
+            v = value
+        else:
+            return
+        if getattr(s, key) == v:
+            return
+        setattr(s, key, v)
+        self.main._settings_timer.start()
+        self.schedule_publish()
 
     def _sync_live(self, t: Template) -> None:
         """Урок идёт, а его этапы поправили — обновить расписание таймера. Начало текущего этапа (по id блока)
@@ -321,6 +349,8 @@ class LessonController(QObject):
                 self.main.delete_lesson(t, ask=False)
             elif cmd == "export" and t is not None and d.get("fmt") in ("md", "ipynb", "students", "json"):
                 self.main.export_template(t, str(d["fmt"]))
+            elif cmd == "prefs":
+                self._set_pref(str(d.get("key") or ""), d.get("value"))
             elif cmd == "settings":
                 self.main.open_settings(str(d.get("page") or ""))
             elif cmd == "recognize" and t is not None:

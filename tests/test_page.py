@@ -392,6 +392,38 @@ class PageLessonTest(Page):
         self.assertIn("нет видео", self.js("document.querySelector('#st-s2 .efirnote').textContent"))
 
 
+class PageV11Test(Page):
+    """0.11: «Мои настройки», урок без автоматики, план строкой, экран учеников с экрана урока."""
+
+    def setUp(self):
+        s = self.win.settings
+        s.page_zoom, s.page_plan, s.page_past, s.page_stage_timer = 100, "strip", "dim", True
+        self.win.lesson._last = None
+        self.win.lesson.publish()
+        pump(100)
+
+    def test_zoom_keys(self):
+        s = self.win.settings
+        self.js("document.activeElement && document.activeElement.blur && document.activeElement.blur()")
+        self.edge.key("=", "Equal", 187, modifiers=2)                               # Ctrl+=
+        self.assertTrue(self.wait_py(lambda: s.page_zoom == 110), s.page_zoom)
+        self.assertTrue(self.edge.wait("document.documentElement.style.zoom === '1.1'"))
+        self.edge.key("0", "Digit0", 48, modifiers=2)                               # Ctrl+0 — обычный
+        self.assertTrue(self.wait_py(lambda: s.page_zoom == 100), s.page_zoom)
+        self.assertTrue(self.edge.wait("document.documentElement.style.zoom === '1'"))
+
+    def test_prefs_menu(self):
+        s = self.win.settings
+        self.js("document.querySelector('#tools .prefsbtn').click()")
+        self.assertTrue(self.edge.wait("!!document.querySelector('.menu .prefs')"))
+        self.assertIn("Мои настройки", self.js("document.querySelector('.menu .prefs').textContent"))
+        self.js("[...document.querySelectorAll('.menu .prefs .seg.plan button')].find(b => b.textContent === 'Сбоку').click()")
+        self.assertTrue(self.wait_py(lambda: s.page_plan == "side"))
+        self.js("[...document.querySelectorAll('.menu .prefs button')].find(b => b.textContent === '+').click()")
+        self.assertTrue(self.wait_py(lambda: s.page_zoom == 110))
+        self.js("document.body.dispatchEvent(new MouseEvent('mousedown', {bubbles: true}))")
+
+
 def big_lesson() -> list[Template]:
     blocks = []
     for k in range(10):
