@@ -68,7 +68,8 @@ def webinar_for(t: Template, look=None):
 
 _INLINE = re.compile(r"(`[^`\n]+`)|\[([^\]\n]+)\]\(((?:[^()\s]|\([^()\s]*\))+)\)|(https?://[^\s<>\"'`]+)")
 # «\*», «\.», «\#»… — знак как есть (правка «как в Word» так сохраняет набранные звёздочки и «2024. Год»)
-_ESCAPED = re.compile(r"\\([\\`*_\[\]()#.+\-!>→~|{}])")
+# внутри `кода` обратная косая — как есть: код находится раньше экранирования (как в CommonMark)
+_ESCAPED_OR_CODE = re.compile(r"\\([\\`*_\[\]()#.+\-!>→~|{}•])|(`[^`\n]+`)")
 _SLOT = re.compile("\ue000(\\d+)\ue001")
 _BOLD = re.compile(r"\*\*(.+?)\*\*")     # без __…__: в тексте про Python это __init__, а не жирный
 _ITALIC = re.compile(r"(?<![\w*])\*(?!\s)(.+?)(?<!\s)\*(?![\w*])")
@@ -92,7 +93,8 @@ def _link(url: str, inner: str) -> str:
 
 
 def _inline(text: str) -> str:
-    text = _ESCAPED.sub(lambda m: f"\ue000{ord(m.group(1))}\ue001", text)
+    text = _ESCAPED_OR_CODE.sub(lambda m: m.group(2) if m.group(2) is not None else f"\ue000{ord(m.group(1))}\ue001",
+                                text.replace("\ue000", "").replace("\ue001", ""))
     return _SLOT.sub(lambda m: _esc(chr(int(m.group(1)))), _inline_raw(text))
 
 

@@ -716,9 +716,10 @@ function updateNowbar(cur, stages) {
   const st = s && $("st-" + s.id);
   let dir = "";
   if (st) {
-    const r = st.getBoundingClientRect(), top = document.querySelector("header").offsetHeight;
-    if (r.top > innerHeight - 40) dir = "↓";
-    else if (r.bottom < top + 40) dir = "↑";
+    const z = parseFloat(document.documentElement.style.zoom) || 1;
+    const r = st.getBoundingClientRect(), top = document.querySelector("header").getBoundingClientRect().bottom;
+    if (r.top > innerHeight - 40 * z) dir = "↓";
+    else if (r.bottom < top + 40 * z) dir = "↑";
   }
   bar.hidden = !dir;
   if (dir) {
@@ -1083,7 +1084,11 @@ function apply(state) {
   if (state.live && !(prev && prev.live) && A.mode !== "lesson") setMode("lesson");
   // слайд у учеников сменился (учитель листает) — «я здесь»: лента показывает этот слайд
   const sb = state.efir && state.efir.mode === "slide" ? state.efir.slide_bid : "";
-  if (sb && sb !== A.slideBid && A.mode === "lesson") requestAnimationFrame(() => nodeOf(sb)?.scrollIntoView({ behavior: "smooth", block: "start" }));
+  if (sb && sb !== A.slideBid && A.mode === "lesson") {
+    const owner = stageOfBlock(sb);                       // слайд в свёрнутом этапе — этап раскрыть
+    if (owner && A.userOpen[owner] === false) { A.userOpen[owner] = true; applyCollapse(); }
+    requestAnimationFrame(() => nodeOf(sb)?.scrollIntoView({ behavior: "smooth", block: "start" }));
+  }
   A.slideBid = sb;
   applyPrefs();
   rebuildItems();

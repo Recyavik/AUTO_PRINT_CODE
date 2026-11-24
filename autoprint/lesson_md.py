@@ -159,11 +159,13 @@ def _role(name: str) -> str:
     return _ROLE_BY_NAME.get(n.lower(), "")
 
 
-def _resolve_image(src: str, base: Path | None) -> str:
+def _resolve_image(src: str, base: Path | None, local: bool = True) -> str:
     if src.startswith("<") and src.endswith(">"):
         src = src[1:-1]
-    if re.match(r"https?://", src, re.I):
-        return src
+    if re.match(r"https?://", src, re.I) or not local:
+        return src                   # local=False — текст не из файла урока (ответ чата): файлов с компьютера не берём
+    if src.startswith(("\\\\", "//")):
+        return src                   # сетевой путь — не открываем (Windows пошла бы по SMB)
     rel = unquote(src)
     for cand in ([base / rel] if base is not None else []) + [Path(rel)]:
         try:
@@ -174,7 +176,7 @@ def _resolve_image(src: str, base: Path | None) -> str:
     return rel                       # файла нет — блок останется, суфлёр покажет «нет файла»
 
 
-def parse(text: str, base: Path | None, title: str) -> Template:
+def parse(text: str, base: Path | None, title: str, local_images: bool = True) -> Template:
     lines = text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
     t = Template(title=title)
     i = 0
@@ -276,7 +278,7 @@ def parse(text: str, base: Path | None, title: str) -> Template:
             slide_no = int(sm.group(1)) if sm else 0
             if sm:
                 cap = sm.group(2) or ""
-            blocks.append(Block(BLOCK_IMAGE, _resolve_image(im.group(2), base), title=cap, slide=slide_no))
+            blocks.append(Block(BLOCK_IMAGE, _resolve_image(im.group(2), base, local_images), title=cap, slide=slide_no))
             i += 1
             continue
         para.append(ln)

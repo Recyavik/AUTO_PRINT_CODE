@@ -4,17 +4,20 @@
 
 const esc = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#x27;");
 const BOLD = /\*\*(.+?)\*\*/g;
-const ITALIC = /(?<![\w*])\*(?!\s)(.+?)(?<!\s)\*(?![\w*])/g;
+// границы слова — по буквам любого алфавита, как \w в Python (scenario.md_html): превью и итог совпадают
+const ITALIC = /(?<![\p{L}\p{N}_*])\*(?!\s)(.+?)(?<!\s)\*(?![\p{L}\p{N}_*])/gu;
 const INLINE = /(`[^`\n]+`)|\[([^\]\n]+)\]\(((?:[^()\s]|\([^()\s]*\))+)\)|(https?:\/\/[^\s<>"'`]+)/g;
 // «\*», «\.», «\#»… — знак как есть (так правка «как в Word» хранит набранные звёздочки и «2024. Год»)
-const ESCAPED = /\\([\\`*_\[\]()#.+\-!>→~|{}])/g;
+// внутри `кода` обратная косая — как есть: код находится раньше экранирования (как в CommonMark)
+const ESCAPED_OR_CODE = /\\([\\`*_\[\]()#.+\-!>→~|{}•])|(`[^`\n]+`)/g;
 const SLOT = /\uE000(\d+)\uE001/g;
 
 const emph = (e) => e.replace(BOLD, "<b>$1</b>").replace(ITALIC, "<i>$1</i>");
 const link = (url, inner) => `<a href="${esc(url)}" target="_blank" rel="noopener">${inner}</a>`;
 
 export function inline(text) {
-  text = text.replace(ESCAPED, (_m, c) => "\uE000" + c.charCodeAt(0) + "\uE001");
+  text = text.replace(/[\uE000\uE001]/g, "")
+    .replace(ESCAPED_OR_CODE, (m, c, code) => (code !== undefined ? code : "\uE000" + c.charCodeAt(0) + "\uE001"));
   return inlineRaw(text).replace(SLOT, (_m, n) => esc(String.fromCharCode(+n)));
 }
 

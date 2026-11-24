@@ -162,7 +162,7 @@ def media_path(ref: str) -> Path | None:
     """Файл картинки блока. Относительный путь — от папки данных; абсолютный, которого больше нет (урок из
     прежней папки данных), — ищется по имени в data/media. None — адрес в интернете или файла нет."""
     ref = (ref or "").strip()
-    if not ref or _SCHEME.match(ref):
+    if not ref or _SCHEME.match(ref) or ref.startswith(("\\\\", "//")):
         return None
     p = Path(ref)
     cand = p if p.is_absolute() else DATA_DIR / p
@@ -464,6 +464,10 @@ def _block_from(d: dict) -> Block:
         b.minutes = max(0, min(24 * 60, int(b.minutes)))
     except (TypeError, ValueError):
         b.minutes = 0
+    try:
+        b.slide = max(0, min(9999, int(b.slide)))
+    except (TypeError, ValueError):
+        b.slide = 0
     if b.stage_kind not in STAGE_KINDS:
         b.stage_kind = ""
     return b

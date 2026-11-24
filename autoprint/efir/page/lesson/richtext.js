@@ -17,8 +17,11 @@ function italicStyle(n) { return !!(n.style && n.style.fontStyle === "italic"); 
 
 // маркер вокруг текста; пробелы по краям — снаружи («** a **» Markdown не поймёт)
 function wrap(mk, inner) {
-  const m = inner.match(/^(\s*)([\s\S]*?)(\s*)$/);
-  return m[2] ? m[1] + mk + m[2] + mk + m[3] : inner;
+  // по строкам: «**a\nb**» разбор не поймёт (он идёт строка за строкой) — «**a**\n**b**»
+  return inner.split("\n").map((line) => {
+    const m = line.match(/^(\s*)([\s\S]*?)(\s*)$/);
+    return m[2] ? m[1] + mk + m[2] + mk + m[3] : line;
+  }).join("\n");
 }
 
 // набранный текст — как есть: «x**2», «*», «`» не превращаются в разметку
@@ -119,7 +122,8 @@ function cleanNode(src, doc) {
     const st = (n.getAttribute("style") || "").toLowerCase();
     if (/mso-list:\s*ignore/.test(st) || /display:\s*none/.test(st)) continue;     // маркер списка Word, скрытое
     let tag = KEEP[n.tagName];
-    if (tag === "b" && /font-weight:\s*(normal|400)/.test(st)) tag = "";      // Google Docs: <b style="font-weight:normal">
+    // Google Docs: <b style="font-weight:normal"> — не жирный; Word: <b style="mso-bidi-font-weight:normal"> — жирный
+    if (tag === "b" && /^(normal|400|lighter)$/.test((n.style && n.style.fontWeight) || "")) tag = "";
     if (!tag && (n.tagName === "SPAN" || n.tagName === "FONT")) tag = boldStyle(n) ? "b" : italicStyle(n) ? "i" : "";
     if (n.tagName === "P" && /MsoListParagraph/i.test(n.className || "")) tag = "li";
     const inner = cleanNode(n, doc);

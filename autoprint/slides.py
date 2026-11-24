@@ -278,7 +278,10 @@ def from_pptx(path: str, pdf: str | None = None, minutes: int = DEFAULT_MINUTES,
     hidden = [s for s in slides if s["hidden"]]
     images: dict[int, str] = {}
     if pages:
-        if len(pages) == len(visible):
+        if len(pages) == len(slides) and hidden:
+            images = {s["n"]: pages[i][0] for i, s in enumerate(slides)}
+            hidden = []
+        elif len(pages) == len(visible):
             images = {s["n"]: pages[i][0] for i, s in enumerate(visible)}
             if hidden:
                 warns.append("Скрытые слайды " + ", ".join(str(s["n"]) for s in hidden) + " пропущены — их нет в PDF.")
@@ -324,7 +327,7 @@ def apply_chat_answer(t: Template, text: str) -> tuple[Template, list[str]]:
     md = md_answer(text)
     if md is None:
         raise ValueError("В ответе нет урока в Markdown — попросите нейросеть ответить блоком ~~~markdown, как в промпте.")
-    new = lesson_md.parse(md, None, t.title)
+    new = lesson_md.parse(md, None, t.title, local_images=False)
     if not any(b.type in (BLOCK_STAGE, BLOCK_MARKDOWN, BLOCK_IMAGE) for b in new.blocks):
         raise ValueError("В ответе нейросети пустой урок — ни этапов, ни заметок. Попросите ответить по промпту ещё раз.")
     have = {b.slide: b for b in t.blocks if b.type == BLOCK_IMAGE and b.slide}
@@ -332,10 +335,14 @@ def apply_chat_answer(t: Template, text: str) -> tuple[Template, list[str]]:
     used: list[int] = []
     missing: list[int] = []
     keep: list[Block] = []
+    foreign = 0
     for b in new.blocks:
         if b.type == BLOCK_IMAGE:
             m = re.fullmatch(r"slide:(\d+)", (b.text or "").strip())
             n = int(m.group(1)) if m else b.slide
+            if not n and not re.match(r"https?://", (b.text or "").strip(), re.I):
+                foreign += 1               # путь к файлу из ответа чата — не открываем
+                continue
             if n:
                 src = have.get(n)
                 if src is None:
@@ -346,6 +353,8 @@ def apply_chat_answer(t: Template, text: str) -> tuple[Template, list[str]]:
         keep.append(b)
     new.blocks = keep
     missing = list(dict.fromkeys(missing))
+    if foreign:
+        notes.append(f"Картинки из ответа с путями к файлам пропущены ({foreign}) — вставьте их сами.")
     if missing:
         notes.append(", ".join(f"Слайда {n}" if i == 0 else f"слайда {n}" for i, n in enumerate(missing))
                      + " нет в презентации — пропущено.")

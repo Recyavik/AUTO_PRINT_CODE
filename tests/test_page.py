@@ -226,6 +226,17 @@ class PageEditTest(Page):
                       " return window.__rt.toMarkdown(d); })()")
         self.assertIn("int 42", got)
 
+    def test_final_review_richtext(self):
+        md = "`a\\.b` и `\"C:\\\\Users\"`"
+        self.assertEqual(self.js(f"window.__rt.roundtrip({md!r})"), md)                  # внутри кода — как есть
+        word = "<p><b style='mso-bidi-font-weight:normal'>Жирный</b> обычный</p>"
+        got = self.js(f"(() => {{ const d = document.createElement('div'); d.innerHTML = window.__rt.cleanPaste({word!r});"
+                      " return window.__rt.toMarkdown(d); })()")
+        self.assertEqual(got, "**Жирный** обычный")                                     # жирный из Word остаётся
+        got = self.js("(() => { const d = document.createElement('div'); d.innerHTML = '<p><b>а<br>б</b></p>';"
+                      " return window.__rt.toMarkdown(d); })()")
+        self.assertEqual(got, "**а**\n**б**")                                           # по строкам — разбор поймёт
+
     def test_homework_copy_item(self):
         b = self.block("n4")
         b.role = "homework"
@@ -795,6 +806,16 @@ class PageSlidesTest(Page):
         self.win.store.templates[:] = [x for x in self.win.store.templates if x.id != new.id]
         self.win.lesson.publish()
         self.assertTrue(self.edge.wait(f"document.getElementById('titleText').textContent === '{self.t.title}'"))
+
+    def test_restore_keeps_slide_number(self):
+        self.mode("prep")
+        ids = lambda: [b.id for b in self.t.blocks]
+        self.js("document.querySelector('[data-id=sl3] .lbl').click()")
+        self.edge.key("Delete", "Delete", 46)
+        self.assertTrue(self.wait_py(lambda: "sl3" not in ids()))
+        self.js("document.querySelector('#toast button').click()")                       # «Вернуть»
+        self.assertTrue(self.wait_py(lambda: "sl3" in ids()))
+        self.assertEqual(self.t.find_block("sl3").slide, 3)                              # снова «Слайд 3», не картинка
 
     def test_clicker_quiet_with_modal(self):
         self.mode("lesson")

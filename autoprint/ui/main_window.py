@@ -560,6 +560,10 @@ class MainWindow(FramelessWindow):
     def new_from_presentation(self, path: str = "") -> Template | None:
         """«Новый урок → Из презентации…»: PDF или PowerPoint → урок по слайдам (заметки докладчика — плашками)."""
         from .import_dialog import pptx_lesson
+        if self.efir.live_webinar() is not None:
+            self._notify("Идёт эфир — урок из презентации подготовьте после него: импорт занимает до минуты, "
+                         "и программа на это время занята.", warn=True)
+            return None
         if not path:
             path, _ = QFileDialog.getOpenFileName(self, "Урок из презентации", "", "Презентация (*.pdf *.pptx)")
         if not path:
@@ -642,6 +646,7 @@ class MainWindow(FramelessWindow):
             d.activateWindow()
             return
         d = ImportDialog(self, self.settings, tab=tab, open_ai_settings=lambda: self.open_settings("ai"))
+        d.live_check = lambda: self.efir.live_webinar() is not None    # идёт эфир — презентации не импортируем
         d.accepted.connect(lambda: self._take_import(d))
         d.finished.connect(lambda _r: self._save_settings())   # запомнить выбор разбора
         self._import_dlg = d

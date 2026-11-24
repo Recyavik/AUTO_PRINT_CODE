@@ -82,6 +82,7 @@ class ImportDialog(QDialog):
         self.open_ai_settings = open_ai_settings      # «Подключить нейросеть…» — открыть ⚙ → Нейросеть
         self.result: list[Template] = []
         self.result_notes: list[str] = []        # замечания импорта (презентация: скрытые слайды, нет PDF)
+        self.live_check = lambda: False          # идёт эфир — презентации не импортируем (окно программы задаёт)
         self.result_style = ""
         self._paste_parsed: Template | None = None
         self._ai_parsed: L.Parsed | None = None
@@ -429,6 +430,9 @@ QScrollArea#importScroll, QScrollArea#importScroll > QWidget > QWidget {{ backgr
         for p in paths:
             if p.lower().endswith(".pdf") and Path(p).stem.lower() in pptx:
                 continue                         # PDF той же презентации — картинки к слайдам PPTX
+            if p.lower().endswith((".pdf", ".pptx")) and self.live_check():
+                errors.append(f"{Path(p).name}: идёт эфир — презентацию импортируйте после него")
+                continue
             try:
                 if p.lower().endswith(".pptx"):
                     t, warns = pptx_lesson(self, p, pdfs.get(Path(p).stem.lower()))

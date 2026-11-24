@@ -112,7 +112,7 @@ def _new_block(d) -> Block:
         raise ValueError("Неверный тип блока")
     b = _block_from({k: v for k, v in d.items() if k in Block.__dataclass_fields__})
     # поля, которые задаёт страница, — с той же проверкой, что и при правке
-    for key in ("text", "title", "role", "lang", "profile", "minutes", "stage_kind", "part", "steps", "sel"):
+    for key in ("text", "title", "role", "lang", "profile", "minutes", "stage_kind", "part", "steps", "sel", "slide"):
         if key in d and key in _FIELDS[b.type]:
             setattr(b, key, _field(b, key, d[key]))
     if b.type == BLOCK_MARKDOWN and b.role not in ROLES:

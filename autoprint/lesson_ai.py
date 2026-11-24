@@ -960,11 +960,14 @@ def md_answer(text: str) -> str | None:
 def _parse_md_answer(md: str, title: str, slide) -> Parsed:
     """Ответ своего чата — урок в Markdown: слайды «slide:N» — картинками из PDF материала (slide(N))."""
     from . import lesson_md
-    t = lesson_md.parse(md, None, title or "Урок от нейросети")
+    t = lesson_md.parse(md, None, title or "Урок от нейросети", local_images=False)
     warnings: list[str] = []
     keep = []
     for b in t.blocks:
         m = re.fullmatch(r"slide:(\d+)", (b.text or "").strip()) if b.type == BLOCK_IMAGE else None
+        if b.type == BLOCK_IMAGE and not m and not re.match(r"https?://", (b.text or "").strip(), re.I):
+            warnings.append("Картинка с путём к файлу пропущена — вставьте её сами.")
+            continue
         if m:
             n = int(m.group(1))
             path = slide(n) if slide else None

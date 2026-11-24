@@ -491,6 +491,9 @@ class EfirController(QObject):
         self.brk_seq += 1
         self.mode = MODE_BREAK
         if self.store.live:
+            if self.store.slide is not None:
+                self.store.slide = None
+            self.slide = None
             self.store.set_break({"ends_at": self.brk_ends, "total": self.brk_total, "seq": self.brk_seq})
         self.publish()
         if self.clients <= 0:

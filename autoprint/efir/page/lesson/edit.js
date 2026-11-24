@@ -42,7 +42,7 @@ export function undo() {
 export function snapshot(it) {
   return { id: it.id, type: it.type, text: it.text || "", title: it.title || "", role: it.role || "text",
     lang: it.lang || "python", steps: it.steps || [], sel: it.sel || [], profile: it.profile || "",
-    minutes: it.minutes || 0, stage_kind: it.kind || "", part: it.part || "" };
+    minutes: it.minutes || 0, stage_kind: it.kind || "", part: it.part || "", slide: it.slide || 0 };
 }
 
 function prevId(id) {
@@ -273,9 +273,9 @@ export function beginNote(n, it, caretAtEnd = true) {
     ansBox.appendChild(add);
     box.appendChild(ansBox);
   } else if (role === "term") {
-    const [head, ...rest] = text.trim().split("\n");
+    const [head, ...rest] = text.replace(/\s+$/, "").split("\n");
     termIn = el("input", "termin");
-    termIn.value = text.trim() ? head.trim() : "";
+    termIn.value = head.trim();
     termIn.placeholder = "Термин";
     termIn.setAttribute("aria-label", "Термин");
     box.appendChild(termIn);

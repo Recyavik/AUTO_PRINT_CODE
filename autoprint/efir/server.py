@@ -305,6 +305,8 @@ class _Handler(BaseHTTPRequestHandler):
             owner._on_command(data)
             return self._json({"ok": True})
         if path == "/report":
+            if data.get("type") == "key" and not self._origin_ok():
+                return self._json({"ok": False}, 403)      # листать слайды может только своя вкладка учеников
             owner._on_report(data)
             return self._json({"ok": True})
         if path == "/pick":

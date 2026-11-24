@@ -894,5 +894,103 @@ class ParserFixTest(unittest.TestCase):
         self.assertIn('href="https://ru.wikipedia.org/wiki/Python_(язык)"', md_html("[В](https://ru.wikipedia.org/wiki/Python_(язык))"))
 
 
+# ================================================================ Task 16: итоговое ревью
+
+class FinalReviewTest(unittest.TestCase):
+    def test_code_spans_stay_literal(self):
+        from autoprint.scenario import md_html
+        self.assertEqual(md_html("`a\\.b`"), "<p><code>a\\.b</code></p>")
+        self.assertEqual(md_html('`"C:\\\\Users"`'), "<p><code>&quot;C:\\\\Users&quot;</code></p>")
+        self.assertEqual(md_html("x\\*\\*2 и `y**2`"), "<p>x**2 и <code>y**2</code></p>")
+        self.assertEqual(md_html("\\• пункт"), "<p>• пункт</p>")
+        md_html("\ue0009999999\ue001 текст")                     # подобранный текст не роняет публикацию
+
+    def test_italic_unicode_words(self):
+        from autoprint.scenario import md_html
+        self.assertEqual(md_html("*при*вет"), "<p>*при*вет</p>")    # как и на странице (md.js)
+
+    def test_block_slide_coerced(self):
+        from autoprint import lesson_edit
+        b = storage._block_from({"type": "image", "text": "x.png", "slide": "x"})
+        self.assertEqual(b.slide, 0)
+        t = Template("У", [stage("A", 5, id="s1")], id="T")
+        with self.assertRaises(ValueError):
+            lesson_edit.apply(t, [{"op": "insert", "after": "s1",
+                                   "block": {"id": "img1", "type": "image", "text": "a.png", "slide": "x"}}])
+        lesson_edit.apply(t, [{"op": "restore", "after": "s1",
+                               "block": {"id": "img2", "type": "image", "text": "a.png", "slide": 4}}])
+        self.assertEqual(t.find_block("img2").slide, 4)
+
+    def test_chat_answer_no_local_files(self):
+        from autoprint import lesson_ai as L
+        from autoprint import slides
+        secret = TMP / "secret.txt"
+        secret.write_text("секрет", encoding="utf-8")
+        text = (f"~~~markdown\n## Э · 30 мин\n\n![x]({secret.as_posix()})\n\n![y](//evil-host/share/p.png)\n\n"
+                "![Слайд 1](slide:1)\n\n> [!say]\n> Текст\n~~~")
+        new, notes = slides.apply_chat_answer(slides_lesson(), text)
+        imgs = [b.text for b in new.blocks if b.type == BLOCK_IMAGE]
+        self.assertEqual(len(imgs), 1)                                  # только слайд 1
+        self.assertFalse(any("secret" in x or "evil" in x for x in imgs))
+        self.assertTrue(any("картинк" in n.lower() for n in notes), notes)
+        parsed = L.parse_lesson(text, slide=lambda n: None)
+        self.assertFalse(any(b.type == BLOCK_IMAGE for b in parsed.template.blocks))
+        self.assertIsNone(storage.media_path("//evil-host/share/p.png"))
+        self.assertIsNone(storage.media_path("\\\\evil-host\\share\\p.png"))
+
+    def test_hidden_slides_in_pdf_too(self):
+        from autoprint import slides
+        deck = make_pptx(TMP / "allpages.pptx", [{"file": 1, "title": "Один"}, {"file": 2, "title": "Два", "hidden": True},
+                                                 {"file": 3, "title": "Три"}])
+        pdf = make_pdf(TMP / "allpages.pdf", ["Один", "Два", "Три"])
+        t, warns, _ = slides.from_pptx(deck, pdf=pdf)
+        self.assertEqual([b.slide for b in t.blocks if b.type == BLOCK_IMAGE and b.text], [1, 2, 3])
+        self.assertEqual(warns, [])
+
+
+class FinalReviewWindowTest(Base):
+    port = 18982
+
+    def setUp(self):
+        self.L = slides_lesson("L")
+        self.win = make_window([self.L], port=self.port)
+        self.win.lesson.open_page = lambda: None
+        self.win.printer.set_focus("L")
+
+    def test_import_refused_while_live(self):
+        self.win.lesson.command({"cmd": "start"})
+        self.assertIsNone(self.win.new_from_presentation(make_pdf(TMP / "live.pdf", ["Один"])))
+        self.assertEqual(len(self.win.store.templates), 1)
+
+    def test_break_clears_slide(self):
+        ef = self.win.efir
+        self.win.lesson.command({"cmd": "start"})
+        self.win.lesson.command({"cmd": "slide", "block": "sl2"})
+        self.assertIsNotNone(ef.store.slide)
+        ef.start_break(5)
+        self.assertIsNone(ef.store.slide)                               # после перезапуска не вернётся старый слайд
+
+    def test_report_key_needs_own_origin(self):
+        import urllib.request
+        ef = self.win.efir
+        ef.ensure_server()
+        port = ef.server.port
+
+        def post(origin):
+            req = urllib.request.Request(f"http://127.0.0.1:{port}/report", data=b'{"type": "key", "key": "PageDown"}',
+                                         headers={"Content-Type": "text/plain", "Origin": origin}, method="POST")
+            try:
+                urllib.request.urlopen(req, timeout=5).read()
+            except Exception:  # noqa: BLE001 — отказ — тоже ответ
+                pass
+        from test_v10 import call_in_thread
+        call_in_thread(lambda: post("https://evil.example"))
+        pump(200)
+        self.assertNotEqual(ef.mode, "slide")                           # чужой сайт слайды не листает
+        call_in_thread(lambda: post(f"http://127.0.0.1:{port}"))
+        pump(200)
+        self.assertEqual(ef.mode, "slide")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
