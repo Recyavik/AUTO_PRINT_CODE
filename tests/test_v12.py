@@ -697,5 +697,144 @@ class WebImagesTest(unittest.TestCase):
             self.assertFalse(web_images.is_local_url(u), u)
 
 
+# ================================================================ Task 10: «Урок через нейросеть»
+
+ANSWER_PLAN = """Вот урок:
+
+~~~markdown
+---
+title: Функции
+---
+
+> [!goal]
+> Ученики пишут функцию.
+
+## Приветствие · 5 мин
+
+> [!say]
+> Здравствуйте!
+
+## Теория · 20 мин
+
+![Слайд 2](slide:2)
+
+![Кот у ноутбука](https://ex.org/cat.png)
+
+![Схема функции](фото)
+
+```python
+def f(x):
+    return x
+```
+
+## Перерыв · 10 мин · перерыв
+~~~
+"""
+
+
+class ImportLessonTest(unittest.TestCase):
+    def dialog(self, plans_=(), exercises=lambda plan: []):
+        from autoprint.ui.import_dialog import TAB_LESSON, ImportDialog
+        d = ImportDialog(None, storage.Settings(), tab=TAB_LESSON, plans=list(plans_), exercises=exercises)
+        d.lesson_page.fetch = lambda t, **kw: []                                   # сеть не трогаем
+        self.addCleanup(lambda: (d.close(), d.deleteLater()))
+        return d
+
+    def test_copy_prompt_with_plan_and_class(self):
+        from PySide6.QtGui import QGuiApplication
+        p = plan90()
+        d = self.dialog([p], exercises=lambda plan: ["Глаза"] if plan is p else [])
+        s = d.settings
+        pg = d.lesson_page
+        pg.plan_combo.setCurrentIndex(pg.plan_combo.findData("P"))
+        pg.class_edit.setText("5 класс")
+        self.assertTrue(pg.copy_btn.isEnabled())                                  # без материала — можно
+        self.assertTrue(pg.minutes_row.isHidden())                                # минуты — из плана
+        pg.copy_prompt()
+        txt = QGuiApplication.clipboard().text()
+        self.assertIn("## Теория · 20 мин", txt)
+        self.assertIn("5 класс", txt)
+        self.assertIn("«Глаза»", txt)
+        self.assertEqual((s.lesson_plan, s.lesson_class), ("P", "5 класс"))
+        self.assertEqual(d.tabs.value(), "lesson")
+
+    def test_answer_preview_and_add_links_plan(self):
+        p = plan90()
+        d = self.dialog([p])
+        pg = d.lesson_page
+        pg.plan_combo.setCurrentIndex(pg.plan_combo.findData("P"))
+        pg.answer_edit.setPlainText(ANSWER_PLAN)
+        pump(400)
+        info = pg.info.text()
+        for part in ("по плану «Онлайн 90»", "Слайды: 1", "Фото по ссылкам: 1", "Нужно вставить: 1",
+                     "«Практика» в ответе пустой"):
+            self.assertIn(part, info)
+        self.assertFalse(pg.slides_btn.isHidden())                                # слайд без картинки — подставить
+        self.assertTrue(d.add_btn.isEnabled())
+        d._add()
+        self.assertTrue(wait(lambda: bool(d.result)))
+        t = d.result[0]
+        self.assertEqual(t.plan_id, "P")
+        self.assertEqual([b.link for b in stages_of(t)], ["p1", "p2", "p3", "p4"])
+        self.assertTrue(any("пустой" in n for n in d.result_notes))
+
+    def test_close_while_downloading_adds_nothing(self):
+        d = self.dialog([plan90()])
+        started = []
+
+        def slow(t, cancel=None, progress=None, **kw):
+            started.append(1)
+            cancel.wait(5)
+            return []
+        d.lesson_page.fetch = slow
+        d.lesson_page.answer_edit.setPlainText(ANSWER_PLAN)
+        pump(400)
+        d._add()
+        self.assertTrue(wait(lambda: bool(started)))
+        self.assertIn("Скачиваю картинки", d.status.text())
+        d.reject()
+        pump(300)
+        self.assertEqual(d.result, [])
+
+    def test_skip_download_adds_lesson(self):
+        d = self.dialog([plan90()])
+
+        def slow(t, cancel=None, progress=None, **kw):
+            cancel.wait(5)
+            return ["Не скачалось: 1 — эти картинки покажутся из интернета."]
+        d.lesson_page.fetch = slow
+        d.lesson_page.answer_edit.setPlainText(ANSWER_PLAN)
+        pump(400)
+        d._add()
+        self.assertTrue(wait(lambda: d.lesson_page.downloading()))
+        d.lesson_page.skip_download()
+        self.assertTrue(wait(lambda: bool(d.result)))
+        self.assertTrue(any("Не скачалось" in n for n in d.result_notes))
+
+    def test_code_tab_has_no_scenario(self):
+        from autoprint import lesson_ai as L
+        from autoprint.ui.import_dialog import TAB_AI, ImportDialog
+        s = storage.Settings()
+        s.lesson_style = L.STYLE_SCENARIO                                          # 0.11 запомнил сценарий
+        d = ImportDialog(None, s, tab=TAB_AI)
+        try:
+            self.assertNotIn(L.STYLE_SCENARIO, d.style_seg.buttons)
+            self.assertEqual(d.style_seg.value(), L.STYLE_STEPS)
+        finally:
+            d.close()
+            d.deleteLater()
+
+    def test_library_button_opens_lesson_tab(self):
+        win = window([plan90()], 18912)
+        try:
+            win.library.btn_ai.click()
+            pump(100)
+            self.assertEqual(win._import_dlg.tabs.value(), "lesson")
+            self.assertEqual([x.id for x in win._import_dlg.lesson_page.plans], ["P"])
+            win._import_dlg.close()
+        finally:
+            close(win)
+
+
 if __name__ == "__main__":
     unittest.main()

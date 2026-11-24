@@ -1,8 +1,10 @@
 """«Импорт урока»: из файла, вставкой или с помощью нейросети.
 
 - «Из файла» — .ipynb, .md, .py, .json (перетащить или выбрать);
-- «Вставить» — код, Markdown с ```-блоками, тетрадка Jupyter или ответ нейросети (JSON): что это — видно сразу;
-- «С помощью нейросети» — код или задание с решением → нейросеть раскладывает его в урок: с комментариями
+- «Вставить» — код, Markdown с ```-блоками, тетрадка Jupyter или ответ нейросети: что это — видно сразу;
+- «Урок через нейросеть» — план, класс, «Скопировать промпт» в свой чат (или встроенная нейросеть) → урок по
+  плану со слайдами, фото и местами для картинок (import_lesson.py);
+- «Код через нейросеть» — код или задание с решением → нейросеть раскладывает его в урок: с комментариями
   для преподавателя, по шагам или по частям. Подключённая нейросеть (⚙ → Нейросеть) отвечает сама; без неё —
   «Скопировать промпт» в свой чат (ChatGPT, Claude…) и вставить ответ обратно.
 
@@ -25,11 +27,13 @@ from .. import ai, lesson_ai as L, materials
 from ..highlighter import LANGUAGES
 from ..importers import FILE_EXTS, FILE_FILTER, load_file, parse_pasted
 from ..storage import Settings, Template
+from .import_lesson import LessonAIPage, _Job
 from .theme import theme
 from .widgets import Card, Note, Row, Segmented, Switch, Toast, accent_button, button, group_title, hsep, label, \
     page_header
 
-TAB_FILE, TAB_PASTE, TAB_AI = "file", "paste", "ai"
+TAB_FILE, TAB_PASTE, TAB_AI, TAB_LESSON = "file", "paste", "ai", "lesson"
+CODE_STYLES = (L.STYLE_COMMENTS, L.STYLE_STEPS, L.STYLE_PARTS)      # «Код через нейросеть»: сценарий — на своей вкладке
 
 
 def pptx_lesson(parent, path: str, pdf: str | None = None) -> tuple[Template, list[str]]:
@@ -64,17 +68,9 @@ SCENARIO_PLACEHOLDER = ("Вставьте методичку, план урок�
                         "PowerPoint (.pptx). Нейросеть разложит урок по этапам: что сказать, спросить, показать.")
 
 
-class _Job(QObject):
-    """Запрос к нейросети в фоновом потоке; сигналы приходят в поток окна."""
-    status = Signal(str)         # кто отвечает
-    progress = Signal(str, int, str)   # фаза (connect | think | write), знаков, хвост ответа
-    done = Signal(str, str)      # ответ, кто ответил
-    failed = Signal(str)
-
-
 class ImportDialog(QDialog):
     def __init__(self, parent=None, settings: Settings | None = None, tab: str = TAB_FILE,
-                 open_ai_settings=None) -> None:
+                 open_ai_settings=None, plans=(), exercises=None) -> None:
         super().__init__(parent)
         self.setWindowTitle("Импорт урока")
         self.setModal(False)   # из окна можно открыть ⚙ → Нейросеть и вернуться
@@ -97,7 +93,8 @@ class ImportDialog(QDialog):
         root.addWidget(page_header("Импорт урока", "Из файла, вставкой из буфера обмена или с помощью нейросети: "
                                    "она разложит код в урок с подсказками для преподавателя."))
         root.addSpacing(14)
-        self.tabs = Segmented([(TAB_FILE, "Из файла"), (TAB_PASTE, "Вставить"), (TAB_AI, "С помощью нейросети")])
+        self.tabs = Segmented([(TAB_FILE, "Из файла"), (TAB_PASTE, "Вставить"), (TAB_LESSON, "Урок через нейросеть"),
+                               (TAB_AI, "Код через нейросеть")])
         self.tabs.changed.connect(self._show_tab)
         root.addWidget(self.tabs, 0, Qt.AlignmentFlag.AlignLeft)
         # разбор вставленного — с небольшой задержкой после последнего изменения (до страниц: им нужны таймеры)
@@ -105,7 +102,12 @@ class ImportDialog(QDialog):
         self._answer_timer = QTimer(self, singleShot=True, interval=250, timeout=self._parse_answer)
         root.addSpacing(14)
         self.stack = QStackedWidget()
-        self.pages = {TAB_FILE: self._page_file(), TAB_PASTE: self._page_paste(), TAB_AI: self._page_ai()}
+        self.lesson_page = LessonAIPage(self.settings, plans, exercises, notify=self._notify,
+                                        open_ai_settings=open_ai_settings, live_check=lambda: self.live_check())
+        self.lesson_page.changed.connect(self._lesson_state)
+        self.lesson_page.status_text.connect(self._lesson_status)
+        self.pages = {TAB_FILE: self._page_file(), TAB_PASTE: self._page_paste(), TAB_LESSON: self.lesson_page,
+                      TAB_AI: self._page_ai()}
         for p in self.pages.values():
             self.stack.addWidget(p)
         root.addWidget(self.stack, 1)
@@ -121,6 +123,11 @@ class ImportDialog(QDialog):
         self.status = label("", "importStatus", wrap=True)
         self.status.setTextFormat(Qt.TextFormat.PlainText)
         nav.addWidget(self.status, 3)
+        self.skip_btn = button("Пропустить", quiet=True)          # скачивание фото: добавить урок сразу
+        self.skip_btn.setToolTip("Добавить урок сейчас: недокачанные фото останутся ссылками из интернета")
+        self.skip_btn.clicked.connect(self.lesson_page.skip_download)
+        self.skip_btn.hide()
+        nav.addWidget(self.skip_btn)
         self.add_btn = accent_button("Добавить урок", "plus")
         self.add_btn.clicked.connect(self._add)
         nav.addWidget(self.add_btn)
@@ -212,8 +219,8 @@ class ImportDialog(QDialog):
 
         lay.addWidget(group_title("2. Как разложить"))
         c = Card()
-        self.style_seg = Segmented([(k, v) for k, v in L.STYLES.items()])
-        self.style_seg.set_value(s.lesson_style if s.lesson_style in L.STYLES else L.STYLE_STEPS)
+        self.style_seg = Segmented([(k, v) for k, v in L.STYLES.items() if k in CODE_STYLES])
+        self.style_seg.set_value(s.lesson_style if s.lesson_style in CODE_STYLES else L.STYLE_STEPS)
         self.style_hint = label("", "rowSub", wrap=True)
         self.style_seg.changed.connect(self._style_changed)
         c.add(Row("layers", "Разбор", "", [self.style_seg]))
@@ -348,10 +355,35 @@ QScrollArea#importScroll, QScrollArea#importScroll > QWidget > QWidget {{ backgr
         self.resize(w, h)
 
     # ------------------------------------------------------------ вкладки и состояние
+    def _notify(self, text: str, warn: bool = False) -> None:
+        self.toast.show_message(text, warn=warn, ms=7000)
+
+    def _lesson_state(self) -> None:
+        if self.tabs.value() != TAB_LESSON:
+            return
+        busy = self.lesson_page.downloading()
+        self.add_btn.setEnabled(self.lesson_page.ready())
+        self.skip_btn.setVisible(busy)
+
+    def _lesson_status(self, text: str) -> None:
+        if self.tabs.value() == TAB_LESSON:
+            self.status.setText(text)
+
+    def _lesson_added(self, t: Template, notes: list[str]) -> None:
+        self.result = [t]
+        self.result_notes = notes
+        self.result_style = ""
+        self.skip_btn.hide()
+        self.accept()
+
     def _show_tab(self, key) -> None:
         self.stack.setCurrentWidget(self.pages[key])
         self.add_btn.setVisible(key != TAB_FILE)
-        if key == TAB_AI:
+        self.skip_btn.setVisible(key == TAB_LESSON and self.lesson_page.downloading())
+        if key == TAB_LESSON:
+            self.lesson_page.reparse()
+            self._lesson_state()
+        elif key == TAB_AI:
             self._update_ai_buttons()
             self._parse_answer()
         elif key == TAB_PASTE:
@@ -515,8 +547,9 @@ QScrollArea#importScroll, QScrollArea#importScroll > QWidget > QWidget {{ backgr
         self._material_pdf = m.pdf
         self._slides.clear()
         self.material.setPlainText(m.text)
-        if m.pages and self.style_seg.value() != L.STYLE_SCENARIO and Path(path).suffix.lower() in (".pdf", ".pptx"):
-            self.toast.show_message("Похоже на методичку или презентацию — для неё подойдёт «Сценарий урока».", ms=6000)
+        if m.pages and Path(path).suffix.lower() in (".pdf", ".pptx"):
+            self.toast.show_message("Похоже на методичку или презентацию — для неё вкладка «Урок через нейросеть».",
+                                    ms=6000)
 
     def _slide(self, n: int) -> str | None:
         """Картинка слайда N материала (PDF) → файл в данных программы."""
@@ -670,6 +703,10 @@ QScrollArea#importScroll, QScrollArea#importScroll > QWidget > QWidget {{ backgr
     # ------------------------------------------------------------ итог
     def _add(self) -> None:
         key = self.tabs.value()
+        if key == TAB_LESSON:
+            if self.lesson_page.ready():
+                self.lesson_page.start_add(self._lesson_added)
+            return
         if key == TAB_PASTE and self._paste_parsed is not None:
             self.result = [self._paste_parsed]
             t = self._paste_parsed
@@ -685,6 +722,7 @@ QScrollArea#importScroll, QScrollArea#importScroll > QWidget > QWidget {{ backgr
     def reject(self) -> None:
         if self._cancel is not None:
             self._cancel.set()
+        self.lesson_page.close_page()           # «Закрыть»: скачивание фото и нейросеть — отменить, урок не добавлять
         super().reject()
 
     def changeEvent(self, e) -> None:

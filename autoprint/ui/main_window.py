@@ -237,7 +237,7 @@ class MainWindow(FramelessWindow):
         self.library.new_structure.connect(self._new_from_menu)
         self.library.plans_provider = lambda: [(p.id, p.title) for p in self.store.plans()]
         self.library.import_requested.connect(lambda: self.import_files())
-        self.library.ai_requested.connect(lambda: self.import_files("ai"))
+        self.library.ai_requested.connect(lambda: self.import_files("lesson"))
         self.library.update_clicked.connect(self.open_update_dialog)
         root.addWidget(self.library, 1)
         self.print_bar = PrintBar(self.printer)
@@ -260,7 +260,7 @@ class MainWindow(FramelessWindow):
         m.addSeparator()
         m.addAction(icons.icon("plus"), "Новый урок\tCtrl+N", self.new_template)
         m.addAction(icons.icon("import"), "Импорт…\tCtrl+O", lambda: self.import_files())
-        m.addAction(icons.icon("sparkles"), "Урок из методички (нейросеть)…", lambda: self.import_files("ai"))
+        m.addAction(icons.icon("sparkles"), "Урок через нейросеть…", lambda: self.import_files("lesson"))
         t = self._selected()
         if t is not None:
             self._export_menu(m.addMenu(icons.icon("export"), "Экспорт урока"), t)
@@ -795,7 +795,8 @@ class MainWindow(FramelessWindow):
             d.raise_()
             d.activateWindow()
             return
-        d = ImportDialog(self, self.settings, tab=tab, open_ai_settings=lambda: self.open_settings("ai"))
+        d = ImportDialog(self, self.settings, tab=tab, open_ai_settings=lambda: self.open_settings("ai"),
+                         plans=self.store.plans(), exercises=self.exercise_titles)
         d.live_check = lambda: self.efir.live_webinar() is not None    # идёт эфир — презентации не импортируем
         d.accepted.connect(lambda: self._take_import(d))
         d.finished.connect(lambda _r: self._save_settings())   # запомнить выбор разбора

@@ -867,36 +867,40 @@ class ImportTest(unittest.TestCase):
         self.addCleanup(d.close)
         return d
 
+    def lesson_tab(self):
+        """0.12: сценарий урока — на своей вкладке «Урок через нейросеть»."""
+        from autoprint.storage import Settings
+        from autoprint.ui.import_dialog import TAB_LESSON, ImportDialog
+        d = ImportDialog(None, Settings(), tab=TAB_LESSON)
+        self.addCleanup(d.close)
+        return d
+
     def test_scenario_options(self):
         from autoprint import lesson_ai as L
-        d = self.dialog()
-        d.style_seg.set_value(L.STYLE_SCENARIO)
-        d._style_changed(L.STYLE_SCENARIO)
-        d.minutes_spin.setValue(80)
-        d.break_spin.setValue(10)
-        d.material.setPlainText("x\n" * 400)               # большой текст — но это методичка, не разметка кода
-        o = d._options()
+        d = self.lesson_tab()
+        pg = d.lesson_page
+        pg.plan_combo.setCurrentIndex(pg.plan_combo.findData(""))      # без плана — минуты и перерыв
+        pg.minutes_spin.setValue(80)
+        pg.break_spin.setValue(10)
+        pg.material.setPlainText("x\n" * 400)               # большой текст — но это методичка, не разметка кода
+        o = pg.options()
         self.assertEqual((o.style, o.minutes, o.break_min, o.marks), (L.STYLE_SCENARIO, 80, 10, False))
-        self.assertTrue(d.row_keep.isHidden() and d.row_task.isHidden())
-        self.assertFalse(d.scenario_row.isHidden())
-        d.style_seg.set_value(L.STYLE_STEPS)
-        d._style_changed(L.STYLE_STEPS)
-        self.assertFalse(d.row_keep.isHidden())
-        self.assertTrue(d.scenario_row.isHidden())
+        self.assertFalse(pg.minutes_row.isHidden())
+        c = self.dialog()                                   # «Код через нейросеть»: про код, без сценария
+        self.assertFalse(c.row_keep.isHidden())
+        self.assertTrue(c.scenario_row.isHidden())
 
     def test_material_from_pdf_and_slides(self):
-        from autoprint import lesson_ai as L
         from autoprint.storage import DATA_DIR
-        d = self.dialog()
-        d.style_seg.set_value(L.STYLE_SCENARIO)
-        d._style_changed(L.STYLE_SCENARIO)
+        d = self.lesson_tab()
+        pg = d.lesson_page
         pdf = make_pdf(TMP / "lesson3.pdf", ["Цель урока", "Правила", "Пример YouTube"])
-        d.load_material(str(pdf))
-        self.assertIn("=== Страница 3 ===", d.material.toPlainText())
-        d.answer_edit.setPlainText(SCENARIO_ANSWER)
-        d._parse_answer()
-        self.assertIsNotNone(d._ai_parsed)
-        t = d._ai_parsed.template
+        pg.load_material(str(pdf))
+        self.assertIn("=== Страница 3 ===", pg.material.toPlainText())
+        pg.answer_edit.setPlainText(SCENARIO_ANSWER)
+        pg.reparse()
+        self.assertIsNotNone(pg.parsed())
+        t = pg.parsed()[0]
         img = next(b for b in t.blocks if b.type == BLOCK_IMAGE)
         from autoprint.storage import media_path
         self.assertTrue(img.text.startswith("media/"), img.text)

@@ -670,14 +670,13 @@ class ChatPromptTest(unittest.TestCase):
     def test_dialog_copy_enabled_without_material(self):
         from PySide6.QtGui import QGuiApplication
         from autoprint import lesson_ai as L
-        from autoprint.ui.import_dialog import TAB_AI, ImportDialog
+        from autoprint.ui.import_dialog import TAB_LESSON, ImportDialog
         s = storage.Settings()
         s.lesson_style = L.STYLE_SCENARIO
-        d = ImportDialog(None, s, tab=TAB_AI)
+        d = ImportDialog(None, s, tab=TAB_LESSON)          # 0.12: урок — на вкладке «Урок через нейросеть»
         try:
-            d._update_ai_buttons()
-            self.assertTrue(d.copy_btn.isEnabled())
-            d._copy_prompt()
+            self.assertTrue(d.lesson_page.copy_btn.isEnabled())
+            d.lesson_page.copy_prompt()
             self.assertIn("приложен к сообщению", QGuiApplication.clipboard().text())
         finally:
             d.close()

@@ -38,6 +38,10 @@ CODE = "import statistics\n\ngrades = [5, 4, 3]\naverage = sum(grades) / len(gra
 def test_prompt() -> None:
     for style in L.STYLES:
         p = L.build_prompt(CODE, L.Options(style=style))
+        if style == L.STYLE_SCENARIO:        # 0.12: урок — в Markdown, как в своём чате
+            check(f"промпт «{L.STYLES[style]}»: формат урока в Markdown, пример и материал",
+                  "~~~markdown" in p and CODE in p and "Пример ответа" in p and "## Название этапа · 10 мин" in p)
+            continue
         check(f"промпт «{L.STYLES[style]}»: правила стиля, формат, пример и материал",
               L.FORMAT in p and CODE in p and L._STYLE_RULES[style].split("\n")[0] in p and "Пример ответа" in p)
     p = L.instruction(L.Options(keep_code=True, task=False, explain=False))
