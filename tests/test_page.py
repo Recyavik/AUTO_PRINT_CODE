@@ -541,7 +541,7 @@ class PageV11Test(Page):
             pump(1500)
             self.assertEqual(self.js("document.querySelectorAll('.stage.collapsed').length"), 0)
             self.assertEqual(self.js("scrollY"), y0)
-            self.assertEqual(self.js("document.querySelector('#st-s2 .left .lbl2').textContent"), "Сейчас · осталось")
+            self.assertEqual(self.js("document.querySelector('#st-s2 .left .lbl2').textContent"), "Сейчас")   # время — в строке плана
             self.assertEqual(self.js("document.querySelector('#st-s3 .left .lbl2').textContent"), "")   # без «через»
         finally:
             self.stop_live()
@@ -587,8 +587,8 @@ class PageV11Test(Page):
         opened = []
         ef.open_tab = lambda: opened.append(1)
         self.mode("lesson")
-        chip = "document.querySelector('#tools .scrchip')"
-        btn = "[...document.querySelectorAll('#tools button')].find(b => b.textContent.trim() === '{}')"
+        chip = "document.querySelector('#strip .scrchip')"
+        btn = "[...document.querySelectorAll('header button')].find(b => b.textContent.trim() === '{}')"
         try:
             self.assertTrue(self.edge.wait(f"!!{chip} && {chip}.textContent.includes('Экран учеников не открыт')"))
             self.js(btn.format("Перерыв") + ".click()")
@@ -663,6 +663,9 @@ class PageV11Test(Page):
             self.go_live(6)
             self.assertTrue(self.edge.wait("document.querySelector('#strip .cur') && "
                                            "document.querySelector('#strip .cur').textContent.includes('Разбор')"))
+            self.assertEqual(self.js("getComputedStyle(document.getElementById('strip')).display"), "flex")
+            self.assertGreater(self.js("document.querySelector('#strip .cur').getBoundingClientRect().height"), 0)
+            self.assertGreater(self.js("document.querySelector('#strip .scrchip').getBoundingClientRect().height"), 0)
             self.assertIn("Приветствие", self.js("document.querySelector('#strip .prev').textContent"))
             self.assertIn("Итоги", self.js("document.querySelector('#strip .next').textContent"))
             self.assertIn("конец", self.js("document.querySelector('#strip').textContent"))
@@ -710,7 +713,7 @@ class PageSlidesTest(Page):
         self.js("document.querySelector('[data-id=sl2] .toscreen').click()")
         self.assertTrue(self.wait_py(lambda: self.shown() == "sl2"))
         self.assertTrue(self.edge.wait("!!document.querySelector('.blk.onscreen[data-id=sl2]')"))
-        self.assertTrue(self.edge.wait("document.querySelector('#tools .scrchip').textContent.includes('слайд 2')"))
+        self.assertTrue(self.edge.wait("document.querySelector('#strip .scrchip').textContent.includes('слайд 2')"))
         self.win.efir.show_background()
 
     def test_paste_answer_box(self):

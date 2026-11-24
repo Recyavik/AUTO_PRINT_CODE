@@ -51,6 +51,7 @@ def main() -> int:
     s.samples_seen = ["steps_v1", "tour_v1", "lesson_v1", "lesson_v2", "lesson_v3"]
     s.migrations = ["tray_v1", "window_v10", "roles_v10", "samples_v10"]
     s.update_auto_check = False
+    s.start_timer = True              # для снимка таймера: «Начать урок» открывает и мини-таймер
     win = MainWindow(s, store)
     win.resize(520, 480)
     win.show()
@@ -89,12 +90,35 @@ def main() -> int:
             e.eval(f"document.querySelector('.seg.modes button:{'first' if m == 'prep' else 'last'}-child').click()")
             pump(400)
 
-        # Подготовка: заметки и код рядом, правка на месте
+        def shot_menu(name: str) -> bool:
+            # clip снимка — в координатах документа, а getBoundingClientRect — окна: прибавить прокрутку
+            pump(300)
+            r = e.eval("(() => { const m = document.querySelector('.menu'); if (!m) return null; const r = m.getBoundingClientRect();"
+                       " return {x: r.left + scrollX, y: r.top + scrollY, w: r.width, h: r.height}; })()")
+            if not r or not r["h"]:
+                print("меню не открылось:", name)
+                return False
+            shot(name, {"x": max(0, r["x"] - 16), "y": max(0, r["y"] - 16), "width": r["w"] + 32, "height": r["h"] + 32})
+            e.eval("document.body.dispatchEvent(new MouseEvent('mousedown', {bubbles: true}))")
+            pump(200)
+            return True
+
+        # Подготовка: правка заметки «как в Word» — панель Ж / К / списки, разметки не видно
         mode("prep")
-        y = e.eval("(() => { const b = [...document.querySelectorAll('.blk[data-type=code]')][1];"
-                   " return b.getBoundingClientRect().top + scrollY - 330; })()")
-        e.eval(f"window.scrollTo(0, {int(y)})")
+        e.eval("(() => { const b = [...document.querySelectorAll('.blk[data-type=markdown]')].find(x => x.querySelector('.r-tell'));"
+               " window.scrollTo(0, b.getBoundingClientRect().top + scrollY - 260); b.querySelector('.row > .c').click(); })()")
         shot("lesson-prep.png")
+        e.eval("document.activeElement && document.activeElement.blur()")
+        pump(300)
+        # палитра «+» по группам и «Мои настройки»
+        e.eval("(() => { const i = [...document.querySelectorAll('.ins .insbtn')][3]; i.scrollIntoView({block: 'center'}); i.click(); })()")
+        if not shot_menu("palette.png"):
+            return 1
+        window_top = "window.scrollTo(0, 0)"
+        e.eval(window_top)
+        e.eval("document.querySelector('#tools .prefsbtn').click()")
+        if not shot_menu("prefs.png"):
+            return 1
 
         # Урок идёт: третий этап — текущий, пройденные свёрнуты
         win.lesson._start_stage_now(t, 2)

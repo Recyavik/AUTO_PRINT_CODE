@@ -294,7 +294,77 @@ function mayReplace() {
   return !other || confirm("Сейчас идёт эфир «" + other + "». Завершить его и начать урок?");
 }
 
+// идёт урок: «Урок идёт · 11:02 ▾» — начало, «Начать этот этап сейчас», «Завершить»
+function liveMenu(anchor) {
+  const box = el("div", "pmenu");
+  box.appendChild(el("div", "mhead", "Идёт урок"));
+  const row = el("label", "zrow");
+  row.appendChild(el("span", "", "Начало"));
+  const tm = el("input");
+  tm.type = "time";
+  tm.className = "tmin";
+  tm.value = hhmm(A.S.live.anchor);
+  tm.title = "Начало идущего урока: наберите время и нажмите Enter — время этапов сдвинется (Esc — отмена)";
+  const was = tm.value;
+  const commit = () => { if (tm.value && tm.value !== was) cmd({ cmd: "set_start", start: tm.value }); };
+  tm.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") { e.preventDefault(); commit(); closeMenu(); } else if (e.key === "Escape") { tm.value = was; closeMenu(); }
+  });
+  tm.addEventListener("change", commit);
+  row.appendChild(tm);
+  box.appendChild(row);
+  menu(anchor, [{ node: box },
+    { label: "Начать этот этап сейчас", hint: "текущий этап — с этой минуты, следующие сдвигаются", on: () => cmd({ cmd: "shift_now" }) },
+    { label: "Мини-таймер «Эфира»", hint: "окно поверх всех", on: () => cmd({ cmd: "timer" }) },
+    { sep: true },
+    { label: "Завершить урок…", danger: true, on: () => { if (confirm("Завершить урок? Таймер «Эфира» закроется.")) cmd({ cmd: "stop" }); } },
+  ], { focus: false });
+}
+
+function startAtMenu(anchor) {
+  const L = A.S.lesson;
+  const box = el("div", "pmenu");
+  box.appendChild(el("div", "mhead", "Начать урок в"));
+  const row = el("div", "zrow");
+  const tm = el("input");
+  tm.type = "time";
+  tm.className = "tmin";
+  tm.value = (L && L.start) || nextHalfHour();
+  const go = el("button", "primary", "Начать");
+  go.onclick = () => { if (tm.value && mayReplace()) { closeMenu(); cmd({ cmd: "start", at: tm.value, force: !!A.S.other_live }); } };
+  tm.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); go.click(); } });
+  row.appendChild(tm);
+  row.appendChild(go);
+  box.appendChild(row);
+  box.appendChild(el("div", "phelp", "До начала таймер считает «до начала». Время из прошлого (в пределах 6 часов) — урок уже идёт."));
+  menu(anchor, [{ node: box }], { focus: false });
+  tm.focus();
+}
+
 // ---------------------------------------------------------------- экран учеников
+function renderScreenCtl() {
+  stripEl();
+  const box = $("strip").querySelector(".screen");
+  box.innerHTML = "";
+  const ef = (A.S && A.S.efir) || {};
+  const sc = el("button", "chip scrchip");
+  sc.title = "Экран учеников: что у них сейчас и что показать";
+  sc.onclick = () => screenMenu(sc);
+  box.appendChild(sc);
+  if (ef.mode && ef.mode !== "idle") {
+    const back = el("button", "", "Вернуть фон");
+    back.title = "Ученикам — снова фон (B)";
+    back.onclick = () => cmd({ cmd: "background" });
+    box.appendChild(back);
+  } else {
+    const br = el("button", "", "Перерыв");
+    br.title = "Перерыв ученикам — по плану урока (другие минуты — в «У учеников ▾»)";
+    br.onclick = () => cmd({ cmd: "break", stage: currentBreakStage() });
+    box.appendChild(br);
+  }
+  screenChip();
+}
+
 function currentBreakStage() {
   const { cur, stages } = computeCurrent();
   const s = cur >= 0 ? stages[cur] : null;
@@ -314,7 +384,7 @@ function screenText() {
 }
 
 function screenChip() {
-  const c = document.querySelector("#tools .scrchip");
+  const c = document.querySelector("#strip .scrchip");
   if (!c) return;
   const [text, cls] = screenText();
   if (c.textContent !== text) c.textContent = text;
@@ -437,8 +507,9 @@ export function renderTools() {
   if (!L) return;
   const P = A.S.print || {};
   const stages = stagesOf(A.items);
-  const status = chip("", "");
+  const status = el("button", "chip");
   status.id = "status";
+  status.onclick = () => { if (A.S && A.S.live && A.mode === "lesson") liveMenu(status); };
   t.appendChild(status);
   if (BUSY.includes(P.state)) {
     const it = A.byId.get(P.block);
@@ -456,68 +527,17 @@ export function renderTools() {
     seg.appendChild(b);
   }
   t.appendChild(seg);
-  if (A.mode === "lesson") {
-    // экран учеников — отсюда: что у них сейчас, перерыв, фон (окно таймера «Эфира» не нужно)
-    const ef = A.S.efir || {};
-    const sc = el("button", "chip scrchip");
-    sc.title = "Экран учеников: что у них сейчас и что показать";
-    sc.onclick = () => screenMenu(sc);
-    t.appendChild(sc);
-    if (ef.mode && ef.mode !== "idle") {
-      const back = el("button", "", "Вернуть фон");
-      back.title = "Ученикам — снова фон (B)";
-      back.onclick = () => cmd({ cmd: "background" });
-      t.appendChild(back);
-    } else {
-      const br = el("button", "", "Перерыв");
-      br.title = "Перерыв ученикам — по плану урока (другие минуты — в «У учеников ▾»)";
-      br.onclick = () => cmd({ cmd: "break", stage: currentBreakStage() });
-      t.appendChild(br);
-    }
-    screenChip();
-  }
-  if (A.mode === "lesson" && stages.length) {
-    if (!A.S.live) {
-      const go = el("button", "primary", "Начать урок");
-      go.title = "Урок начинается с этой минуты: этапы пойдут по часам";
-      go.onclick = () => { if (mayReplace()) cmd({ cmd: "start", force: !!A.S.other_live }); };
-      t.appendChild(go);
-      const atBox = el("label", "chip");
-      atBox.title = "Начать урок в это время: до начала таймер считает «до начала»";
-      atBox.appendChild(document.createTextNode("или в"));
-      const tm = el("input");
-      tm.type = "time";
-      tm.value = (L.start || nextHalfHour());
-      tm.className = "tm";
-      atBox.appendChild(tm);
-      t.appendChild(atBox);
-      const at = el("button", "", "Начать в это время");
-      at.onclick = () => { if (tm.value && mayReplace()) cmd({ cmd: "start", at: tm.value, force: !!A.S.other_live }); };
-      t.appendChild(at);
-    } else {
-      const startBox = el("label", "chip");
-      startBox.title = "Начало идущего урока: наберите время и нажмите Enter — время этапов сдвинется (Esc — отмена)";
-      startBox.appendChild(document.createTextNode("Начало"));
-      const tm = el("input");
-      tm.type = "time";
-      tm.className = "tm";
-      tm.value = hhmm(A.S.live.anchor);
-      const was = tm.value;
-      const commit = () => { if (tm.value && tm.value !== was) cmd({ cmd: "set_start", start: tm.value }); };
-      tm.addEventListener("keydown", (e) => {
-        if (e.key === "Enter") { e.preventDefault(); tm.blur(); } else if (e.key === "Escape") { tm.value = was; tm.blur(); }
-      });
-      tm.addEventListener("blur", commit);
-      startBox.appendChild(tm);
-      t.appendChild(startBox);
-      const shift = el("button", "", "Начать этот этап сейчас");
-      shift.title = "Текущий этап начинается сейчас, следующие сдвигаются";
-      shift.onclick = () => cmd({ cmd: "shift_now" });
-      t.appendChild(shift);
-      const stop = el("button", "ghost", "Завершить");
-      stop.onclick = () => { if (confirm("Завершить урок? Таймер «Эфира» закроется.")) cmd({ cmd: "stop" }); };
-      t.appendChild(stop);
-    }
+  if (A.mode === "lesson") renderScreenCtl();       // экран учеников — во второй строке, рядом с планом
+  if (A.mode === "lesson" && stages.length && !A.S.live) {
+    const go = el("button", "primary", "Начать урок");
+    go.title = "Урок начинается с этой минуты: этапы пойдут по часам";
+    go.onclick = () => { if (mayReplace()) cmd({ cmd: "start", force: !!A.S.other_live }); };
+    t.appendChild(go);
+    const at = el("button", "", "в… ▾");
+    at.title = "Начать урок в назначенное время: до начала таймер считает «до начала»";
+    at.setAttribute("aria-label", "Начать урок в назначенное время");
+    at.onclick = () => startAtMenu(at);
+    t.appendChild(at);
   }
   const zb = el("button", "iconbtn only prefsbtn", "Аа");
   zb.title = "Мои настройки: размер текста, план, этапы";
@@ -635,10 +655,11 @@ function stripEl() {
 
 function renderStrip(elapsed, cur, stages) {
   const s = $("strip");
-  s.hidden = !stages.length;
-  if (!stages.length) return;
+  s.hidden = false;                       // вторая строка «Урока»: план (по настройке) и экран учеников
   stripEl();
   const [pb, cb, nb, end] = ["prev", "cur", "next", "end"].map((c) => s.querySelector("." + c));
+  s.classList.toggle("noplan", !stages.length);
+  if (!stages.length) return;
   const set = (e, text, id) => {
     if (e.textContent !== text) e.textContent = text;
     e.hidden = !text;
@@ -735,7 +756,7 @@ function tick() {
     if (!lbl) continue;
     if (ph === "current") {
       const left = (s.end - elapsed) * 60;
-      const timer = prefs().page_stage_timer !== false;
+      const timer = prefs().page_stage_timer !== false && !document.body.classList.contains("plan-strip");
       lbl.textContent = !timer ? "Сейчас" : ending ? "Осталось меньше минуты" : "Сейчас · осталось";
       big.textContent = timer ? mmss(left) : "";
       const frac = Math.min(1, Math.max(0, (elapsed - s.start) / (s.end - s.start)));
@@ -770,7 +791,7 @@ function tick() {
   } else {
     status.className = "chip ok";
     status.innerHTML = '<span class="dot"></span>';
-    status.appendChild(document.createTextNode("Урок идёт · " + mmss(elapsed * 60)));
+    status.appendChild(document.createTextNode("Урок идёт · " + mmss(elapsed * 60) + (A.mode === "lesson" ? " ▾" : "")));
   }
 }
 setInterval(tick, 1000);

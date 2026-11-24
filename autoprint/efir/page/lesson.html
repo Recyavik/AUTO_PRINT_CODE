@@ -404,13 +404,19 @@ input.inl-h1 { font: 800 20px/1.25 var(--ui); width: min(32em, 60vw); }
 
 /* ---------------- план строкой (в «Уроке») */
 #strip { flex: 1 1 100%; display: none; align-items: center; gap: 6px 10px; flex-wrap: wrap; min-width: 0; }
-body.mode-lesson.plan-strip #strip { display: flex; }
+body.mode-lesson #strip { display: flex; }
+body.mode-lesson:not(.plan-strip) #strip :is(.prev, .cur, .next, .end, .more), #strip.noplan :is(.prev, .cur, .next, .end, .more) { display: none !important; }
+#strip .screen { margin-left: auto; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+#status { cursor: default; }
+body.mode-lesson #status.ok { cursor: pointer; }
+.tmin { font: 600 15px var(--ui); color: var(--text); background: var(--card); border: 1px solid var(--stroke2); border-radius: 8px;
+  padding: 4px 8px; }
 #strip button { min-height: 34px; padding: 0 14px; border-radius: 999px; font-size: 15px; }
 #strip .prev, #strip .next { background: transparent; color: var(--dim); }
 #strip .cur { background: var(--accent-soft); border-color: var(--accent-line); font-weight: 800; color: var(--text);
   font-variant-numeric: tabular-nums; }
 #strip .end { color: var(--dim); font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums; }
-#strip .more { margin-left: auto; }
+#strip .more { margin-left: 0; }
 body.mode-lesson.plan-strip nav#plan, body.mode-lesson.plan-hidden nav#plan { display: none; }
 body.mode-lesson.plan-strip.plan-open nav#plan { display: block; position: fixed; top: calc(var(--hh, 64px) + 8px); left: 24px;
   width: min(340px, 90vw); max-height: calc(100vh - var(--hh, 64px) - 24px); z-index: 40; box-shadow: var(--shadow); }
