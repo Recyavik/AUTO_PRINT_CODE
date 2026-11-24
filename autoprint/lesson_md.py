@@ -71,6 +71,16 @@ def _image_path(rel: str) -> str:
     return f"<{rel}>" if re.search(r"[\s()<>]", rel) else rel
 
 
+def clean_video(name: str) -> str:
+    """Название видео зарядки без кавычек и лишних пробелов: промпт пишет их «так» — нейросеть так и отвечает."""
+    return " ".join((name or "").strip().strip("«»\"'„“”").split())
+
+
+def video_key(name: str) -> str:
+    """Для сравнения названий видео: без кавычек, регистра, «ё»."""
+    return clean_video(name).casefold().replace("ё", "е")
+
+
 def stage_line(b: Block) -> str:
     """Строка этапа: «## Зарядка · 3 мин · зарядка: Гимнастика для глаз» (тот же вид — в промпте нейросети)."""
     head = f"## {(b.title or 'Этап').strip()} · {b.minutes} мин"
@@ -267,7 +277,7 @@ def parse(text: str, base: Path | None, title: str, local_images: bool = True) -
             if tail:
                 minutes = int(tail.group(1))
                 kind = _KIND_BY_WORD.get((tail.group(2) or "").lower(), "")
-                video = (tail.group(3) or "").strip() if kind == "exercise" else ""
+                video = clean_video(tail.group(3) or "") if kind == "exercise" else ""
                 head = head[:tail.start()]
             note = ""
             j = i + 1

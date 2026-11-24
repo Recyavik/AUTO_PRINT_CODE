@@ -28,6 +28,7 @@ log = logging.getLogger(__name__)
 # «Мои настройки» экрана урока: поле Settings → допустимые значения
 PREFS = {"page_zoom": "zoom", "page_plan": ("strip", "side", "hidden"), "page_past": ("dim", "collapse"),
          "page_stage_timer": "bool", "start_timer": "bool", "start_screen": "bool"}
+ANSWER_FETCH_LIMIT = 90     # «Вставить ответ нейросети»: фото качаются не дольше, потом урок добавляется со ссылками
 
 
 def _edge_path() -> str | None:
@@ -249,12 +250,19 @@ class LessonController(QObject):
         self.main._notify("Урок по ответу нейросети: скачиваю картинки — урок появится в списке через минуту.")
         fetch = self.fetch
 
+        ev = threading.Event()
+        timer = threading.Timer(ANSWER_FETCH_LIMIT, ev.set)       # общий срок: дальше — ссылками из интернета
+        timer.daemon = True
+
         def work() -> None:
             try:
-                more = fetch(new) or []
+                more = fetch(new, cancel=ev) or []
             except Exception as e:   # noqa: BLE001 — урок добавляется и без фото
                 more = [f"Картинки не скачались: {e}"]
+            finally:
+                timer.cancel()
             self._fetched.emit((t, new, notes + list(more)))
+        timer.start()
         threading.Thread(target=work, name="lesson-answer-images", daemon=True).start()
 
     def _insert_answer(self, t: Template, new: Template, notes: list[str]) -> None:
@@ -677,9 +685,10 @@ class LessonController(QObject):
         st = t.find_block(stage_id) if stage_id else None
         if st is None:
             return int(index or 0)
+        from ..lesson_md import video_key
         w = self.efir.webinar or self.efir.live_webinar()
-        titles = [e.title.casefold() for e in (w.exercises if w is not None else [])]
-        want = (st.exercise or "").strip().casefold()
+        titles = [video_key(e.title) for e in (w.exercises if w is not None else [])]
+        want = video_key(st.exercise)
         return titles.index(want) if want and want in titles else 0
 
     def _ensure_screen(self, t: Template) -> None:
@@ -706,5 +715,7 @@ class LessonController(QObject):
         self.main.settings.lesson_look = lid
         self.main._settings_timer.start()
         self.main._save_timer.start()
+        if t.kind == KIND_PLAN:
+            self.main.plan_changed(t)        # оформление плана — и у уроков по нему (видео зарядки находится)
         if self.efir.live_lesson_id() == t.id:
             self.efir.launch_lesson(t, show=False)      # оформление идущего урока — сразу

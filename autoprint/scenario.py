@@ -275,7 +275,7 @@ def item_state(b: Block, media_url) -> dict:
     HTML готов и безопасен; простые поля — текстом."""
     from pathlib import Path
     from .storage import BLOCK_CODE, BLOCK_IMAGE, ROLES, media_path
-    d = {"id": b.id, "type": b.type, "v": block_version(b), "text": b.text, "title": b.title}
+    d = {"id": b.id, "type": b.type, "v": block_version(b), "text": b.text, "title": b.title, "link": b.link}
     if b.type == BLOCK_CODE:
         label, icon = lang_info(b.lang)
         d.update(lang=b.lang, label=label, icon=icon, html=code_html(b.text, b.lang), steps=list(b.steps),

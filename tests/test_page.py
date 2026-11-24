@@ -935,10 +935,51 @@ class PageV12Test(Page):
         self.close_menu()
 
     def test_refused_edit_shows_message_no_retry(self):     # Review Focus 5
+        self.mode("prep")
         self.js("window.__suflor.push({op: 'set', block: 'ts1', fields: {minutes: 3}})")
         self.assertTrue(self.edge.wait("document.getElementById('toast').textContent.includes('задаёт план')"))
         self.assertTrue(self.edge.wait("window.__suflor.busy() === 0", 5))
         self.assertEqual(self.store.get("T").find_block("ts1").minutes, 5)
+        # итоговое ревью, находка 2: отклонённая правка не остаётся на экране
+        self.assertTrue(self.edge.wait("document.querySelector('#st-ts1 .mins').textContent === '5'"))
+
+    def test_fixed_title_not_editable(self):
+        """Итоговое ревью, находка 2: в уроке по плану название этапа не правится (оно из плана)."""
+        self.mode("prep")
+        self.js("document.querySelector('#st-ts1 .stitle').click()")
+        pump(200)
+        self.assertFalse(self.js("!!document.querySelector('#st-ts1 .inl-stage')"))
+        self.assertIn("из плана", self.js("document.querySelector('#st-ts1 .stitle').title"))
+
+    def test_banner_link_asks_while_live(self):
+        """Итоговое ревью, находка 3: идёт урок по плану — щелчок по уроку в полосе плана спрашивает."""
+        self.open_lesson("P")
+        self.mode("lesson")
+        self.go_live(1)
+        try:
+            self.assertTrue(self.edge.wait("document.getElementById('status').textContent.startsWith('Урок идёт')"))
+            self.mode("prep")
+            self.js("window.__confirmText = ''; window.confirm = (t) => { window.__confirmText = t; return false; }")
+            self.js("document.querySelector('#planbanner .linkbtn').click()")
+            self.assertIn("Завершить его и открыть «Функции»", self.js("window.__confirmText"))
+            pump(200)
+            self.assertEqual(self.win.printer.focus_id, "P")
+            self.assertTrue(self.win.efir.live_lesson_id())
+        finally:
+            self.stop_live()
+
+    def test_undo_deleted_exercise_stage_keeps_video(self):
+        """Итоговое ревью, находка 6: «Вернуть» после удаления этапа-зарядки — видео то же."""
+        self.store.get("F").find_block("fz").exercise = "Шея"
+        self.open_lesson("F")
+        self.mode("prep")
+        self.js("document.querySelector('#st-fz .smore').click()")
+        self.assertTrue(self.edge.wait("!!document.querySelector('.menu')"))
+        self.js("[...document.querySelectorAll('.menu .mi')].find(b => b.textContent.startsWith('Удалить этап')).click()")
+        self.assertTrue(self.wait_py(lambda: self.store.get("F").find_block("fz") is None))
+        self.js("document.activeElement && document.activeElement.blur && document.activeElement.blur()")
+        self.edge.key("z", "KeyZ", 90, modifiers=2)                                  # Ctrl+Z
+        self.assertTrue(self.wait_py(lambda: (self.store.get("F").find_block("fz") or Block("x")).exercise == "Шея"))
 
     def test_edit_in_plan_while_live_asks(self):            # Review Focus 1, вторая часть
         self.mode("lesson")

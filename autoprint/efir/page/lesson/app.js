@@ -593,7 +593,10 @@ function renderPlanInfo() {
   line.appendChild(document.createTextNode(": этапы и минуты для всех уроков по нему (" + topics.length + ")" + (topics.length ? ": " : ". Уроков пока нет — «Новый урок» у названия ▾.")));
   topics.forEach((x, i) => {
     const b = el("button", "linkbtn", x.title);
-    b.onclick = () => cmd({ cmd: "open", lesson: x.id, force: !!A.S.live });
+    b.onclick = () => {                     // идёт урок (план «Начать») — как в списке уроков: спросить
+      if (A.S.live && !confirm("Идёт урок «" + L.title + "». Завершить его и открыть «" + x.title + "»?")) return;
+      cmd({ cmd: "open", lesson: x.id, force: !!A.S.live });
+    };
     line.appendChild(b);
     if (i < topics.length - 1) line.appendChild(document.createTextNode(", "));
   });
@@ -974,7 +977,8 @@ $("main").addEventListener("click", (e) => {
     const st = sh.closest(".stage");
     const it = A.byId.get(st.id.slice(3));
     if (!it) return;
-    if (t.closest(".stitle")) E.editStageTitle(t.closest(".stitle"), it);
+    const fixedPlan = A.S.lesson && A.S.lesson.fixed;          // урок по плану: название этапа — из плана
+    if (t.closest(".stitle")) { if (!fixedPlan) E.editStageTitle(t.closest(".stitle"), it); }
     else if (t.closest(".mins") && !t.closest(".mins.fixed")) E.editStageMinutes(t.closest(".mins"), it);
     else if (t.closest(".kindbtn")) E.kindMenu(t.closest(".kindbtn"), it);
     else if (t.closest(".smore")) E.stageMenu(t.closest(".smore"), it);

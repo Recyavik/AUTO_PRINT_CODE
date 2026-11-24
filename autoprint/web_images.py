@@ -10,8 +10,10 @@
 from __future__ import annotations
 
 import ipaddress
+import re
 import socket
 import tempfile
+import time
 import urllib.request
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -30,19 +32,43 @@ class _Local(Exception):
     """Адрес — не интернет (или перенаправили туда)."""
 
 
+class _Cancelled(Exception):
+    """«Пропустить» / «Закрыть» — посреди скачивания."""
+
+
 def _bad_ip(ip: str) -> bool:
+    """Не адрес интернета: частный, loopback, link-local, общий провайдерский (100.64/10), зарезервированный…"""
     try:
         a = ipaddress.ip_address(ip.split("%")[0])
     except ValueError:
         return False
     if a.version == 6 and a.ipv4_mapped is not None:
         a = a.ipv4_mapped
-    return a.is_private or a.is_loopback or a.is_link_local or a.is_reserved or a.is_multicast or a.is_unspecified
+    return not a.is_global or a.is_multicast or a.is_unspecified
+
+
+# хост из одних чисел: браузер читает его как IPv4 — «127.1», «2130706433», «0x7f000001», «0177.0.0.1»
+_NUMERIC_V4 = re.compile(r"^(0x[0-9a-f]*|[0-9]+)(\.(0x[0-9a-f]*|[0-9]+)){0,3}\.?$", re.I)
+
+
+def _host_ip(host: str) -> str | None:
+    """Хост → IP так, как его поймёт браузер; None — это имя, а не адрес."""
+    h = (host or "").strip("[]").rstrip(".")
+    try:
+        return str(ipaddress.ip_address(h.split("%")[0]))
+    except ValueError:
+        pass
+    if _NUMERIC_V4.match(h):
+        try:
+            return socket.inet_ntoa(socket.inet_aton(h))
+        except OSError:
+            return "0.0.0.0"              # не разобрать — считать не интернетом
+    return None
 
 
 def is_local_url(url: str) -> bool:
-    """Без DNS: не http(s), localhost, *.local, буквальный частный / loopback / link-local IP. Такой адрес не
-    скачивается и не отдаётся странице урока."""
+    """Без DNS: не http(s), localhost, *.local, адрес не из интернета (и в записи «127.1», «2130706433»,
+    «0x7f000001»). Такой адрес не скачивается и не отдаётся странице урока."""
     try:
         parts = urlsplit((url or "").strip())
         host = (parts.hostname or "").lower().rstrip(".")
@@ -52,7 +78,8 @@ def is_local_url(url: str) -> bool:
         return True
     if host == "localhost" or host.endswith((".localhost", ".local")):
         return True
-    return _bad_ip(host)
+    ip = _host_ip(host)
+    return ip is not None and _bad_ip(ip)
 
 
 def _resolve(host: str) -> list[str]:
@@ -63,7 +90,10 @@ def _public(url: str, resolve) -> bool:
     """Адрес в интернете: схема http(s) и все IP хоста — публичные. OSError — имя не нашлось (сеть)."""
     if is_local_url(url):
         return False
-    ips = resolve(urlsplit(url).hostname)
+    host = urlsplit(url).hostname
+    if _host_ip(host) is not None:       # адрес, а не имя — DNS не нужен (is_local_url его уже проверил)
+        return True
+    ips = resolve(host)
     return bool(ips) and not any(_bad_ip(ip) for ip in ips)
 
 
@@ -88,8 +118,10 @@ def _default_opener(resolve):
     return open_
 
 
-def _download(url: str, opener, resolve) -> str:
-    """→ ссылка на копию в data/media. _Local — адрес не интернет; иное исключение — не скачалось."""
+def _download(url: str, opener, resolve, cancel=None) -> str:
+    """→ ссылка на копию в data/media. _Local — адрес не интернет; _Cancelled — отменили; иное исключение — не
+    скачалось (сеть, тип, больше 10 МБ, дольше TIMEOUT секунд на всю картинку)."""
+    deadline = time.monotonic() + TIMEOUT
     resp = opener(url, TIMEOUT)
     try:
         final = resp.geturl() or url
@@ -104,6 +136,10 @@ def _download(url: str, opener, resolve) -> str:
             raise ValueError("больше 10 МБ")
         data = bytearray()
         while True:
+            if cancel is not None and cancel.is_set():
+                raise _Cancelled(url)
+            if time.monotonic() > deadline:
+                raise ValueError(f"дольше {TIMEOUT} с")
             chunk = resp.read(65536)
             if not chunk:
                 break
@@ -137,7 +173,9 @@ def fetch_images(t: Template, *, cancel=None, progress=None, opener=None, resolv
         try:
             if not _public(url, resolve):
                 raise _Local(url)
-            b.text = _download(url, opener, resolve)
+            b.text = _download(url, opener, resolve, cancel)
+        except _Cancelled:
+            break                            # «Пропустить»: эта и остальные — ссылками
         except _Local:
             b.text = ""                      # место «Нужна картинка: <подпись>»
             local += 1

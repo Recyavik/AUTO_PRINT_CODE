@@ -960,5 +960,115 @@ class SamplePlanTest(unittest.TestCase):
             close(win)
 
 
+# ================================================================ итоговое ревью: исправления
+
+class FinalReviewTest(unittest.TestCase):
+    def test_numeric_ipv4_and_cgnat_are_local(self):
+        """Находка 1: 127.1, 2130706433, 0x7f000001, 0177.0.0.1 — браузер читает их как 127.0.0.1; 100.64/10 — не интернет."""
+        from autoprint import scenario, web_images
+        for u in ("http://127.1/a.png", "http://2130706433/a.png", "http://0x7f000001/a.png", "http://0177.0.0.1/a.png",
+                  "http://3232235777/a.png", "http://100.64.0.1/a.png", "http://[::ffff:127.0.0.1]/a.png",
+                  "http://192.168.1/a.png", "http://0/a.png"):
+            self.assertTrue(web_images.is_local_url(u), u)
+            self.assertEqual(scenario.item_state(Block(BLOCK_IMAGE, u, title="к"), lambda p: "")["url"], "", u)
+        self.assertFalse(web_images.is_local_url("http://8.8.8.8/a.png"))
+        self.assertFalse(web_images.is_local_url("https://img.example.org/cat.jpg"))
+        t = Template("У", [Block(BLOCK_IMAGE, "https://cgnat.example/a.png", id="c")])
+        web_images.fetch_images(t, opener=fake({"https://cgnat.example/a.png": ("image/png", PNG)}),
+                                resolve=lambda h: ["100.64.3.4"])
+        self.assertEqual(t.find_block("c").text, "")                                 # имя ведёт в 100.64/10 — место
+
+    def test_download_deadline_and_skip_inside_read(self):
+        """Находка 5: «15 с на картинку» — на всю картинку, а не на каждое чтение; «Пропустить» — сразу, не дожидаясь
+        картинки, которая качается."""
+        import threading
+        from autoprint import web_images
+
+        class Slow(FakeResp):
+            def read(self, n=-1):
+                time.sleep(0.05)
+                return b"0" * 1024                                            # поток не кончается — медленный сервер
+
+        def opener(url, timeout):
+            return Slow(url, "image/png", b"")
+        orig = web_images.TIMEOUT
+        web_images.TIMEOUT = 0.4
+        try:
+            t = Template("У", [Block(BLOCK_IMAGE, "https://ex.org/slow.png", id="s")])
+            t0 = time.monotonic()
+            notes = web_images.fetch_images(t, opener=opener, resolve=lambda h: ["93.184.216.34"])
+            self.assertLess(time.monotonic() - t0, 2)
+            self.assertEqual(t.find_block("s").text, "https://ex.org/slow.png")
+            self.assertIn("Не скачалось: 1", " ".join(notes))
+        finally:
+            web_images.TIMEOUT = orig
+        ev = threading.Event()
+        threading.Timer(0.3, ev.set).start()
+        t = Template("У", [Block(BLOCK_IMAGE, "https://ex.org/slow.png", id="s"), Block(BLOCK_IMAGE, "https://ex.org/2.png")])
+        t0 = time.monotonic()
+        web_images.fetch_images(t, cancel=ev, opener=opener, resolve=lambda h: ["93.184.216.34"])
+        self.assertLess(time.monotonic() - t0, 2)                                    # не ждали 15 с медленной картинки
+
+    def test_exercise_name_in_quotes(self):
+        """Находка 7: промпт показывает видео в «ёлочках» — нейросеть так и пишет; видео всё равно находится."""
+        from autoprint import lesson_md
+        from autoprint.efir.model import Exercise, Look
+        t = lesson_md.parse("## Зарядка · 3 мин · зарядка: «Гимнастика для глаз»\n", None, "x")
+        self.assertEqual(stages_of(t)[0].exercise, "Гимнастика для глаз")
+        video = TMP / "q.mp4"
+        video.write_bytes(b"\x00" * 16)
+        u = Template("У", [stage("Зарядка", 3, id="z", stage_kind="exercise", exercise="«шея »")], id="U")
+        win = window([u], 18919)
+        try:
+            u = win.store.get("U")
+            look = Look(title="З", exercises=[Exercise("Глаза", str(video)), Exercise("Шея", str(video))])
+            win.efir.save_look(look)
+            u.look = look.id
+            win.printer.set_focus("U")
+            win.lesson.command({"cmd": "exercise", "stage": "z"})
+            self.assertEqual(win.efir.ex_index, 1)
+        finally:
+            win.efir.show_background()
+            close(win)
+
+    def test_plan_look_reaches_topics(self):
+        """Находка 4: сменили оформление у плана — у уроков по нему оно то же (видео зарядки находится)."""
+        from autoprint.efir.model import Look
+        p = plan90()
+        t = plans.new_topic(p, "Функции")
+        win = window([p, t], 18918)
+        try:
+            look = Look(title="Кабинет 12")
+            win.efir.save_look(look)
+            win.printer.set_focus("P")
+            win.lesson.command({"cmd": "preset", "id": look.id})
+            self.assertEqual(win.store.get("P").look, look.id)
+            self.assertEqual(win.store.get(t.id).look, look.id)
+        finally:
+            close(win)
+
+    def test_page_answer_download_has_overall_limit(self):
+        """Находка 5, экран урока: «Вставить ответ нейросети» с фото — урок добавляется не позже общего срока."""
+        from autoprint.ui import lesson_control
+        p = plan90()
+        win = window([p], 18917)
+        orig = lesson_control.ANSWER_FETCH_LIMIT
+        lesson_control.ANSWER_FETCH_LIMIT = 0.3
+
+        def stuck(tt, cancel=None, **kw):
+            cancel.wait(30)                                                       # сеть «висит», пока не отменят
+            return []
+        win.lesson.fetch = stuck
+        try:
+            win.printer.set_focus("P")
+            t0 = time.monotonic()
+            win.lesson.command({"cmd": "apply_answer", "text": ANSWER_PLAN})
+            self.assertTrue(wait(lambda: len(win.store.topics_of("P")) == 1, 5))
+            self.assertLess(time.monotonic() - t0, 4)
+        finally:
+            lesson_control.ANSWER_FETCH_LIMIT = orig
+            close(win)
+
+
 if __name__ == "__main__":
     unittest.main()

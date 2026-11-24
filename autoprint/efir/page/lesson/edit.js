@@ -3,7 +3,7 @@
 "use strict";
 import { A, $, el, icon, menu, closeMenu, toast, newId, isTyping, cmd } from "./state.js";
 import * as Q from "./queue.js";
-import { nodeOf, stageOfBlock, exerciseList } from "./render.js";
+import { nodeOf, stageOfBlock, exerciseList, videoKey } from "./render.js";
 import { beginCode, endCode } from "./code.js";
 import { mdHtml, askParts, escapeHtml } from "./md.js";
 import { toMarkdown, cleanPaste } from "./richtext.js";
@@ -42,7 +42,8 @@ export function undo() {
 export function snapshot(it) {
   return { id: it.id, type: it.type, text: it.text || "", title: it.title || "", role: it.role || "text",
     lang: it.lang || "python", steps: it.steps || [], sel: it.sel || [], profile: it.profile || "",
-    minutes: it.minutes || 0, stage_kind: it.kind || "", part: it.part || "", slide: it.slide || 0 };
+    minutes: it.minutes || 0, stage_kind: it.kind || "", part: it.part || "", slide: it.slide || 0,
+    exercise: it.exercise || "", link: it.link || "" };          // «Вернуть»: видео зарядки и связь с планом — те же
 }
 
 function prevId(id) {
@@ -535,7 +536,7 @@ export function kindMenu(anchor, it) {
   const items = kinds.map(([k, n]) => ({ label: n, checked: (it.kind || "") === k, on: () => setFields(it.id, { stage_kind: k }) }));
   const ex = exerciseList().filter(Boolean);
   if (ex.length) {                                      // зарядка: какое видео включать ученикам
-    const cur = it.kind === "exercise" ? (ex.find((t) => t.toLowerCase() === (it.exercise || "").toLowerCase()) || ex[0]) : null;
+    const cur = it.kind === "exercise" ? (ex.find((t) => videoKey(t) === videoKey(it.exercise)) || ex[0]) : null;
     items.push({ head: "Зарядка — видео ученикам" });
     for (const title of ex) {
       items.push({ label: title, checked: cur === title, on: () => setFields(it.id, { stage_kind: "exercise", exercise: title }) });

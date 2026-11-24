@@ -332,6 +332,7 @@ function stageHead(art, it, info, pn) {
   meta.push(durText(it.minutes || 0));
   sht.appendChild(el("div", "meta", meta.join(" · ")));
   const h = el("h2", "stitle", it.title || "Этап");
+  if (fixed) h.title = "Название — из плана «" + L.plan.title + "»";
   sht.appendChild(h);
   fresh.appendChild(sht);
   const ed = el("div", "sedit");
@@ -358,6 +359,11 @@ function stageHead(art, it, info, pn) {
   return fresh;
 }
 
+// название видео для сравнения: без кавычек «», регистра и «ё» (как lesson_md.video_key)
+export function videoKey(s) {
+  return (s || "").trim().replace(/^[«»"'„“”]+|[«»"'„“”]+$/g, "").split(/\s+/).filter(Boolean).join(" ").toLowerCase().replace(/ё/g, "е");
+}
+
 // видео зарядок оформления урока: список названий (до 0.12 — да/нет)
 export function exerciseList() {
   const x = A.S && A.S.exercises;
@@ -366,7 +372,7 @@ export function exerciseList() {
 
 function efirRow(it) {
   const ex = exerciseList();
-  const video = ex.length ? (ex.find((t) => t && t.toLowerCase() === (it.exercise || "").toLowerCase()) || ex[0]) : "";
+  const video = ex.length ? (ex.find((t) => t && videoKey(t) === videoKey(it.exercise)) || ex[0]) : "";
   const k = "efir:" + it.id + ":" + it.kind + ":" + ex.join("|") + ":" + (it.exercise || "") + ":" + it.minutes + ":" + ((A.S && A.S.efir && A.S.efir.tab) || "");
   let n = nodes.get("efir:" + it.id);
   if (n && n.dataset.k === k) return n;
