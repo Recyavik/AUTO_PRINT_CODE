@@ -373,7 +373,7 @@ export function exerciseList() {
 function efirRow(it) {
   const ex = exerciseList();
   const video = ex.length ? (ex.find((t) => t && videoKey(t) === videoKey(it.exercise)) || ex[0]) : "";
-  const k = "efir:" + it.id + ":" + it.kind + ":" + ex.join("|") + ":" + (it.exercise || "") + ":" + it.minutes + ":" + ((A.S && A.S.efir && A.S.efir.tab) || "") + ":" + (A.S && A.S.efir && A.S.efir.tab_open ? 1 : 0);
+  const k = "efir:" + it.id + ":" + it.kind + ":" + ex.join("|") + ":" + (it.exercise || "") + ":" + it.minutes + ":" + ((A.S && A.S.efir && A.S.efir.tab) || "") + ":" + (A.S && A.S.efir && A.S.efir.tab_open ? 1 : 0) + ":" + ((A.S && A.S.exercises_missing) || []).join("|");
   let n = nodes.get("efir:" + it.id);
   if (n && n.dataset.k === k) return n;
   const fresh = el("div", "blk efir");
@@ -394,6 +394,12 @@ function efirRow(it) {
     b.dataset.act = "exercise";
     b.dataset.stage = it.id;
     c.appendChild(b);
+    if (video && ((A.S && A.S.exercises_missing) || []).includes(video)) {   // файла видео нет — сказать заранее
+      c.appendChild(el("span", "efirnote warnnote", "⚠ Файл видео «" + video + "» не найден (удалён или перемещён)."));
+      const pick = el("button", "efirbtn addvideo", "Выбрать видео…");
+      pick.dataset.act = "add-video";
+      c.appendChild(pick);
+    }
   } else {
     c.appendChild(el("span", "efirnote", "В оформлении экрана учеников нет видео зарядки."));
     const av = el("button", "efirbtn addvideo", "Добавить видео зарядки…");

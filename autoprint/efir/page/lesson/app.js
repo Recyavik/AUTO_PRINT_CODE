@@ -467,7 +467,11 @@ function screenText() {
     if (ef.break_ends && !left && !ef.break_paused) return ["Перерыв окончен ▾", "warn"];
     return ["У учеников: перерыв" + (left ? " · " + mmss(left) : "") + (ef.break_paused ? " · пауза" : "") + " ▾", "warn"];
   }
-  if (ef.mode === "exercise") return ["У учеников: зарядка", "warn"];
+  if (ef.mode === "exercise") {
+    if (ef.ex_waiting) return ["У учеников: зарядка ждёт щелчка по их вкладке ▾", "bad"];
+    if (ef.ex_muted) return ["У учеников: зарядка без звука — щёлкните по их вкладке ▾", "bad"];
+    return ["У учеников: зарядка ▾", "warn"];
+  }
   if (ef.mode === "slide") return ["У учеников: слайд " + (ef.slide_n || "") + " ▾", "ok"];
   if (!ef.tab_open) return ["Экран учеников ▾", "dim"];
   return ["У учеников: фон ▾", ""];

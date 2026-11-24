@@ -1139,6 +1139,69 @@ class OneWindowTest(unittest.TestCase):
         self.assertEqual(len(launched), 1)
 
 
+class ExerciseSoundTest(unittest.TestCase):
+    def test_lesson_page_knows_when_exercise_is_silent_or_waiting(self):
+        """Зарядка без звука или стоит до щелчка (браузер не дал автозапуск) — экран урока это видит и говорит, что
+        сделать; щелчок по вкладке учеников это снимает."""
+        from autoprint.efir.model import Exercise, Look
+        video = TMP / "ex-sound.mp4"
+        video.write_bytes(b"\x00" * 16)
+        t = Template("У", [stage("Зарядка", 3, id="z", stage_kind="exercise")], id="U")
+        win = window([t], 18926)
+        said = []
+        win.efir.message.connect(lambda text, warn: said.append(text))
+        try:
+            t = win.store.get("U")
+            look = Look(title="З", exercises=[Exercise("Глаза", str(video))])
+            win.efir.save_look(look)
+            t.look = look.id
+            win.printer.set_focus("U")
+            win.efir.clients = 1
+            win.lesson.command({"cmd": "exercise", "stage": "z"})
+            ef = win.efir
+            ef._on_report({"type": "blocked", "seq": ef.ex_seq, "all": True})     # даже без звука браузер не запускает
+            win.lesson._last = None
+            win.lesson.publish()
+            st = ef.server._states["lesson"]["efir"]
+            self.assertEqual((st["ex_waiting"], st["ex_muted"]), (True, True))
+            self.assertTrue(any("ждёт щелчка" in s for s in said), said)
+            ef._on_report({"type": "video", "seq": ef.ex_seq, "pos": 1, "dur": 60, "paused": False, "muted": True})
+            win.lesson.publish()
+            st = ef.server._states["lesson"]["efir"]
+            self.assertEqual((st["ex_waiting"], st["ex_muted"]), (False, True))   # идёт, но без звука
+            ef._on_report({"type": "unlock"})
+            ef._on_report({"type": "video", "seq": ef.ex_seq, "pos": 2, "dur": 60, "paused": False, "muted": False})
+            win.lesson.publish()
+            st = ef.server._states["lesson"]["efir"]
+            self.assertEqual((st["ex_waiting"], st["ex_muted"]), (False, False))
+        finally:
+            win.efir.show_background()
+            close(win)
+
+    def test_missing_exercise_file_known_in_advance(self):
+        from autoprint.efir.model import Exercise, Look
+        t = Template("У", [stage("Зарядка", 3, id="z", stage_kind="exercise")], id="U")
+        win = window([t], 18927)
+        try:
+            t = win.store.get("U")
+            look = Look(title="З", exercises=[Exercise("Глаза", str(TMP / "нет-такого.mp4"))])
+            win.efir.save_look(look)
+            t.look = look.id
+            win.printer.set_focus("U")
+            win.lesson._last = None
+            win.lesson.publish()
+            self.assertEqual(win.efir.server._states["lesson"]["exercises_missing"], ["Глаза"])
+        finally:
+            close(win)
+
+    def test_screen_page_retries_and_unmutes(self):
+        """Экран учеников: видимая вкладка — снова запустить видео; щелчок — запустить стоящее и включить звук."""
+        html = (Path(storage.__file__).resolve().parent / "efir" / "page" / "screen.html").read_text(encoding="utf-8")
+        self.assertIn("visibilitychange", html)
+        self.assertIn("all: true", html)
+        self.assertIn("unlock", html)
+
+
 class LiveSafetyTest(unittest.TestCase):
     def test_timer_close_hides_for_lesson(self):
         """× мини-таймера во время урока — только прячет таймер; урок идёт дальше, таймер открывается снова."""

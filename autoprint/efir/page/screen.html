@@ -483,11 +483,19 @@ function startScreen() {
     const p = video.play();
     if (p) p.catch(err => {
       if (err && err.name === 'NotAllowedError') {          // браузер не даёт звук без щелчка по странице
-        blocked = true; video.muted = true; video.play().catch(() => {});
-        report({ type: 'blocked', seq: exSeq });
+        blocked = true; video.muted = true;
+        // без звука — идёт сразу (ученики видят); не дали и так — стоит до щелчка по вкладке (учителю скажут)
+        video.play().then(() => report({ type: 'blocked', seq: exSeq }))
+          .catch(() => report({ type: 'blocked', seq: exSeq, all: true }));
       } else report({ type: 'video_error', seq: exSeq, message: String(err && err.message || err) });
     });
   }
+
+  // зарядка должна идти: вкладка не стоит, не на паузе в программе, не доиграла
+  const wantsVideo = () => exSeq >= 0 && vidEl.classList.contains('on') && video.style.display !== 'none' &&
+    video.getAttribute('src') && video.paused && !video.ended && !(S.exercise && S.exercise.paused);
+  // вкладку открыли в фоне — в фоне браузер видео не запускает: стала видимой — запустить
+  document.addEventListener('visibilitychange', () => { if (!document.hidden && wantsVideo()) play(); });
 
   function hideVideo() {
     if (!vidEl.classList.contains('on') && exSeq < 0) return;
@@ -531,9 +539,10 @@ function startScreen() {
 
   // звук: первый щелчок по странице разрешает воспроизведение со звуком до перезагрузки вкладки
   const unlock = () => {
+    if (wantsVideo()) { blocked = false; play(); }            // стояла до щелчка — пошла сразу со звуком
     if (unlocked) return;
     unlocked = true;
-    if (blocked && !video.paused) { video.muted = false; blocked = false; }
+    if (blocked && !video.paused) { video.muted = false; blocked = false; }   // шла без звука — звук, без перезапуска
     report({ type: 'unlock' });
   };
   window.addEventListener('pointerdown', unlock, true);

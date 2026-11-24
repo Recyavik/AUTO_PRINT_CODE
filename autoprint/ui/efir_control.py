@@ -60,6 +60,8 @@ class EfirController(QObject):
         self.video_pos = 0.0
         self.video_dur = 0.0
         self.video_error = ""
+        self.video_muted = False         # зарядка идёт без звука (браузер не дал звук без щелчка по вкладке)
+        self.video_waiting = False       # зарядка стоит до щелчка (браузер не дал запустить даже без звука)
         # перерыв (время — time.time(), секунды)
         self.brk_seq = 0
         self.brk_ends = 0.0
@@ -103,8 +105,8 @@ class EfirController(QObject):
             return False
         self._tab_opened_at = time.monotonic()
         self.open_tab()
-        self.message.emit("Вкладка экрана учеников не была открыта — открыл её в браузере. Покажите её ученикам "
-                          "(демонстрация этой вкладки).", False)
+        self.message.emit("Вкладка экрана учеников не была открыта — открыл её в браузере. Щёлкните по ней один раз "
+                          "(иначе браузер не даст звук зарядки) и покажите её ученикам (демонстрация этой вкладки).", False)
         return True
 
     def copy_url(self) -> None:
@@ -144,14 +146,24 @@ class EfirController(QObject):
             self.tab_changed.emit()
         elif kind == "blocked":
             self.blocked = True
+            if d.get("all"):                  # даже без звука браузер видео не запустил — стоит до щелчка по вкладке
+                self.video_waiting = True
+                self.message.emit("Зарядка ждёт щелчка: браузер не дал запустить видео — щёлкните один раз по вкладке "
+                                  "экрана учеников, видео пойдёт со звуком", True)
+            else:
+                self.message.emit("Зарядка идёт без звука: браузер не дал включить звук — щёлкните один раз по вкладке "
+                                  "экрана учеников, звук появится (видео не начнётся заново)", True)
             self.tab_changed.emit()
-            self.message.emit("Браузер не дал включить звук: щёлкните один раз по вкладке эфира — звук появится", True)
+            self.screen_changed.emit()
         elif kind == "video" and d.get("seq") == self.ex_seq and self.mode == MODE_EXERCISE:
             try:
                 self.video_pos = float(d.get("pos") or 0)
                 self.video_dur = float(d.get("dur") or 0)
             except (TypeError, ValueError):
                 pass
+            self.video_muted = bool(d.get("muted"))
+            if not d.get("paused"):
+                self.video_waiting = False
             if not d.get("muted"):
                 self.blocked = False
             self.screen_changed.emit()
@@ -464,6 +476,7 @@ class EfirController(QObject):
         self.ex_paused = False
         self.video_pos = self.video_dur = 0.0
         self.video_error = ""
+        self.video_muted = self.video_waiting = False
         self.mode = MODE_EXERCISE
         self._forget_break()
         self.publish()

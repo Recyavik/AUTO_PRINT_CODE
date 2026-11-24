@@ -188,7 +188,9 @@ class LessonController(QObject):
                         "slide_n": (self.efir.slide or {}).get("n", 0) if self.efir.mode == "slide" else 0,
                         "slide_bid": (self.efir.slide or {}).get("bid", "") if self.efir.mode == "slide" else "",
                         "ex_index": self.efir.ex_index if self.efir.mode == "exercise" else -1,
-                        "break_paused": self.efir.mode == "break" and self.efir.brk_left_paused is not None},
+                        "break_paused": self.efir.mode == "break" and self.efir.brk_left_paused is not None,
+                        "ex_muted": self.efir.mode == "exercise" and (self.efir.video_muted or self.efir.video_waiting),
+                        "ex_waiting": self.efir.mode == "exercise" and self.efir.video_waiting},
             armed=t.active_block if t is not None else "",
             media_url=self.efir.server.media_url, presets=[(lk.id, lk.title) for lk in self.efir.store.looks],
             preset=preset.id if preset is not None else "", dark=theme.dark, efir_mode=self.efir.mode,
@@ -202,6 +204,9 @@ class LessonController(QObject):
             topics=self.main.store.topics_of(t.id) if t is not None and t.kind == KIND_PLAN else (),
             plans=self.main.store.plans())
         state["notice"] = dict(self._notice)
+        # видео зарядок, файлов которых нет (удалили, переместили) — этап-зарядка предупредит заранее
+        state["exercises_missing"] = [e.title for e in (preset.exercises if preset is not None else [])
+                                      if not Path(e.path).is_file()]
         # во время зарядки экран эфира шлёт ход видео раз в секунду: странице суфлёра от этого ничего не
         # меняется — не перерисовывать её (иначе пересоздаются кнопки и теряются щелчки)
         key = json.dumps(state, ensure_ascii=False, sort_keys=True)
