@@ -138,5 +138,93 @@ class ViewKitTest(AppPage):
         self.assertEqual(bad, 0)
 
 
+class ShellTest(AppPage):
+    """Оболочка: шапка (области перетаскивания, кнопки окна), меню разделов, клавиши, файлы, уведомления."""
+    port = 18994
+    route = "#/lessons"
+
+    def regions(self):
+        return self.app.window.regions
+
+    def test_titlebar_regions(self):
+        self.assertTrue(self.wait_py(lambda: bool(self.regions().drag), 5), "страница не прислала области окна")
+        r = self.regions()
+        x, y, w, h = r.drag[0]
+        self.assertEqual((x, y), (0, 0))
+        self.assertAlmostEqual(h * r.zoom, 44, delta=2)
+        self.assertGreaterEqual(len(r.holes), 6)            # знак, «Аа», поверх, маленький, свернуть, развернуть, закрыть
+        from autoprint.ui.regions import HTCAPTION, HTCLIENT
+        hole = r.holes[-1]
+        cx, cy = (hole[0] + hole[2] / 2) * r.zoom, (hole[1] + hole[3] / 2) * r.zoom
+        self.assertEqual(self.app.window.client_hit(cx, cy), HTCLIENT)      # кнопка нажимается
+        gap = self.js("(() => { const r = document.querySelector('#titlebar .tb-fill').getBoundingClientRect();"
+                      " return [r.left + r.width / 2, r.top + r.height / 2]; })()")
+        self.assertEqual(self.app.window.client_hit(gap[0], gap[1]), HTCAPTION)  # пустое место тянет окно
+
+    def test_regions_resent_on_zoom(self):
+        try:
+            self.app.settings.page_zoom = 150
+            self.app.publish_now()
+            self.assertTrue(self.wait_py(lambda: abs(self.regions().drag[0][3] * self.regions().zoom - 66) < 3
+                                         if self.regions().drag else False, 6))
+        finally:
+            self.app.settings.page_zoom = 100
+            self.app.publish_now()
+            self.wait_py(lambda: abs(self.regions().drag[0][3] * self.regions().zoom - 44) < 3, 6)
+
+    def test_window_buttons_send_cmds(self):
+        self.app.settings.always_on_top = False
+        self.click("#pinBtn")
+        self.assertTrue(self.wait_py(lambda: self.app.window.pinned))
+        self.assertTrue(self.wait_js("document.querySelector('#pinBtn').getAttribute('aria-pressed') === 'true'"))
+        self.click("#pinBtn")
+        self.assertTrue(self.wait_py(lambda: not self.app.window.pinned))
+        self.click("#compactBtn")
+        self.assertTrue(self.wait_py(lambda: self.app.window.compact))
+        self.app.window.set_compact(False)
+        self.app.publish_now()
+
+    def test_rail_links_and_counts(self):
+        self.assertEqual(self.js("[...document.querySelectorAll('#rail a.nav')].map(a => a.getAttribute('href'))"),
+                         ["#/lessons", "#/efir", "#/settings"])
+        self.assertEqual(self.js("document.querySelector('#rail a[href=\"#/lessons\"] .cnt').textContent"),
+                         str(len([t for t in self.store.templates if t.kind != 'plan'])))
+        self.go("#/settings", "settings")
+        self.assertTrue(self.js("document.querySelector('#rail a[href=\"#/settings\"]').classList.contains('on')"))
+        self.go("#/lessons", "lessons")
+
+    def test_ctrl_n_opens_wizard(self):
+        self.js("document.dispatchEvent(new KeyboardEvent('keydown', {key: 'n', code: 'KeyN', ctrlKey: true, bubbles: true}))")
+        self.assertTrue(self.wait_js("location.hash === '#/new'"))
+        self.go("#/lessons", "lessons")
+
+    def test_drop_routes_to_view(self):
+        import tempfile
+        from pathlib import Path
+        f = Path(tempfile.mkdtemp()) / "урок.md"
+        f.write_text("# x", encoding="utf-8")
+        self.js("window.__lastDrop = null")
+        self.app.drop([str(f)])
+        self.assertTrue(self.wait_js("window.__lastDrop && window.__lastDrop.view === 'lessons'"))
+        self.assertEqual(self.js("window.__lastDrop.files[0].name"), "урок.md")
+
+    def test_notice_toast_with_action(self):
+        self.app.settings.always_on_top = False
+        self.app.notify("Окно поверх всех?", action={"label": "Да, поверх", "cmd": {"cmd": "window", "op": "pin"}})
+        self.assertTrue(self.wait_js("[...document.querySelectorAll('.toast')].some(t => t.textContent.includes('Окно поверх всех?'))"))
+        self.js("[...document.querySelectorAll('.toast .btn')].find(b => b.textContent.includes('Да, поверх')).click()")
+        self.assertTrue(self.wait_py(lambda: self.app.window.pinned))
+        self.app.window.window_cmd("pin")
+
+    def test_pick_files_call(self):
+        import autoprint.app_cmd as C
+        old = C.QFileDialog.getOpenFileNames
+        C.QFileDialog.getOpenFileNames = staticmethod(lambda *a, **k: (["C:/x/урок.md"], ""))
+        try:
+            self.assertEqual(self.js("window.appCore.call({cmd: 'pick_files', purpose: 'import'})"), ["C:/x/урок.md"])
+        finally:
+            C.QFileDialog.getOpenFileNames = old
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

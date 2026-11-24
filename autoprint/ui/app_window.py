@@ -196,7 +196,43 @@ class AppWindow(FramelessWindow):
         self._loaded = True
         self.fail.hide()
         self.splash.hide()
+        self._watch_drops()
         self.ready.emit()
+
+    # ------------------------------------------------------------ файлы, перетащенные в окно
+    def _watch_drops(self) -> None:
+        """Файлы ловит окно, а не браузер: у программы — настоящие пути (видео в сотни МБ не копируются через
+        страницу), а страница не уходит на file://. Текст и картинки из браузера — как обычно, странице."""
+        for w in (self.view, self.view.focusProxy() if self.view is not None else None):
+            if w is not None and not w.property("apc_drops"):
+                w.setProperty("apc_drops", True)
+                w.installEventFilter(self)
+
+    @staticmethod
+    def _local_files(mime) -> list[str]:
+        if mime is None or not mime.hasUrls():
+            return []
+        urls = mime.urls()
+        if not urls or not all(u.isLocalFile() for u in urls):
+            return []
+        return [u.toLocalFile() for u in urls]
+
+    def eventFilter(self, obj, ev) -> bool:
+        from PySide6.QtCore import QEvent
+        t = ev.type()
+        if t in (QEvent.Type.DragEnter, QEvent.Type.DragMove):
+            if self._local_files(ev.mimeData()):
+                ev.acceptProposedAction()
+                return True
+        elif t == QEvent.Type.Drop:
+            paths = self._local_files(ev.mimeData())
+            if paths:
+                ev.acceptProposedAction()
+                drop = getattr(self.app, "drop", None)
+                if callable(drop):
+                    drop(paths)
+                return True
+        return super().eventFilter(obj, ev)
 
     def run_js(self, code: str, callback=None) -> None:
         if self.view is None:

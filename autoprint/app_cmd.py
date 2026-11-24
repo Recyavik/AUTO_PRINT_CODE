@@ -9,10 +9,24 @@ import concurrent.futures
 import logging
 
 from PySide6.QtCore import QObject, Signal
+from PySide6.QtWidgets import QFileDialog
 
 log = logging.getLogger(__name__)
 
 CALL_TIMEOUT_S = 600
+
+# окна выбора файла: назначение → (заголовок, фильтр, несколько файлов)
+PICK = {
+    "import": ("Импорт урока", None, True),
+    "material": ("Материал урока", "Методички, презентации и код (*.pdf *.docx *.pptx *.txt *.md *.py *.ipynb *.html "
+                 "*.js *.css *.json);;Все файлы (*.*)", False),
+    "image": ("Картинка", "Картинки (*.png *.jpg *.jpeg *.gif *.webp);;Все файлы (*.*)", False),
+    "video": ("Видео зарядки", "Видео (*.mp4 *.webm *.mov *.m4v);;Все файлы (*.*)", True),
+    "presentation": ("Презентация — для картинок слайдов", "Презентация (*.pdf *.pptx)", False),
+    "json": ("Файл JSON", "JSON (*.json);;Все файлы (*.*)", False),
+    "font": ("Свой файл шрифта", "Шрифты (*.ttf *.otf *.woff *.woff2)", False),
+    "background": ("Картинка для фона", "Картинки (*.png *.jpg *.jpeg *.gif *.webp)", False),
+}
 
 
 class AppCommands(QObject):
@@ -76,6 +90,9 @@ class AppCommands(QObject):
     def cmd_quit(self, _d: dict) -> None:
         self.app.quit_app()
 
+    def cmd_update_open(self, _d: dict) -> None:
+        self.app.open_update_dialog()
+
     def cmd_notice_action(self, d: dict) -> None:
         """Кнопка в тосте: повторить команду из уведомления (например, «Завершить и открыть»)."""
         act = (self.app.notice or {}).get("action") or {}
@@ -98,3 +115,23 @@ class AppCommands(QObject):
 
     def call_ping(self, _d: dict):
         return "pong"
+
+    def call_pick_files(self, d: dict) -> list[str]:
+        """Системное окно выбора файлов поверх окна программы → пути (пусто — передумали)."""
+        from .importers import FILE_FILTER
+        title, flt, multi = PICK.get(str(d.get("purpose") or "import"), PICK["import"])
+        flt = str(d.get("filter") or flt or FILE_FILTER)
+        if "multi" in d:
+            multi = bool(d["multi"])
+        if multi:
+            paths, _ = QFileDialog.getOpenFileNames(self.app.window, title, str(d.get("dir") or ""), flt)
+            return [str(p) for p in paths]
+        path, _ = QFileDialog.getOpenFileName(self.app.window, title, str(d.get("dir") or ""), flt)
+        return [str(path)] if path else []
+
+    def call_pick_save(self, d: dict) -> str:
+        """Куда сохранить: системное окно → путь или "" (передумали)."""
+        name = "".join(c for c in str(d.get("name") or "") if c not in '\\/:*?"<>|').strip()
+        path, _ = QFileDialog.getSaveFileName(self.app.window, str(d.get("title") or "Сохранить"), name,
+                                              str(d.get("filter") or "Все файлы (*.*)"))
+        return str(path or "")

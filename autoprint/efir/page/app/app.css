@@ -208,6 +208,64 @@ input[type=checkbox]:not(.sw) { accent-color: var(--accent); width: 16px; height
 .toast .tt { flex: 1; min-width: 0; }
 .toast .btn { height: 30px; }
 
+/* ---------------------------------------------------------------- оболочка: шапка, меню разделов, экран */
+#app { height: 100%; }
+#shell { height: calc(var(--vh) * 100); display: flex; flex-direction: column; }
+#titlebar { height: 44px; flex: none; display: flex; align-items: center; gap: 6px; padding-left: 10px;
+  background: var(--ground); border-bottom: 1px solid var(--line); user-select: none; min-width: 0; }
+.tb-logo { width: 30px; height: 30px; display: grid; place-items: center; border-radius: var(--r-sm); flex: none; }
+.tb-logo:hover { background: var(--raised); }
+.tb-logo img { width: 22px; height: 22px; display: block; }
+.crumbs { display: flex; align-items: center; gap: 4px; min-width: 0; font-size: 14px; color: var(--dim); }
+.crumbs a { color: var(--dim); text-decoration: none; padding: 4px 8px; border-radius: 7px; white-space: nowrap; }
+.crumbs a:hover { background: var(--raised); color: var(--text); }
+.crumbs .sep { color: var(--faint); }
+.crumbs .cur { color: var(--text); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  padding: 0 6px; min-width: 0; }
+.tb-fill { flex: 1; align-self: stretch; min-width: 24px; }
+.tb-extra { display: flex; align-items: center; gap: 4px; flex: none; }
+.tb-tools { display: flex; align-items: center; gap: 2px; flex: none; }
+.tb-tools .btn.icon { width: 34px; height: 32px; border-radius: var(--r-sm); color: var(--dim); }
+.tb-tools .btn.icon[aria-pressed="true"] { color: var(--accent); background: var(--accent-soft); border-color: transparent; }
+.tb-sep { width: 1px; height: 20px; background: var(--line2); margin: 0 6px; flex: none; }
+.tb-win { display: flex; align-self: stretch; flex: none; }
+.tb-win .btn.icon { width: 46px; height: 100%; border-radius: 0; color: var(--dim); border: 0; }
+.tb-win .btn.icon:hover { background: var(--raised); color: var(--text); }
+.tb-win .btn.close:hover { background: #C42B1C; color: #fff; }
+#frame { flex: 1; display: flex; min-height: 0; }
+#rail { width: 216px; flex: none; padding: 14px 10px; display: flex; flex-direction: column; gap: 2px;
+  border-right: 1px solid var(--line); overflow: auto; }
+#rail .nav { display: flex; align-items: center; gap: 12px; height: 40px; padding: 0 12px; border-radius: var(--r);
+  color: var(--dim); text-decoration: none; font-weight: 500; }
+#rail .nav:hover { background: var(--panel); color: var(--text); }
+#rail .nav.on { background: var(--panel); color: var(--text); box-shadow: inset 0 0 0 1px var(--line); }
+#rail .nav.on .i { color: var(--accent); }
+#rail .nav .nl { flex: 1; }
+#rail .cnt { font-size: 12.5px; color: var(--faint); }
+#rail .livemark { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: var(--live); font-weight: 600; }
+#rail .spacer { flex: 1; }
+#rail .upd { margin-bottom: 8px; white-space: normal; height: auto; min-height: 38px; padding: 8px 12px; }
+#view { flex: 1; min-width: 0; min-height: 0; position: relative; overflow: hidden; }
+body[data-view="lesson"] #rail, body[data-view="wizard"] #rail, body.compact #rail { display: none; }
+
+/* страница раздела (уроки, эфир, настройки) */
+.page { height: 100%; overflow: auto; padding: 26px clamp(16px, 3vw, 36px) 48px; }
+.page .wrap { max-width: 1000px; margin: 0 auto; display: flex; flex-direction: column; gap: 26px; }
+.page h1 { font-size: 28px; font-weight: 700; letter-spacing: -.01em; line-height: 1.2; }
+.pagehead { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 14px; }
+.pagehead h1 { flex: 1 1 200px; }
+.lead { font-size: 16px; color: var(--dim); max-width: 64ch; }
+.zoompanel { display: flex; flex-direction: column; gap: 8px; min-width: 260px; }
+.zoompanel .zrow { display: flex; align-items: center; gap: 8px; }
+.zoompanel .zval { min-width: 56px; text-align: center; }
+@media (max-width: 760px) {
+  #rail { width: 64px; padding: 10px 8px; }
+  #rail .nav .nl, #rail .cnt, #rail .livemark, #rail .upd .bl { display: none; }
+  #rail .nav { justify-content: center; padding: 0; }
+  .crumbs a { display: none; }
+  .crumbs .sep { display: none; }
+}
+
 /* ---------------------------------------------------------------- витрина компонентов (#/dev/ui) */
 .devui { height: 100%; overflow: auto; padding: 24px clamp(16px, 4vw, 40px) 60px; }
 .devui .wrap { max-width: 900px; margin: 0 auto; display: flex; flex-direction: column; gap: 22px; }

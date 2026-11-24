@@ -49,20 +49,25 @@ addEventListener("wheel", (e) => {
 }, { passive: false });
 
 // ---------------------------------------------------------------- экраны
+// имя экрана для страницы (data-view) — по адресу: #/new → wizard
+const VIEW_NAMES = { new: "wizard" };
+
 function render() {
   const r = route();
-  const name = views[r.view] ? r.view : (views.lessons ? "lessons" : Object.keys(views)[0]);
-  const root = document.getElementById("app");
-  if (current && currentName === name && current.route) {   // тот же экран — только новое место в нём
+  const key = views[r.view] ? r.view : (views.lessons ? "lessons" : Object.keys(views)[0]);
+  const name = VIEW_NAMES[key] || key;
+  const root = document.getElementById("view") || document.getElementById("app");
+  if (current && currentName === key && current.route) {   // тот же экран — только новое место в нём
     current.route(r);
     document.body.dataset.view = name;
+    emit("view", name);
     return;
   }
   if (current && current.destroy) current.destroy();
   root.innerHTML = "";
-  currentName = name;
+  currentName = key;
   document.body.dataset.view = "";
-  current = name ? views[name](root, r) || {} : {};
+  current = key ? views[key](root, r) || {} : {};
   document.body.dataset.view = name;
   if (window.__ready && current.update) current.update(S);
   emit("view", name);
