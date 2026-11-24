@@ -5,12 +5,20 @@
 const esc = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#x27;");
 const BOLD = /\*\*(.+?)\*\*/g;
 const ITALIC = /(?<![\w*])\*(?!\s)(.+?)(?<!\s)\*(?![\w*])/g;
-const INLINE = /(`[^`\n]+`)|\[([^\]\n]+)\]\(([^)\s]+)\)|(https?:\/\/[^\s<>"'`]+)/g;
+const INLINE = /(`[^`\n]+`)|\[([^\]\n]+)\]\(((?:[^()\s]|\([^()\s]*\))+)\)|(https?:\/\/[^\s<>"'`]+)/g;
+// «\*», «\.», «\#»… — знак как есть (так правка «как в Word» хранит набранные звёздочки и «2024. Год»)
+const ESCAPED = /\\([\\`*_\[\]()#.+\-!>→~|{}])/g;
+const SLOT = /\uE000(\d+)\uE001/g;
 
 const emph = (e) => e.replace(BOLD, "<b>$1</b>").replace(ITALIC, "<i>$1</i>");
 const link = (url, inner) => `<a href="${esc(url)}" target="_blank" rel="noopener">${inner}</a>`;
 
 export function inline(text) {
+  text = text.replace(ESCAPED, (_m, c) => "\uE000" + c.charCodeAt(0) + "\uE001");
+  return inlineRaw(text).replace(SLOT, (_m, n) => esc(String.fromCharCode(+n)));
+}
+
+function inlineRaw(text) {
   let out = "", pos = 0, m;
   INLINE.lastIndex = 0;
   while ((m = INLINE.exec(text))) {

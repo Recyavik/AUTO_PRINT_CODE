@@ -66,7 +66,10 @@ def webinar_for(t: Template, look=None):
 # Свой маленький разбор: заголовки, абзацы, списки, **жирный**, *курсив*, `код`, ```-блоки, ссылки. Сначала
 # всё экранируется — на страницу не попадёт ни тег, ни скрипт; ссылки — только http(s).
 
-_INLINE = re.compile(r"(`[^`\n]+`)|\[([^\]\n]+)\]\(([^)\s]+)\)|(https?://[^\s<>\"'`]+)")
+_INLINE = re.compile(r"(`[^`\n]+`)|\[([^\]\n]+)\]\(((?:[^()\s]|\([^()\s]*\))+)\)|(https?://[^\s<>\"'`]+)")
+# «\*», «\.», «\#»… — знак как есть (правка «как в Word» так сохраняет набранные звёздочки и «2024. Год»)
+_ESCAPED = re.compile(r"\\([\\`*_\[\]()#.+\-!>→~|{}])")
+_SLOT = re.compile("\ue000(\\d+)\ue001")
 _BOLD = re.compile(r"\*\*(.+?)\*\*")     # без __…__: в тексте про Python это __init__, а не жирный
 _ITALIC = re.compile(r"(?<![\w*])\*(?!\s)(.+?)(?<!\s)\*(?![\w*])")
 _UL = re.compile(r"^\s*[-*•]\s+(.*)$")
@@ -89,6 +92,11 @@ def _link(url: str, inner: str) -> str:
 
 
 def _inline(text: str) -> str:
+    text = _ESCAPED.sub(lambda m: f"\ue000{ord(m.group(1))}\ue001", text)
+    return _SLOT.sub(lambda m: _esc(chr(int(m.group(1)))), _inline_raw(text))
+
+
+def _inline_raw(text: str) -> str:
     out, pos = [], 0
     for m in _INLINE.finditer(text):
         out.append(_emph(_esc(text[pos:m.start()])))
@@ -289,7 +297,7 @@ def item_state(b: Block, media_url) -> dict:
             question, answers = ask_parts(b.text)
             d.update(html=md_html(question), answers=[_inline(a) for a in answers])
         elif role == "term":
-            head, _, rest = (b.text or "").strip().partition("\n")
+            head, _, rest = (b.text or "").rstrip().partition("\n")       # пустой термин — определение не «поднимается»
             d.update(term=head.strip(), html=md_html(rest.strip()))
         else:
             d["html"] = md_html(b.text)

@@ -935,12 +935,23 @@ def md_answer(text: str) -> str | None:
     """Урок в Markdown из ответа чата: внутри блока ~~~markdown / ```markdown (до последней такой же черты —
     внутри могут быть блоки кода) или весь текст, если это урок. None — это не урок в Markdown."""
     from . import lesson_md
-    lines = text.replace("\r\n", "\n").split("\n")
+    text = re.sub(r"\(\s*slide:\s*(\d+)\s*\)", r"(slide:\1)", text.replace("\r\n", "\n"))   # «slide: 2» — тоже слайд
+    lines = text.split("\n")
     for i, ln in enumerate(lines):
         m = _MD_OPEN.match(ln)
         if m:
             fence = m.group(1)
-            close = max((j for j in range(i + 1, len(lines)) if lines[j].strip() == fence), default=len(lines))
+            ch, depth, close = fence[0], 0, len(lines)
+            for j in range(i + 1, len(lines)):     # конец блока — та же черта не внутри вложенного кода
+                s = lines[j].strip()
+                if re.fullmatch(re.escape(ch) + "{%d,}" % len(fence), s):
+                    if depth:
+                        depth -= 1
+                        continue
+                    close = j
+                    break
+                if ch == "`" and re.match(r"^`{3,}\S", s):
+                    depth += 1
             return "\n".join(lines[i + 1:close])
     src = text.strip()
     return src if lesson_md.looks_like_lesson(src) or src.startswith("---\ntitle:") else None

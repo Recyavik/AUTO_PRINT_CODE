@@ -169,7 +169,7 @@ _ROLE_WORDS = {
 }
 _WORD_ROLE = {w: r for r, ws in _ROLE_WORDS.items() for w in ws}
 _MARK = re.compile(r"^\s*(?:[-•*]\s+|\d+[).]\s+)?(?:\[(?P<b>[^\]]{1,30})\]\s*|"
-                   r"(?P<w>[А-Яа-яЁёA-Za-z/! ]{2,30}?)(?:\s+\d+)?\s*(?::|—|–|-(?=\s))\s*)(?P<rest>.*)$")
+                   r"(?P<w>[А-Яа-яЁёA-Za-z/! ]{2,30}?)(?:\s+\d+)?\s*(?::|—|–|-(?=\s)|(?<=!)(?=\s))\s*)(?P<rest>.*)$")
 _BULLET = re.compile(r"^\s*(?:[-•*]|\d+[).])\s+")
 
 
@@ -325,6 +325,8 @@ def apply_chat_answer(t: Template, text: str) -> tuple[Template, list[str]]:
     if md is None:
         raise ValueError("В ответе нет урока в Markdown — попросите нейросеть ответить блоком ~~~markdown, как в промпте.")
     new = lesson_md.parse(md, None, t.title)
+    if not any(b.type in (BLOCK_STAGE, BLOCK_MARKDOWN, BLOCK_IMAGE) for b in new.blocks):
+        raise ValueError("В ответе нейросети пустой урок — ни этапов, ни заметок. Попросите ответить по промпту ещё раз.")
     have = {b.slide: b for b in t.blocks if b.type == BLOCK_IMAGE and b.slide}
     notes: list[str] = []
     used: list[int] = []
@@ -343,6 +345,7 @@ def apply_chat_answer(t: Template, text: str) -> tuple[Template, list[str]]:
                 used.append(n)
         keep.append(b)
     new.blocks = keep
+    missing = list(dict.fromkeys(missing))
     if missing:
         notes.append(", ".join(f"Слайда {n}" if i == 0 else f"слайда {n}" for i, n in enumerate(missing))
                      + " нет в презентации — пропущено.")

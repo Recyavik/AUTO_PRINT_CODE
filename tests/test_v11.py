@@ -804,5 +804,95 @@ class ScreenKeysTest(Base):
         self.assertIn("report({ type: 'key'", html)
 
 
+# ================================================================ Task 15: находки тестировщика
+
+class QAFixTest(Base):
+    port = 18980
+
+    def setUp(self):
+        self.L = slides_lesson("L")
+        self.L.blocks.append(Block(BLOCK_IMAGE, slide_png(9), title="Схема", id="pic"))   # обычная картинка
+        self.win = make_window([self.L], port=self.port)
+        self.win.lesson.open_page = lambda: None
+        self.win.printer.set_focus("L")
+
+    def test_screen_key_ignored_during_webinar(self):
+        from autoprint.efir.model import Activity, Webinar
+        ef = self.win.efir
+        w = ef.store.add([Webinar(title="Вебинар", schedule=[Activity("x", 30)])])[0]
+        ef.launch(w.id, "")
+        ef._on_report({"type": "key", "key": "PageDown"})
+        pump(50)
+        self.assertNotEqual(ef.mode, "slide")                      # слайды урока в чужой эфир не выводим
+
+    def test_plain_image_to_screen(self):
+        ef = self.win.efir
+        self.win.lesson.command({"cmd": "slide", "block": "pic"})
+        self.assertEqual((ef.slide or {}).get("bid"), "pic")
+
+    def test_restore_respects_start_timer(self):
+        from autoprint.efir import store as store_mod
+        from autoprint.ui.efir_control import EfirController
+        ef = self.win.efir
+        self.win.lesson.command({"cmd": "start"})
+        folder = ef.store.path.parent
+        old = store_mod.efir_dir
+        store_mod.efir_dir = lambda: folder
+        try:
+            ctl2 = EfirController(None)
+        finally:
+            store_mod.efir_dir = old
+        ctl2.settings = ef.settings                     # start_timer = False (по умолчанию)
+        shown = []
+        ctl2.show_timer = lambda: shown.append(1)
+        ctl2.server.want_port = 18981
+        try:
+            ctl2.restore()
+            self.assertEqual(shown, [])
+        finally:
+            ctl2.server.stop()
+
+    def test_break_zero_minutes_stage(self):
+        self.L.blocks.insert(0, stage("Перерыв", 0, id="b0", stage_kind="break"))
+        self.win.lesson.command({"cmd": "break", "stage": "b0"})
+        self.assertEqual(self.win.efir.mode, "break")
+        self.assertAlmostEqual(self.win.efir.brk_total, 600, delta=1)
+
+
+class ParserFixTest(unittest.TestCase):
+    def test_answer_parser_edges(self):
+        from autoprint import lesson_ai as L
+        from autoprint import slides
+        base = slides_lesson()
+        with self.assertRaises(ValueError):
+            slides.apply_chat_answer(base, "~~~markdown\n~~~")
+        text = ("```markdown\n## Э · 30 мин\n\n![Слайд 2](slide: 2)\n\n> [!say]\n> Текст\n\n```python\nprint(1)\n```\n```\n"
+                "Пояснение:\n```\nНадеюсь, это поможет!\n```")
+        md = L.md_answer(text)
+        self.assertNotIn("Надеюсь", md)
+        new, notes = slides.apply_chat_answer(base, text)
+        self.assertEqual([b.slide for b in new.blocks if b.type == BLOCK_IMAGE], [2])
+        self.assertEqual([b.text for b in new.blocks if b.type == BLOCK_CODE], ["print(1)"])
+        _n, notes = slides.apply_chat_answer(base, "~~~markdown\n## Э · 30 мин\n\n![Слайд 9](slide:9)\n\n"
+                                                  "![Слайд 9](slide:9)\n~~~")
+        self.assertEqual(" ".join(notes).count("слайда 9") + " ".join(notes).count("Слайда 9"), 1)
+
+    def test_important_bang_marker(self):
+        from autoprint.slides import notes_blocks
+        self.assertEqual([(b.role, b.text) for b in notes_blocks("Важно! не забыть отступы")],
+                         [("important", "не забыть отступы")])
+
+    def test_term_empty_head(self):
+        from autoprint import scenario
+        it = scenario.item_state(Block(BLOCK_MARKDOWN, "\nопределение без термина", role="term"), lambda p: "")
+        self.assertEqual(it["term"], "")
+
+    def test_md_escapes(self):
+        from autoprint.scenario import md_html
+        self.assertEqual(md_html("2024\\. Год"), "<p>2024. Год</p>")
+        self.assertEqual(md_html("x\\*\\*2 + y\\*\\*2"), "<p>x**2 + y**2</p>")
+        self.assertIn('href="https://ru.wikipedia.org/wiki/Python_(язык)"', md_html("[В](https://ru.wikipedia.org/wiki/Python_(язык))"))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

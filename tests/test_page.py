@@ -211,6 +211,35 @@ class PageEditTest(Page):
         pump(600)
         self.assertEqual(self.block("n3").text, before)                         # открыть и закрыть — текст тот же
 
+    def test_rich_escapes_and_paste_sources(self):
+        md = self.js("(() => { const d = document.createElement('div');"
+                     " d.innerHTML = '<p>2024. Год начала курса!</p><p>x**2 + y**2</p>'; return window.__rt.toMarkdown(d); })()")
+        self.assertEqual(md, "2024\\. Год начала курса!\n\nx\\*\\*2 + y\\*\\*2")       # набранное — как есть
+        self.assertEqual(self.js(f"window.__rt.roundtrip({md!r})"), md)
+        gdocs = ('<b style="font-weight:normal" id="docs-internal-guid-1"><p>Первая</p>'
+                 '<p><b>Жирное</b> обычное</p></b>')
+        got = self.js(f"(() => {{ const d = document.createElement('div'); d.innerHTML = window.__rt.cleanPaste({gdocs!r});"
+                      " return window.__rt.toMarkdown(d); })()")
+        self.assertEqual(got, "Первая\n\n**Жирное** обычное")                           # обёртка Google Docs — не жирный
+        table = "<table><tr><td>int</td><td>42</td></tr></table>"
+        got = self.js(f"(() => {{ const d = document.createElement('div'); d.innerHTML = window.__rt.cleanPaste({table!r});"
+                      " return window.__rt.toMarkdown(d); })()")
+        self.assertIn("int 42", got)
+
+    def test_homework_copy_item(self):
+        b = self.block("n4")
+        b.role = "homework"
+        self.win.lesson.publish()
+        try:
+            self.assertTrue(self.edge.wait("!!document.querySelector('[data-id=n4] .r-homework')"))
+            self.js("document.querySelector('[data-id=n4] .bmore').click()")
+            self.assertTrue(self.edge.wait("!!document.querySelector('.menu')"))
+            self.assertTrue(self.js("[...document.querySelectorAll('.menu .mi')].some(b => b.textContent.includes('Скопировать для чата'))"))
+            self.js("document.body.dispatchEvent(new MouseEvent('mousedown', {bubbles: true}))")
+        finally:
+            self.block("n4").role = "tell"
+            self.win.lesson.publish()
+
     def test_ask_fields(self):
         q = "Что такое функция?\n→ кусок кода с именем"
         self.assertEqual(self.block("n2").text, q)
@@ -503,6 +532,34 @@ class PageV11Test(Page):
         self.assertTrue(self.wait_py(lambda: s.page_zoom == 100), s.page_zoom)
         self.assertTrue(self.edge.wait("document.documentElement.style.zoom === '1'"))
 
+    def test_zoom_menus_in_view_and_print(self):
+        s = self.win.settings
+        s.page_zoom = 150
+        self.win.lesson._last = None
+        self.win.lesson.publish()
+        try:
+            self.assertTrue(self.edge.wait("document.documentElement.style.zoom === '1.5'"))
+            more = "[...document.querySelectorAll('#tools .iconbtn.only')].find(b => b.getAttribute('aria-label') === 'Ещё')"
+            self.js(f"{more}.click()")
+            self.assertTrue(self.edge.wait("!!document.querySelector('.menu')"))
+            r = self.js(f"""(() => {{ const m = document.querySelector('.menu').getBoundingClientRect();
+                const a = {more}.getBoundingClientRect();
+                return [m.left, m.top, m.right, m.bottom, innerWidth, innerHeight, a.bottom]; }})()""")
+            left, top, right, bottom, vw, vh, abot = r
+            self.assertGreaterEqual(left, 0)
+            self.assertLessEqual(right, vw + 1)
+            self.assertLessEqual(bottom, vh + 1)                                    # меню целиком в окне
+            # у кнопки — или, если длинное, во всю высоту окна (с прокруткой), а не где-то внизу за краем
+            self.assertTrue(abs(top - abot) < 40 or bottom >= vh - 24, r)
+            self.js("document.body.dispatchEvent(new MouseEvent('mousedown', {bubbles: true}))")
+            self.edge.call("Emulation.setEmulatedMedia", {"media": "print"})
+            self.assertEqual(self.js("getComputedStyle(document.documentElement).zoom"), "1")   # на бумагу — без экранного масштаба
+        finally:
+            self.edge.call("Emulation.setEmulatedMedia", {"media": ""})
+            s.page_zoom = 100
+            self.win.lesson.publish()
+            self.edge.wait("document.documentElement.style.zoom === '1'")
+
     def test_prefs_menu(self):
         s = self.win.settings
         self.js("document.querySelector('#tools .prefsbtn').click()")
@@ -738,6 +795,18 @@ class PageSlidesTest(Page):
         self.win.store.templates[:] = [x for x in self.win.store.templates if x.id != new.id]
         self.win.lesson.publish()
         self.assertTrue(self.edge.wait(f"document.getElementById('titleText').textContent === '{self.t.title}'"))
+
+    def test_clicker_quiet_with_modal(self):
+        self.mode("lesson")
+        more = "[...document.querySelectorAll('#tools .iconbtn.only')].find(b => b.getAttribute('aria-label') === 'Ещё')"
+        self.js(f"{more}.click()")
+        self.assertTrue(self.edge.wait("!!document.querySelector('.menu')"))
+        self.js("[...document.querySelectorAll('.menu .mi')].find(b => b.textContent.includes('Распечатать')).click()")
+        self.assertTrue(self.edge.wait("!!document.querySelector('.modal')"))
+        self.edge.key("ArrowRight", "ArrowRight", 39)
+        pump(500)
+        self.assertEqual(self.win.efir.mode, "idle")                                    # окно печати открыто — слайды не листаем
+        self.js("document.querySelector('.modal').remove()")
 
     def test_clicker_keys(self):
         self.mode("lesson")

@@ -238,6 +238,9 @@ class LessonController(QObject):
         t = self.current()
         if t is None:
             return
+        live = self.efir.live_webinar()
+        if live is not None and self.efir.live_lesson_id() != t.id:
+            return                                  # идёт вебинар, а не этот урок — слайды урока в эфир не выводим
         if key in ("ArrowRight", "PageDown"):
             self._slide_step(t, 1)
         elif key in ("ArrowLeft", "PageUp"):
@@ -254,14 +257,15 @@ class LessonController(QObject):
         return marked or imgs
 
     def _show_slide(self, t: Template, bid: str) -> None:
+        from ..storage import BLOCK_IMAGE
+        b = next((x for x in t.blocks if x.id == bid and x.type == BLOCK_IMAGE and (x.text or "").strip()), None)
+        if b is None:
+            return                                  # «На экран» — у любой картинки; листают ◀ ▶ — по слайдам
         slides = self._slides(t)
-        i = next((k for k, b in enumerate(slides) if b.id == bid), -1)
-        if i < 0:
-            return
-        b = slides[i]
-        nxt = slides[i + 1].text.strip() if i + 1 < len(slides) else ""
+        i = next((k for k, x in enumerate(slides) if x.id == bid), -1)
+        nxt = slides[i + 1].text.strip() if 0 <= i < len(slides) - 1 else ""
         self._ensure_screen(t)
-        self.efir.show_slide(b.text.strip(), b.slide or i + 1, b.id, nxt)
+        self.efir.show_slide(b.text.strip(), b.slide or (i + 1 if i >= 0 else 0), b.id, nxt)
         if self.efir.clients <= 0 and not self._tab_warned:          # напомнить один раз, не на каждом слайде
             self._tab_warned = True
             self.main._notify("Слайд на экране учеников — но вкладка экрана учеников не открыта (У учеников ▾ → Открыть).")
@@ -560,8 +564,8 @@ class LessonController(QObject):
                 end = live.anchor + timedelta(minutes=st.end_min)
                 self.efir.start_break(st.end_min - st.start_min, ends_at=end.timestamp())
                 return
-        if st is not None:
-            self.efir.start_break(max(1, st.end_min - st.start_min))
+        if st is not None and st.end_min > st.start_min:
+            self.efir.start_break(st.end_min - st.start_min)
             return
         w = self.efir.webinar or self.efir.live_webinar()
         self.efir.start_break(int(minutes or 0) or (w.break_min if w else 10))

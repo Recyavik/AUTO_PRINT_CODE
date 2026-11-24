@@ -55,11 +55,20 @@ function applyPrefs() {
   const p = prefs();
   const z = String(Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, p.page_zoom || 100)) / 100);
   if (document.documentElement.style.zoom !== z) document.documentElement.style.zoom = z;
+  setVh();
   const b = document.body.classList;
   for (const v of ["strip", "side", "hidden"]) b.toggle("plan-" + v, (p.page_plan || "strip") === v);
   b.toggle("past-collapse", p.page_past === "collapse");
   b.toggle("no-stage-timer", p.page_stage_timer === false);
 }
+
+// 1vh в пикселях страницы с учётом zoom: высоты «по экрану» (план, меню, слайд) не вылезают за окно
+function setVh() {
+  const z = parseFloat(document.documentElement.style.zoom) || 1;
+  document.documentElement.style.setProperty("--vh", (innerHeight / z / 100).toFixed(3) + "px");
+}
+window.addEventListener("resize", setVh);
+setVh();
 
 export function setPref(key, value) {
   if (!A.S) return;
@@ -397,7 +406,7 @@ function screenMenu(anchor) {
   const ef = (A.S && A.S.efir) || {};
   const stages = stagesOf(A.items);
   const brk = stages.find((s) => s.item.kind === "break");
-  const planned = brk ? brk.minutes : 10;
+  const planned = brk && brk.minutes > 0 ? brk.minutes : 10;
   const items = [{ head: "Экран учеников" }];
   if (!ef.tab_open) items.push({ label: "Открыть экран учеников", hint: "вкладка для демонстрации", on: () => cmd({ cmd: "open_tab" }) });
   items.push({ label: "Фон", checked: !ef.mode || ef.mode === "idle", on: () => cmd({ cmd: "background" }) });
@@ -530,7 +539,10 @@ export function renderTools() {
   }
   t.appendChild(seg);
   if (A.mode === "lesson") renderScreenCtl();       // экран учеников — во второй строке, рядом с планом
-  if (A.mode === "lesson" && stages.length && !A.S.live) {
+  if (A.mode === "lesson" && stages.length && !A.S.live && !stages.some((s) => s.minutes > 0)) {
+    t.appendChild(chip("Поставьте этапам минуты — тогда урок можно начать", "warn"));
+  }
+  if (A.mode === "lesson" && stages.length && !A.S.live && stages.some((s) => s.minutes > 0)) {
     const go = el("button", "primary", "Начать урок");
     go.title = "Урок начинается с этой минуты: этапы пойдут по часам";
     go.onclick = () => { if (mayReplace()) cmd({ cmd: "start", force: !!A.S.other_live }); };
@@ -1002,7 +1014,10 @@ document.addEventListener("paste", (e) => {
 const NEXT_KEYS = new Set(["ArrowRight", "PageDown"]), PREV_KEYS = new Set(["ArrowLeft", "PageUp"]);
 document.addEventListener("keydown", (e) => {
   if (A.mode !== "lesson" || isTyping(e.target) || e.ctrlKey || e.altKey || e.metaKey) return;
+  if (document.querySelector(".modal")) return;                            // открыто окно — клавиши ему
   if (!A.items.some((x) => x.type === "image" && x.url)) return;           // без картинок — обычная прокрутка
+  const slides = A.items.some((x) => x.type === "image" && x.slide);
+  if (!slides && (e.key === "PageDown" || e.key === "PageUp")) return;     // только картинки — PageUp/Down листают ленту
   if (NEXT_KEYS.has(e.key) || PREV_KEYS.has(e.key)) {
     e.preventDefault();
     cmd({ cmd: "slide_step", d: NEXT_KEYS.has(e.key) ? 1 : -1 });

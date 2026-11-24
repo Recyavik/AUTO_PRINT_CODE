@@ -112,11 +112,19 @@ export function menu(anchor, items, opts = {}) {
   };
   build(m, items);
   document.body.appendChild(m);
-  const r = anchor.getBoundingClientRect();
+  // «Размер текста» — zoom на <html>: координаты на экране делим на него, иначе меню уезжает и обрезается
+  const z = parseFloat(document.documentElement.style.zoom) || 1;
+  const vw = innerWidth / z, vh = innerHeight / z;
+  m.style.maxHeight = Math.max(120, vh - 16) + "px";
+  m.style.maxWidth = Math.min(420, vw - 16) + "px";
+  const rr = anchor.getBoundingClientRect();
+  const r = { left: rr.left / z, right: rr.right / z, top: rr.top / z, bottom: rr.bottom / z };
   const w = m.offsetWidth, h = m.offsetHeight;
   let x = opts.right ? r.right - w : r.left, y = r.bottom + 4;
-  if (x + w > innerWidth - 8) x = innerWidth - w - 8;
-  if (y + h > innerHeight - 8) y = Math.max(8, r.top - h - 4);
+  if (x + w > vw - 8) x = vw - w - 8;
+  if (y + h > vh - 8) {                       // не влезает под кнопку — над ней, иначе у нижнего края окна
+    y = r.top - h - 4 >= 8 ? r.top - h - 4 : Math.max(8, vh - h - 8);
+  }
   m.style.left = Math.max(8, x) + "px";
   m.style.top = y + "px";
   openMenu = m;

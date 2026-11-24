@@ -171,6 +171,8 @@ function toggleCode(rich) {
   const anc = (node.nodeType === 1 ? node : node.parentElement).closest("code");
   if (anc && rich.contains(anc)) { anc.replaceWith(document.createTextNode(anc.textContent)); return; }
   if (r.collapsed) return;
+  const blockOf = (n) => (n.nodeType === 1 ? n : n.parentElement).closest("p, li, div.rich, h2, h3, h4");
+  if (blockOf(r.startContainer) !== blockOf(r.endContainer)) { toast("«Код» — внутри одной строки"); return; }
   const code = document.createElement("code");
   code.textContent = r.toString();
   r.deleteContents();
@@ -285,7 +287,7 @@ export function beginNote(n, it, caretAtEnd = true) {
   }
   function serialize() {
     let md = toMarkdown(rich);
-    if (termIn) md = (termIn.value.trim() + (md ? "\n" + md : "")).trim();
+    if (termIn) md = (termIn.value.trim() + (md ? "\n" + md : "")).replace(/\s+$/, "");
     if (ansBox) {
       const a = [...ansBox.querySelectorAll(".ansin")].map((i) => i.value.trim()).filter(Boolean);
       if (a.length) md = (md ? md + "\n" : "") + a.map((x) => "→ " + x).join("\n");
@@ -462,6 +464,7 @@ export function blockMenu(anchor, it) {
   const list = [];
   if (it.type === "markdown") {
     list.push({ label: "Роль…", on: () => roleMenu(anchor, it) });
+    if (it.role === "homework") list.push({ label: "Скопировать для чата", hint: "текст домашнего задания", on: () => copyForChat(it) });
     list.push({ label: it.title ? "Изменить заголовок" : "Добавить заголовок", on: () => editTitle(nodeOf(it.id), it) });
   } else if (it.type === "code") {
     list.push({ label: "Следующим к печати", on: () => cmd({ cmd: "arm", block: it.id }) });
@@ -470,9 +473,6 @@ export function blockMenu(anchor, it) {
     for (const [k, n] of PROFILES) list.push({ label: n, checked: (it.profile || "") === k, on: () => setFields(it.id, { profile: k }) });
     list.push({ sep: true });
     list.push({ label: it.title ? "Изменить заголовок" : "Добавить заголовок", on: () => editTitle(nodeOf(it.id), it) });
-    if (it.role === "homework") {
-      list.push({ label: "Скопировать для чата", hint: "текст домашнего задания", on: () => copyForChat(it) });
-    }
   } else if (it.type === "image") {
     list.push({ label: "Заменить картинку…", on: () => pickImage(it.id, true) });
     list.push({ label: it.title ? "Изменить подпись" : "Добавить подпись", on: () => editTitle(nodeOf(it.id), it) });

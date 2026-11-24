@@ -68,7 +68,7 @@ function noteContent(it) {
       c.appendChild(d);
     }
   } else if (it.role === "term") {
-    const [head, ...rest] = (it.text || "").trim().split("\n");
+    const [head, ...rest] = (it.text || "").replace(/\s+$/, "").split("\n");
     c.appendChild(el("div", "term", local ? head.trim() : (it.term || head.trim())));
     const d = el("div", "def");
     d.innerHTML = local ? mdHtml(rest.join("\n").trim()) : (it.html || "");

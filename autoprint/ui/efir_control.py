@@ -400,7 +400,8 @@ class EfirController(QObject):
         elif self.store.slide:                                      # слайд был у учеников — снова он
             self.mode, self.slide = MODE_SLIDE, dict(self.store.slide)
         self.publish()
-        self.show_timer()
+        if not w.lesson_id or getattr(self.settings, "start_timer", True):
+            self.show_timer()                       # урок ведут с экрана урока — мини-таймер только по настройке
 
     def _tick(self) -> None:
         """Раз в 5 с: «время вышло» перерыва постояло BREAK_HOLD_S — экран сам возвращается к фону (E6)."""

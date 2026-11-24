@@ -21,8 +21,15 @@ function wrap(mk, inner) {
   return m[2] ? m[1] + mk + m[2] + mk + m[3] : inner;
 }
 
+// набранный текст — как есть: «x**2», «*», «`» не превращаются в разметку
+const escText = (s) => s.replace(/[\\`*]/g, (c) => "\\" + c);
+// строка абзаца, которая выглядела бы списком, заголовком или ответом, — тоже как есть («2024. Год»)
+const escLine = (l) => l.replace(/^(\s*)(#{1,6}\s|[-+•]\s|→|->|\d+[.)]\s)/, (_m, sp, mk) =>
+  sp + (/^\d/.test(mk) ? mk.replace(/([.)])/, "\\$1") : "\\" + mk));
+const escLines = (s) => s.split("\n").map(escLine).join("\n");
+
 function inlineMd(node, ctx) {
-  if (node.nodeType === 3) return node.data.replace(/ /g, " ").replace(/\n/g, " ");
+  if (node.nodeType === 3) return escText(node.data.replace(/\u00a0/g, " ").replace(/\n/g, " "));
   if (node.nodeType !== 1) return "";
   const tag = node.tagName;
   if (tag === "BR") return "\n";
@@ -37,7 +44,9 @@ function inlineMd(node, ctx) {
     return text.trim() === href ? href : "[" + text.replace(/[[\]]/g, "") + "](" + href + ")";
   }
   if (tag === "IMG" || tag === "SCRIPT" || tag === "STYLE") return "";
-  const bold = (tag === "B" || tag === "STRONG" || boldStyle(node)) && !ctx.b;
+  if (tag === "TD" || tag === "TH") return kids(node, ctx) + " ";
+  const notBold = !!node.style && /^(normal|400|lighter)$/.test(node.style.fontWeight || "");   // обёртка Google Docs
+  const bold = ((tag === "B" || tag === "STRONG") && !notBold || boldStyle(node)) && !ctx.b;
   const ital = (tag === "I" || tag === "EM" || italicStyle(node)) && !ctx.i;
   let inner = kids(node, { b: ctx.b || bold, i: ctx.i || ital });
   if (ital) inner = wrap("*", inner);
@@ -82,13 +91,13 @@ function blockMd(node, ctx = {}) {
     return "#".repeat(level) + " " + kids(node, ctx).replace(/\s*\n\s*/g, " ").trim();
   }
   if ([...node.childNodes].some(isBlock)) return toMarkdown(node);       // div в div (вставка из браузера)
-  return tidy(kids(node, ctx));
+  return escLines(tidy(kids(node, ctx)));
 }
 
 export function toMarkdown(root) {
   const parts = [];
   let buf = "";
-  const flush = () => { const t = tidy(buf); if (t) parts.push(t); buf = ""; };
+  const flush = () => { const t = escLines(tidy(buf)); if (t) parts.push(t); buf = ""; };
   for (const n of root.childNodes) {
     if (isBlock(n)) { flush(); const t = blockMd(n); if (t.trim()) parts.push(t); }
     else buf += inlineMd(n, {});
@@ -110,9 +119,11 @@ function cleanNode(src, doc) {
     const st = (n.getAttribute("style") || "").toLowerCase();
     if (/mso-list:\s*ignore/.test(st) || /display:\s*none/.test(st)) continue;     // маркер списка Word, скрытое
     let tag = KEEP[n.tagName];
+    if (tag === "b" && /font-weight:\s*(normal|400)/.test(st)) tag = "";      // Google Docs: <b style="font-weight:normal">
     if (!tag && (n.tagName === "SPAN" || n.tagName === "FONT")) tag = boldStyle(n) ? "b" : italicStyle(n) ? "i" : "";
     if (n.tagName === "P" && /MsoListParagraph/i.test(n.className || "")) tag = "li";
     const inner = cleanNode(n, doc);
+    if (n.tagName === "TD" || n.tagName === "TH") inner.appendChild(doc.createTextNode(" "));   // ячейки — через пробел
     if (!tag) { frag.appendChild(inner); continue; }
     const e = doc.createElement(tag);
     if (tag === "a") {
