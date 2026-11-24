@@ -177,11 +177,15 @@ function lessonsMenu(anchor) {
   const fill = () => {
     list.innerHTML = "";
     const q = inp.value.trim().toLowerCase();
-    for (const x of (A.S.lessons || []).filter((x) => !q || x.title.toLowerCase().includes(q))) {
+    const all = (A.S.lessons || []).filter((x) => !q || x.title.toLowerCase().includes(q));
+    const plansL = all.filter((x) => x.kind === "plan"), lessonsL = all.filter((x) => x.kind !== "plan");
+    const add = (x) => {
       const b = el("button", "mi" + (L && x.id === L.id ? " on" : ""));
       b.appendChild(el("span", "ml", x.title));
-      const meta = [x.stages ? durText(x.total) : "", x.stages ? x.stages + " " + plural(x.stages, "этап", "этапа", "этапов") : "",
-        x.codes ? x.codes + " " + plural(x.codes, "код", "кода", "кодов") : "без кода"].filter(Boolean).join(" · ");
+      const meta = x.kind === "plan"
+        ? [x.stages ? durText(x.total) : "", x.stages ? x.stages + " " + plural(x.stages, "этап", "этапа", "этапов") : ""].filter(Boolean).join(" · ")
+        : [x.stages ? durText(x.total) : "", x.stages ? x.stages + " " + plural(x.stages, "этап", "этапа", "этапов") : "",
+          x.codes ? x.codes + " " + plural(x.codes, "код", "кода", "кодов") : "без кода", x.plan ? "план «" + x.plan + "»" : ""].filter(Boolean).join(" · ");
       b.appendChild(el("span", "mh", meta));
       b.onclick = () => {
         closeMenu();
@@ -190,12 +194,31 @@ function lessonsMenu(anchor) {
         cmd({ cmd: "open", lesson: x.id, force: !!live });
       };
       list.appendChild(b);
+    };
+    if (plansL.length) {                      // есть планы — две группы
+      list.appendChild(el("div", "mhead", "Планы"));
+      plansL.forEach(add);
+      if (lessonsL.length) list.appendChild(el("div", "mhead", "Уроки"));
     }
+    lessonsL.forEach(add);
   };
   fill();
   inp.addEventListener("input", fill);
-  // «Новый урок»: пустой или по шаблону структуры (этапы с минутами)
+  // «Новый урок»: по плану, пустой или по шаблону структуры (этапы с минутами), новый план
   const news = [{ head: "Новый урок" }];
+  for (const p of A.S.plans || []) {
+    const nb = el("button", "mi newl");
+    nb.appendChild(icon("plus"));
+    nb.appendChild(el("span", "ml", "По плану «" + p.title + "»"));
+    if (p.minutes) nb.appendChild(el("span", "mh", durText(p.minutes)));
+    nb.onclick = () => {
+      closeMenu();
+      if (live && !confirm("Идёт урок «" + L.title + "». Завершить его и начать новый?")) return;
+      cmd({ cmd: "new_lesson", force: !!live, plan: p.id });
+      setMode("prep", true);
+    };
+    news.push({ node: nb });
+  }
   const structs = (A.S.structures && A.S.structures.length) ? A.S.structures : [{ key: "empty", title: "Пустой урок", minutes: 0 }];
   for (const s of structs) {
     const nb = el("button", "mi newl");
@@ -210,6 +233,17 @@ function lessonsMenu(anchor) {
     };
     news.push({ node: nb });
   }
+  const np = el("button", "mi newp");
+  np.appendChild(icon("plus"));
+  np.appendChild(el("span", "ml", "Новый план урока"));
+  np.appendChild(el("span", "mh", "этапы и минуты для многих уроков"));
+  np.onclick = () => {
+    closeMenu();
+    if (live && !confirm("Идёт урок «" + L.title + "». Завершить его и начать новый план?")) return;
+    cmd({ cmd: "new_plan", force: !!live, structure: "empty" });
+    setMode("prep", true);
+  };
+  news.push({ sep: true }, { node: np });
   menu(anchor, [{ node: box }, { sep: true }, ...news], { cls: "lessons" });
   inp.focus();
 }
@@ -291,8 +325,28 @@ function moreMenu(anchor) {
   items.push({ label: hasSlides ? "Промпт для слайдов…" : "Промпт для своего чата…", hint: "ChatGPT, GigaChat, Алиса, DeepSeek",
     on: () => cmd({ cmd: "chat_prompt" }) });
   items.push({ label: "Вставить ответ нейросети…", hint: "копия урока", on: answerBox });
-  items.push({ label: "Удалить урок…", danger: true, on: () => {
-    if (confirm("Удалить урок «" + L.title + "»? Копия прошлой базы — data/templates.json.bak")) cmd({ cmd: "delete_lesson" });
+  // план урока: открыть / отвязать; обычный урок — сделать из этапов план или привязать к плану
+  const isPlan = L.kind === "plan";
+  if (!isPlan) {
+    const plansL = (A.S.plans || []);
+    const hasStages = stagesOf(A.items).length > 0;
+    if (L.fixed && L.plan) {
+      items.push({ head: "План урока" });
+      items.push({ label: "Открыть план «" + L.plan.title + "»", on: openPlan });
+      items.push({ label: "Отвязать от плана…", on: () => {
+        if (confirm("Отвязать урок «" + L.title + "» от плана «" + L.plan.title + "»? Этапы останутся, но правка плана их больше не изменит.")) cmd({ cmd: "unlink_plan" });
+      } });
+    } else if (hasStages || plansL.length) {
+      items.push({ head: "План урока" });
+      if (hasStages) items.push({ label: "Сделать из этапов план", hint: "этапы и минуты — для многих уроков", on: () => cmd({ cmd: "make_plan" }) });
+      for (const p of plansL) items.push({ label: "Привязать к плану «" + p.title + "»", on: () => cmd({ cmd: "link_plan", plan: p.id }) });
+    }
+  }
+  items.push({ label: isPlan ? "Удалить план…" : "Удалить урок…", danger: true, on: () => {
+    const n = (L.topics || []).length;
+    const q = isPlan ? "Удалить план «" + L.title + "»?" + (n ? " Уроки по нему (" + n + ") останутся с этими этапами, но без связи." : "")
+      : "Удалить урок «" + L.title + "»?";
+    if (confirm(q + " Копия прошлой базы — data/templates.json.bak")) cmd({ cmd: "delete_lesson" });
   } });
   menu(anchor, items, { right: true });
 }
@@ -511,7 +565,33 @@ function answerBox() {
 function toolsBusy() { const a = document.activeElement; return !!a && a !== document.body && $("tools").contains(a); }
 $("tools").addEventListener("focusout", () => setTimeout(() => { if (headerStale && !toolsBusy()) { headerStale = false; renderTools(); } }, 0));
 
+// под названием — «по плану «X» ↗»; у плана в «Подготовке» — полоса: чей это план и что такое заготовки
+function renderPlanInfo() {
+  const L = A.S && A.S.lesson;
+  const link = $("planlink"), banner = $("planbanner");
+  const linked = !!(L && L.fixed && L.plan);
+  link.hidden = !linked;
+  if (linked) link.textContent = "по плану «" + L.plan.title + "» ↗";
+  const show = !!(L && L.kind === "plan" && A.mode === "prep");
+  banner.hidden = !show;
+  if (!show) return;
+  banner.innerHTML = "";
+  const topics = L.topics || [];
+  const line = el("div");
+  line.appendChild(el("b", "", "План урока"));
+  line.appendChild(document.createTextNode(": этапы и минуты для всех уроков по нему (" + topics.length + ")" + (topics.length ? ": " : ". Уроков пока нет — «Новый урок» у названия ▾.")));
+  topics.forEach((x, i) => {
+    const b = el("button", "linkbtn", x.title);
+    b.onclick = () => cmd({ cmd: "open", lesson: x.id, force: !!A.S.live });
+    line.appendChild(b);
+    if (i < topics.length - 1) line.appendChild(document.createTextNode(", "));
+  });
+  banner.appendChild(line);
+  banner.appendChild(el("small", "", "Заметки плана — заготовки: попадут в новые уроки по этому плану."));
+}
+
 export function renderTools() {
+  renderPlanInfo();
   if (toolsBusy()) { headerStale = true; return; }
   const t = $("tools");
   t.innerHTML = "";
@@ -860,7 +940,7 @@ $("main").addEventListener("click", (e) => {
     const it = A.byId.get(st.id.slice(3));
     if (!it) return;
     if (t.closest(".stitle")) E.editStageTitle(t.closest(".stitle"), it);
-    else if (t.closest(".mins")) E.editStageMinutes(t.closest(".mins"), it);
+    else if (t.closest(".mins") && !t.closest(".mins.fixed")) E.editStageMinutes(t.closest(".mins"), it);
     else if (t.closest(".kindbtn")) E.kindMenu(t.closest(".kindbtn"), it);
     else if (t.closest(".smore")) E.stageMenu(t.closest(".smore"), it);
     return;
@@ -1054,6 +1134,18 @@ $("lessonsBtn").addEventListener("click", () => lessonsMenu($("lessonsBtn")));
 // ---------------------------------------------------------------- связь с программой
 Q.Q.onChange = saveChip;
 Q.Q.onError = (text) => toast(text);
+window.__suflor = { push: Q.push, busy: Q.busy };     // для проверок: правка в очередь, сколько ждёт
+
+// урок по плану → открыть план (идёт урок — как переход к другому уроку: спросить, завершить ли)
+function openPlan() {
+  const L = A.S && A.S.lesson;
+  if (!L || !L.plan) return;
+  if (A.S.live && !confirm("Идёт урок «" + L.title + "». Завершить его и открыть «" + L.plan.title + "»?")) return;
+  cmd({ cmd: "open", lesson: L.plan.id, force: !!A.S.live });
+  setMode("prep", true);
+}
+window.addEventListener("suflor:open-plan", openPlan);
+$("planlink").addEventListener("click", openPlan);
 Q.Q.onResult = (res) => {
   for (const [id, it] of Object.entries(res.items || {})) {
     if (it) A.fresh.set(id, it);

@@ -115,6 +115,25 @@ class Page(unittest.TestCase):
         self.js(f"document.querySelector('.seg.modes button:{'first' if m == 'prep' else 'last'}-child').click()")
         self.assertTrue(self.edge.wait(f"document.body.classList.contains('mode-{m}')"))
 
+    def republish(self):
+        self.win.lesson._last = None
+        self.win.lesson.publish()
+        pump(100)
+
+    def go_live(self, minutes_ago: float = 0):
+        from datetime import timedelta
+        ef = self.win.efir
+        ef.launch_lesson(self.win.printer.focus(), start="")
+        live = ef.store.live
+        ef.store.set_live(live.webinar_id, live.anchor - timedelta(minutes=minutes_ago))
+        ef.live_changed.emit()
+        self.win.lesson.publish()
+
+    def stop_live(self):
+        self.win.efir.stop_live()
+        self.win.lesson.publish()
+        pump(200)
+
     def tearDown(self):
         errs = self.edge.errors()
         self.edge.events.clear()
@@ -583,20 +602,6 @@ class PageV11Test(Page):
         self.js("document.body.dispatchEvent(new MouseEvent('mousedown', {bubbles: true}))")
 
     # ---------------------------------------------------------------- Task 2: «Урок» ничего не делает сам
-    def go_live(self, minutes_ago: float = 0):
-        from datetime import timedelta
-        ef = self.win.efir
-        ef.launch_lesson(self.t, start="")
-        live = ef.store.live
-        ef.store.set_live(live.webinar_id, live.anchor - timedelta(minutes=minutes_ago))
-        ef.live_changed.emit()
-        self.win.lesson.publish()
-
-    def stop_live(self):
-        self.win.efir.stop_live()
-        self.win.lesson.publish()
-        pump(200)
-
     def test_no_auto_collapse(self):
         self.mode("lesson")
         try:
@@ -881,6 +886,110 @@ class PagePerfTest(Page):
         pump(1200)
         self.assertEqual(self.js("window.__renders()"), before)
         self.js("document.activeElement.blur()")
+
+
+def plan_lessons() -> list[Template]:
+    """Урок «Функции» по плану «Онлайн 90» (этапы ts1…ts4), сам план и обычный урок."""
+    from autoprint import plans
+    p = Template("Онлайн 90", [stage("Приветствие", 5, id="p1"), stage("Теория", 20, id="p2"),
+                               stage("Перерыв", 10, id="p3", stage_kind="break"), stage("Практика", 30, id="p4")],
+                 id="P", kind="plan")
+    t = plans.new_topic(p, "Функции")
+    t.id = "T"
+    for i, b in enumerate(b for b in t.blocks if b.type == BLOCK_STAGE):
+        b.id = f"ts{i + 1}"
+    return [t, p, Template("Свободный", [stage("А", 5, id="fa"), note("Текст", id="fn")], id="F")]
+
+
+class PageV12Test(Page):
+    """0.12: урок по плану, страница плана, меню «По плану»."""
+    templates = staticmethod(plan_lessons)
+
+    def setUp(self):
+        self.js("window.confirm = () => true")
+        if self.win.printer.focus_id != "T":
+            self.open_lesson("T")
+
+    def open_lesson(self, lid):
+        self.win.open_lesson(lid, ask=False)
+        self.republish()
+        title = self.store.get(lid).title
+        self.assertTrue(self.edge.wait(f"document.getElementById('titleText').textContent === {title!r}"))
+
+    def close_menu(self):
+        self.js("document.body.dispatchEvent(new MouseEvent('mousedown', {bubbles: true}))")
+
+    def test_fixed_topic_stage_readonly(self):
+        self.mode("prep")
+        self.assertTrue(self.edge.wait("!!document.querySelector('#st-ts1 .mins.fixed')"))
+        self.assertTrue(self.js("document.querySelector('#st-ts1 .kindbtn').disabled"))
+        self.assertFalse(self.js("!!document.querySelector('#plan input.pmin')"))
+        self.assertIn("из плана «Онлайн 90»", self.js("document.querySelector('#plan .phint').textContent"))
+        self.assertIn("Онлайн 90", self.js("document.getElementById('planlink').textContent"))
+        self.assertFalse(self.js("document.getElementById('planlink').hidden"))
+        self.js("document.querySelector('.ins .insbtn').click()")
+        self.assertTrue(self.edge.wait("!!document.querySelector('.menu')"))
+        self.assertFalse(self.js("[...document.querySelectorAll('.menu .mi')].some(b => b.textContent.startsWith('Этап'))"))
+        self.close_menu()
+
+    def test_refused_edit_shows_message_no_retry(self):     # Review Focus 5
+        self.js("window.__suflor.push({op: 'set', block: 'ts1', fields: {minutes: 3}})")
+        self.assertTrue(self.edge.wait("document.getElementById('toast').textContent.includes('задаёт план')"))
+        self.assertTrue(self.edge.wait("window.__suflor.busy() === 0", 5))
+        self.assertEqual(self.store.get("T").find_block("ts1").minutes, 5)
+
+    def test_edit_in_plan_while_live_asks(self):            # Review Focus 1, вторая часть
+        self.mode("lesson")
+        self.go_live(1)
+        try:
+            self.mode("prep")
+            self.js("window.__confirmText = ''; window.confirm = (t) => { window.__confirmText = t; return false; }")
+            self.js("document.querySelector('#st-ts1 .smore').click()")
+            self.assertTrue(self.edge.wait("!!document.querySelector('.menu')"))
+            self.js("[...document.querySelectorAll('.menu .mi')].find(b => b.textContent.startsWith('Изменить в плане')).click()")
+            self.assertIn("Завершить его и открыть «Онлайн 90»", self.js("window.__confirmText"))
+            pump(200)
+            self.assertEqual(self.win.printer.focus_id, "T")                         # отказались — урок идёт дальше
+            self.assertTrue(self.win.efir.live_lesson_id())
+        finally:
+            self.stop_live()
+
+    def test_unlink_from_stage_menu(self):
+        self.mode("prep")
+        self.js("document.querySelector('#st-ts2 .smore').click()")
+        self.assertTrue(self.edge.wait("!!document.querySelector('.menu')"))
+        self.js("[...document.querySelectorAll('.menu .mi')].find(b => b.textContent.startsWith('Отвязать урок от плана')).click()")
+        self.assertTrue(self.wait_py(lambda: self.store.get("T").plan_id == ""))
+        self.assertTrue(self.edge.wait("!document.querySelector('#st-ts1 .mins.fixed')"))
+        self.win.link_plan(self.store.get("T"), "P")                                 # вернуть для других тестов
+        self.republish()
+
+    def test_plan_stage_delete_asks_when_used(self):
+        self.open_lesson("P")
+        self.mode("prep")
+        self.js("window.__confirmText = ''; window.confirm = (t) => { window.__confirmText = t; return false; }")
+        self.js("document.querySelector('#st-p2 .smore').click()")
+        self.assertTrue(self.edge.wait("!!document.querySelector('.menu')"))
+        self.js("[...document.querySelectorAll('.menu .mi')].find(b => b.textContent.startsWith('Удалить этап')).click()")
+        self.assertIn("В уроках по этому плану (1) заметки этапа «Теория» переедут в «Приветствие»",
+                      self.js("window.__confirmText"))
+        pump(200)
+        self.assertIsNotNone(self.store.get("P").find_block("p2"))
+
+    def test_plan_page_banner_and_new_topic(self):
+        self.open_lesson("P")
+        self.mode("prep")
+        self.assertTrue(self.edge.wait("document.getElementById('planbanner').textContent.includes('Функции')"))
+        self.assertFalse(self.js("document.getElementById('planbanner').hidden"))
+        self.js("document.getElementById('lessonsBtn').click()")
+        self.assertTrue(self.edge.wait("!!document.querySelector('.menu .mi.newl')"))
+        self.assertIn("По плану «Онлайн 90»", self.js("document.querySelector('.menu .mi.newl').textContent"))
+        heads = self.js("[...document.querySelectorAll('.menu .mhead, .menu .head')].map(x => x.textContent)")
+        self.assertIn("Планы", heads)
+        self.close_menu()
+        self.open_lesson("F")
+        self.assertTrue(self.js("document.getElementById('planbanner').hidden"))
+        self.assertTrue(self.js("document.getElementById('planlink').hidden"))
 
 
 if __name__ == "__main__":

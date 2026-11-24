@@ -103,6 +103,7 @@ main { flex: 999 1 560px; min-width: 0; display: flex; flex-direction: column; g
   border: 1px solid var(--stroke2); border-radius: 6px; padding: 3px 6px; text-align: right; font-variant-numeric: tabular-nums; }
 body.mode-prep .prow .pmin { display: block; }
 body.mode-prep .prow .m { display: none; }
+body.mode-prep .prow .m.fixed { display: inline; }      /* урок по плану: минуты — из плана, без поля */
 body.mode-prep .prow[draggable="true"] { cursor: grab; }
 .prow.past { color: var(--faint); }
 .prow.past .n { text-decoration: line-through; }
@@ -146,6 +147,17 @@ body.mode-prep .sedit { display: flex; }
 .sedit .mins { font-variant-numeric: tabular-nums; font-weight: 700; min-width: 2.6em; }
 .sedit .minsu { font-size: 13px; color: var(--dim); margin-right: 6px; }
 .sedit .kindbtn.on { color: var(--accent); border-color: var(--accent-line); }
+/* урок по плану: этапы и минуты — из плана, здесь только видно */
+.sedit .mins.fixed { display: inline-flex; align-items: center; justify-content: flex-end; color: var(--dim); }
+.sedit .kindbtn:disabled { opacity: .45; cursor: default; }
+#planlink { min-height: 0; padding: 0; margin-top: 2px; border: none; background: none; color: var(--accent);
+  font-size: 13px; font-weight: 600; cursor: pointer; text-align: left; }
+#planlink:hover { text-decoration: underline; }
+#planbanner { margin: 14px 24px 0; padding: 12px 16px; border: 1px solid var(--accent-line); border-radius: 12px;
+  background: var(--panel); font-size: 14px; line-height: 1.5; }
+#planbanner b { font-weight: 700; }
+#planbanner .linkbtn { margin: 0 2px; }
+#planbanner small { display: block; color: var(--dim); font-size: 13px; margin-top: 2px; }
 .left { text-align: right; }
 body.mode-prep .left { display: none; }
 .left .lbl2 { font-size: 11px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; color: var(--dim); }
@@ -446,7 +458,7 @@ body.mode-lesson.plan-strip.plan-open nav#plan { display: block; position: fixed
     --t-c:#777; --t-k:#9A5500; --t-b:#0F6A85; --t-f:#1F5FBF; --t-cl:#7A4E00; --t-d:#7A4E00; --t-t:#B00020; --t-a:#8A4513;
     --t-s:#1E6B2B; --t-n:#6B2FB0; --t-o:#555; font-size: 12px; }
   header { position: static; border: none; padding: 0 0 8px; } .tools, #legend, #offline, #toast, #nowbar, #strip, .rtb, .toscreen, .armbtn, .efirbtn, .phint, .ins,
-  .blk > .tools, .sedit, #lessonsBtn, .pmin { display: none !important; }
+  .blk > .tools, .sedit, #lessonsBtn, .pmin, #planlink, #planbanner { display: none !important; }
   #wrap { display: block; padding: 0; } nav#plan { position: static; max-height: none; overflow: visible; margin-bottom: 14px; }
   .stage { break-inside: auto; margin-bottom: 10px; } .stage .body, .stage.collapsed .body { display: block !important; }
   body.mode-prep .body { padding-left: 20px; } .prow .m { display: inline !important; }
@@ -471,12 +483,14 @@ body.mode-lesson.plan-strip.plan-open nav#plan { display: block; position: fixed
     <div style="min-width:0">
       <div class="kicker" id="kicker">Экран урока · AutoPrintCode</div>
       <h1 id="title"><span id="titleText">Экран урока</span><button id="lessonsBtn" title="Другой урок или новый" aria-label="Список уроков" hidden><span class="ic"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></span></button></h1>
+      <button id="planlink" title="Открыть план: этапы и минуты для всех уроков по нему" hidden></button>
     </div>
   </div>
   <div class="tools" id="tools"></div>
   <div id="strip" aria-label="План урока строкой" hidden></div>
 </header>
 <section id="legend" hidden aria-label="Обозначения"><div class="grid" id="legendGrid"></div></section>
+<section id="planbanner" hidden aria-label="План урока"></section>
 <div id="wrap">
   <nav id="plan" aria-label="План урока" hidden></nav>
   <main id="main"><div class="hello">Подключаюсь к AutoPrintCode…</div></main>

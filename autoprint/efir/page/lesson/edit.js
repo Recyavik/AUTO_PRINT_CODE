@@ -492,7 +492,7 @@ export function insertMenu(anchor, after) {
   const items = [];
   for (const g of groups) {
     items.push({ head: g.title });
-    if (g.title === "Урок") {
+    if (g.title === "Урок" && !(A.S.lesson && A.S.lesson.fixed)) {     // урок по плану: этапы — в плане
       items.push({ label: "Этап", hint: "строка плана с минутами", on: () => {
         const id = insertBlock(after, "stage");
         requestAnimationFrame(() => requestAnimationFrame(() => {
@@ -550,11 +550,33 @@ function askText(anchor, title, value, onCommit) {
 }
 
 export function stageMenu(anchor, it) {
+  const L = A.S.lesson;
+  if (L.fixed && L.plan) {                    // урок по плану: этапы и минуты меняются в плане
+    menu(anchor, [
+      { label: "Изменить в плане «" + L.plan.title + "»", hint: "этапы и минуты — у всех уроков по плану",
+        on: () => window.dispatchEvent(new Event("suflor:open-plan")) },
+      { label: "Отвязать урок от плана…", hint: "этапы останутся, их можно будет править здесь", on: () => {
+        if (confirm("Отвязать урок «" + L.title + "» от плана «" + L.plan.title + "»? Этапы останутся, но правка плана их больше не изменит.")) {
+          cmd({ cmd: "unlink_plan" });
+        }
+      } },
+    ], { right: true });
+    return;
+  }
   menu(anchor, [
     { label: it.part ? "Раздел: " + it.part : "Раздел…", hint: "группа этапов в плане", on: () => askText(anchor, "Раздел (часть урока)", it.part || "", (v) => setFields(it.id, { part: v })) },
     { label: it.note ? "Пометка: " + it.note : "Пометка…", hint: "строка под названием", on: () => askText(anchor, "Пометка этапа", it.note || "", (v) => setFields(it.id, { text: v })) },
     { sep: true },
-    { label: "Удалить этап", hint: "блоки останутся", danger: true, on: () => deleteBlock(it.id) },
+    { label: "Удалить этап", hint: "блоки останутся", danger: true, on: () => {
+      const use = (L.kind === "plan" && L.stage_use && L.stage_use[it.id]) || 0;
+      if (use) {                              // план: заметки этого этапа в уроках переедут в соседний этап
+        const st = A.items.filter((x) => x.type === "stage");
+        const i = st.findIndex((x) => x.id === it.id);
+        const y = (st[i - 1] || st[i + 1] || {}).title || "Этап";
+        if (!confirm("В уроках по этому плану (" + use + ") заметки этапа «" + (it.title || "Этап") + "» переедут в «" + y + "». Удалить этап?")) return;
+      }
+      deleteBlock(it.id);
+    } },
   ], { right: true });
 }
 

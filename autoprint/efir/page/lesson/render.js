@@ -295,7 +295,9 @@ function insNode(after) {
 // ---------------------------------------------------------------- этапы
 function stageHead(art, it, info, pn) {
   let sh = art.querySelector(":scope > .sh");
-  const key = String(it.v) + (it.dirty ? "*" : "") + "|" + (pn || "") + "|" + it.title + "|" + it.minutes + "|" + it.kind + "|" + it.part + "|" + it.note;
+  const L = A.S && A.S.lesson;
+  const fixed = !!(L && L.fixed && L.plan);       // урок по плану: этапы и минуты — из плана
+  const key = String(it.v) + (it.dirty ? "*" : "") + "|" + (pn || "") + "|" + it.title + "|" + it.minutes + "|" + it.kind + "|" + it.part + "|" + it.note + "|" + (fixed ? L.plan.title : "");
   if (sh && sh.dataset.k === key) return sh;
   if (sh && sh.contains(document.activeElement)) return sh;
   const fresh = el("div", "sh");
@@ -311,17 +313,18 @@ function stageHead(art, it, info, pn) {
   sht.appendChild(h);
   fresh.appendChild(sht);
   const ed = el("div", "sedit");
-  const mins = el("button", "mins", String(it.minutes || 0));
-  mins.title = "Минуты этапа — щёлкните и наберите";
+  const mins = el(fixed ? "span" : "button", fixed ? "mins fixed" : "mins", String(it.minutes || 0));
+  mins.title = fixed ? "Минуты — из плана «" + L.plan.title + "»" : "Минуты этапа — щёлкните и наберите";
   ed.appendChild(mins);
   ed.appendChild(el("span", "minsu", "мин"));
   const kind = el("button", "kindbtn");
   kind.title = it.kind === "break" ? "Вид этапа: перерыв" : it.kind === "exercise" ? "Вид этапа: зарядка" : "Вид этапа: обычный";
   kind.appendChild(icon(it.kind === "break" ? "break" : it.kind === "exercise" ? "exercise" : "stage"));
   kind.classList.toggle("on", !!it.kind);
+  kind.disabled = fixed;
   ed.appendChild(kind);
   const more = el("button", "smore");
-  more.title = "Раздел, пометка, удалить этап";
+  more.title = fixed ? "Изменить в плане, отвязать от плана" : "Раздел, пометка, удалить этап";
   more.appendChild(icon("more"));
   ed.appendChild(more);
   fresh.appendChild(ed);
@@ -482,6 +485,7 @@ export function renderPlan() {
   if (plan.contains(document.activeElement)) { plan.dataset.stale = "1"; return; }
   plan.dataset.stale = "";
   plan.innerHTML = "";
+  const fixed = !!(L.fixed && L.plan);
   const head = el("div", "ptitle");
   head.appendChild(el("h2", "", "План урока"));
   head.appendChild(el("span", "ptotal", durText(stages.reduce((a, s) => a + s.minutes, 0))));
@@ -500,25 +504,35 @@ export function renderPlan() {
     name.title = A.mode === "prep" ? "Перейти к этапу (перетащите строку, чтобы перенести этап)" : "Перейти к этапу";
     line.appendChild(name);
     if (s.item.kind) line.appendChild(icon(s.item.kind === "break" ? "break" : "exercise"));
-    const m = el("input", "pmin");
-    m.value = String(s.minutes);
-    m.inputMode = "numeric";
-    m.maxLength = 3;
-    m.title = "Минуты этапа: наберите и нажмите Enter";
-    m.setAttribute("aria-label", "Минуты этапа «" + (s.item.title || "Этап") + "»");
-    line.appendChild(m);
-    line.appendChild(el("span", "m", String(s.minutes)));
+    if (!fixed) {
+      const m = el("input", "pmin");
+      m.value = String(s.minutes);
+      m.inputMode = "numeric";
+      m.maxLength = 3;
+      m.title = "Минуты этапа: наберите и нажмите Enter";
+      m.setAttribute("aria-label", "Минуты этапа «" + (s.item.title || "Этап") + "»");
+      line.appendChild(m);
+    }
+    line.appendChild(el("span", fixed ? "m fixed" : "m", String(s.minutes)));
     row.appendChild(line);
     const bar = el("div", "pbar2");
     bar.appendChild(el("i"));
     row.appendChild(bar);
-    row.draggable = A.mode === "prep";
+    row.draggable = A.mode === "prep" && !fixed;
     plan.appendChild(row);
   }
   const P = A.S && A.S.print;
   if (P && P.block) {
     const owner = stageOfBlock(P.block);
     if (owner) $("pr-" + owner)?.classList.add("has-armed");
+  }
+  if (fixed) {
+    const h = el("p", "phint", "Этапы и минуты — из плана «" + L.plan.title + "». ");
+    const b = el("button", "linkbtn openplan", "Открыть план");
+    b.onclick = () => window.dispatchEvent(new Event("suflor:open-plan"));
+    h.appendChild(b);
+    plan.appendChild(h);
+    return;
   }
   plan.appendChild(el("p", "phint", A.mode === "prep" ? "Минуты правятся прямо здесь." :
     (A.S.live ? "Щёлкните по этапу — урок пойдёт с него." : "Щёлкните по этапу — перейти к нему.")));

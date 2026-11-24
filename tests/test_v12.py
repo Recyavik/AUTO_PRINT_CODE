@@ -454,5 +454,54 @@ class LibraryTest(unittest.TestCase):
             close(win)
 
 
+# ================================================================ Task 5: состояние страницы — план и урок по плану
+
+BASE = dict(live_anchor_ms=None, media_url=lambda p: "", presets=[], preset="", dark=True, efir_mode="", tab="",
+            hotkey="Ctrl+F9")
+
+
+class StateTest(unittest.TestCase):
+    def test_state_for_topic_and_plan(self):
+        from autoprint import scenario
+        p = plan90()
+        t = plans.new_topic(p, "Функции")
+        t2 = plans.new_topic(p, "Циклы")
+        t2.blocks = [b for b in t2.blocks if not (b.type == BLOCK_MARKDOWN and b.role == "say")]   # под этапами пусто
+        s = scenario.lesson_state(t, plan=p, topics=[], plans=[p], **BASE)
+        L = s["lesson"]
+        self.assertEqual((L["kind"], L["plan"], L["fixed"], L["topics"]), ("", {"id": "P", "title": "Онлайн 90"}, True, []))
+        self.assertEqual(s["plans"], [{"id": "P", "title": "Онлайн 90", "minutes": 65}])
+        s2 = scenario.lesson_state(p, plan=None, topics=[t, t2], plans=[p], **BASE)
+        L2 = s2["lesson"]
+        self.assertEqual((L2["kind"], L2["fixed"], L2["plan"]), ("plan", False, None))
+        self.assertEqual(L2["topics"], [{"id": t.id, "title": "Функции"}, {"id": t2.id, "title": "Циклы"}])
+        self.assertEqual(L2["stage_use"], {"p1": 1, "p2": 1, "p3": 0, "p4": 1})        # «Циклы» — без заметок
+        free = scenario.lesson_state(Template("Св", [stage("А", 5)]), **BASE)["lesson"]
+        self.assertEqual((free["kind"], free["plan"], free["fixed"]), ("", None, False))
+        ls = scenario.lessons_state([p, t])
+        self.assertEqual([(x["kind"], x["plan"]) for x in ls], [("plan", ""), ("", "Онлайн 90")])
+
+    def test_page_commands(self):
+        p = plan90()
+        f = Template("Свободный", [stage("А", 5), note("x")], id="F")
+        win = window([f, p], 18909)
+        try:
+            win.printer.set_focus("F")
+            win.lesson.command({"cmd": "new_lesson", "plan": "P"})
+            self.assertEqual(len(win.store.topics_of("P")), 1)
+            win.lesson.command({"cmd": "new_plan", "structure": "school45"})
+            self.assertEqual(len(win.store.plans()), 2)
+            win.printer.set_focus("F")
+            win.lesson.command({"cmd": "link_plan", "plan": "P"})
+            self.assertEqual(win.store.get("F").plan_id, "P")
+            win.lesson.command({"cmd": "unlink_plan"})
+            self.assertEqual(win.store.get("F").plan_id, "")
+            win.lesson.command({"cmd": "make_plan"})
+            self.assertTrue(win.store.get("F").plan_id)
+            self.assertEqual(len(win.store.plans()), 3)
+        finally:
+            close(win)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -20,7 +20,7 @@ from PySide6.QtGui import QDesktopServices
 
 from .. import scenario
 from ..efir.model import norm_hhmm, parse_hhmm
-from ..storage import STRUCTURES, Template
+from ..storage import KIND_PLAN, STRUCTURES, Template
 from .theme import theme
 
 log = logging.getLogger(__name__)
@@ -182,7 +182,10 @@ class LessonController(QObject):
             printer=self.main.printer.snapshot(), lessons=scenario.lessons_state(self.main.store.templates),
             exercises=bool(preset is not None and preset.exercises), edits=self.edits, other_live=other_live,
             prefs={k: getattr(self.main.settings, k) for k in PREFS},
-            structures=[{"key": k, "title": v[0], "minutes": sum(s[1] for s in v[1])} for k, v in STRUCTURES.items()])
+            structures=[{"key": k, "title": v[0], "minutes": sum(s[1] for s in v[1])} for k, v in STRUCTURES.items()],
+            plan=self.main.store.get(t.plan_id) if t is not None and t.plan_id else None,
+            topics=self.main.store.topics_of(t.id) if t is not None and t.kind == KIND_PLAN else (),
+            plans=self.main.store.plans())
         # во время зарядки экран эфира шлёт ход видео раз в секунду: странице суфлёра от этого ничего не
         # меняется — не перерисовывать её (иначе пересоздаются кнопки и теряются щелчки)
         key = json.dumps(state, ensure_ascii=False, sort_keys=True)
@@ -474,7 +477,16 @@ class LessonController(QObject):
             elif cmd == "print_settings":
                 self.main.printer.set_option(str(d.get("key") or ""), d.get("value"))
             elif cmd == "new_lesson":
-                self._new_lesson(bool(d.get("force")), str(d.get("structure") or "empty"))
+                self._new_lesson(bool(d.get("force")), str(d.get("structure") or "empty"), str(d.get("plan") or ""))
+            elif cmd == "new_plan":
+                if self._may_leave_live(bool(d.get("force"))):
+                    self.main.new_plan(str(d.get("structure") or "empty"))
+            elif cmd == "make_plan" and t is not None:
+                self.main.make_plan(t)
+            elif cmd == "link_plan" and t is not None:
+                self.main.link_plan(t, str(d.get("plan") or ""))
+            elif cmd == "unlink_plan" and t is not None:
+                self.main.unlink_plan(t)
             elif cmd == "delete_lesson" and t is not None:
                 self.main.delete_lesson(t, ask=False)
             elif cmd == "export" and t is not None and d.get("fmt") in ("md", "ipynb", "students", "json"):
@@ -523,12 +535,22 @@ class LessonController(QObject):
             log.warning("Команда экрана урока %r не выполнена: %s", d, e)
         self.schedule_publish()
 
-    def _new_lesson(self, force: bool, structure: str = "empty") -> None:
-        """«Новый урок» со страницы (пустой или по шаблону структуры): идёт урок — его завершают (страница спросила)."""
+    def _may_leave_live(self, force: bool) -> bool:
+        """Новый урок или план со страницы: идёт урок — его завершают, только если страница спросила (force)."""
         if self.efir.live_lesson_id():
             if not force:
-                return
+                return False
             self.efir.stop_live()
+        return True
+
+    def _new_lesson(self, force: bool, structure: str = "empty", plan: str = "") -> None:
+        """«Новый урок» со страницы (по плану, пустой или по шаблону структуры): идёт урок — его завершают
+        (страница спросила)."""
+        if not self._may_leave_live(force):
+            return
+        if plan:
+            self.main.new_topic(plan)
+            return
         nt = self.main.store.add_from_structure(structure)
         self.main.touch(nt)
         self.main._fill_library(nt.id)

@@ -326,18 +326,32 @@ def role_groups_state() -> list[dict]:
 
 
 def lessons_state(templates) -> list[dict]:
-    """Список уроков для переключателя на странице."""
-    from .storage import is_printable
+    """Список уроков для переключателя на странице: план или урок, название плана урока."""
+    from .storage import KIND_PLAN, is_printable
+    titles = {t.id: t.title for t in templates if t.kind == KIND_PLAN}
     return [{"id": t.id, "title": t.title, "total": total_minutes(t),
              "stages": sum(1 for b in t.blocks if b.type == BLOCK_STAGE),
-             "codes": sum(1 for b in t.blocks if is_printable(b)), "updated": t.updated} for t in templates]
+             "codes": sum(1 for b in t.blocks if is_printable(b)), "updated": t.updated,
+             "kind": t.kind, "plan": titles.get(t.plan_id, "") if t.plan_id else ""} for t in templates]
+
+
+def _stage_use(plan: Template, topics) -> dict[str, int]:
+    """План: id этапа → в скольких уроках по плану под этим этапом есть блоки (спросить перед удалением этапа)."""
+    use = {b.id: 0 for b in plan.blocks if b.type == BLOCK_STAGE}
+    for t in topics:
+        _intro, st = stages(t)
+        for s in st:
+            if s.block.link in use and s.blocks:
+                use[s.block.link] += 1
+    return use
 
 
 def lesson_state(t: Template | None, *, live_anchor_ms: int | None, media_url, presets, preset: str, dark: bool,
                  live_shift: int = 0, efir_extra: dict | None = None,
                  efir_mode: str, tab: str, hotkey: str, armed: str = "", printer: dict | None = None,
-                 lessons: list | None = None, exercises: bool = False, edits: int = 0,
-                 other_live: str = "", prefs: dict | None = None, structures: list | None = None) -> dict:
+                 lessons: list | None = None, exercises=False, edits: int = 0,
+                 other_live: str = "", prefs: dict | None = None, structures: list | None = None,
+                 plan: Template | None = None, topics=(), plans=()) -> dict:
     """Всё, что нужно экрану урока: урок (все блоки с версиями и готовым HTML; этапы с минутами), идёт ли урок
     (якорь времени — мс; минуты этапов страница отсчитывает сама), печать (что следующим, ход), список уроков.
     Простые поля (названия, подписи) — обычным текстом: страница вставляет их как текст, не как HTML."""
@@ -347,11 +361,15 @@ def lesson_state(t: Template | None, *, live_anchor_ms: int | None, media_url, p
     base = {"live": {"anchor": live_anchor_ms, "shift": live_shift} if live_anchor_ms else None, "armed": armed, "dark": dark,
             "efir": {"mode": efir_mode, "tab": tab, **(efir_extra or {})}, "hotkey": hotkey, "print": printer,
             "lessons": lessons or [], "roles": roles_state(), "role_groups": role_groups_state(), "exercises": exercises, "edits": edits,
-            "other_live": other_live, "prefs": prefs or {}, "structures": structures or []}
+            "other_live": other_live, "prefs": prefs or {}, "structures": structures or [],
+            "plans": [{"id": p.id, "title": p.title, "minutes": total_minutes(p)} for p in plans]}
     if t is None:
         return {"lesson": None, **base}
+    from .storage import KIND_PLAN
     _intro, st = stages(t)
     items = [item_state(b, media_url) for b in t.blocks]
+    is_plan = t.kind == KIND_PLAN
+    linked = plan is not None and not is_plan
     lesson = {
         "id": t.id, "title": t.title, "total": total_minutes(t), "start": t.start, "has_stages": bool(st),
         "rev": lesson_rev(t),
@@ -360,5 +378,9 @@ def lesson_state(t: Template | None, *, live_anchor_ms: int | None, media_url, p
                     "kind": s.block.stage_kind, "part": s.block.part, "note": s.block.text.strip(),
                     "start": s.start_min, "end": s.end_min} for s in st],
         "presets": [{"id": pid, "title": title} for pid, title in presets], "preset": preset,
+        # план урока: этапы урока по плану — только для чтения; у плана — его уроки и где под этапами есть заметки
+        "kind": t.kind, "fixed": linked, "plan": {"id": plan.id, "title": plan.title} if linked else None,
+        "topics": [{"id": x.id, "title": x.title} for x in topics] if is_plan else [],
+        "stage_use": _stage_use(t, topics) if is_plan else {},
     }
     return {"lesson": lesson, **base}
