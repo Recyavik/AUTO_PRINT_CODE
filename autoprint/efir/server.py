@@ -287,6 +287,11 @@ class _Handler(BaseHTTPRequestHandler):
             self.close_connection = True
             return self._json({"ok": False, "retry": True}, 503)
         if path.startswith(("/lesson/", "/app/")) and (self.headers.get("X-Suflor") != "1" or not self._origin_ok()):
+            # тело — дочитать и выбросить: закрыть сокет с непрочитанными данными — Windows шлёт RST вместо ответа
+            try:
+                self._read_body(0)
+            except (ValueError, OSError):
+                pass
             self.close_connection = True
             return self._json({"ok": False}, 403)
         try:

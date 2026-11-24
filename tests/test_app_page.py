@@ -36,6 +36,17 @@ class BridgeTest(AppPage):
         self.assertEqual(self.post("/app/cmd", {"cmd": "ping"}, {"X-Suflor": "1", "Origin": "http://evil.example"}), 403)
         self.assertEqual(self.post("/app/call", {"cmd": "ping"}), 403)
 
+    def test_forbidden_post_answers_cleanly(self):
+        """Отказ (403) — ответом, а не разрывом: сервер дочитывает тело, иначе Windows рвёт соединение (RST)."""
+        body = {"cmd": "ping", "pad": "x" * 200000}
+        codes = set()
+        for _ in range(60):
+            try:
+                codes.add(self.post("/app/cmd", body))
+            except OSError as e:
+                codes.add(type(e).__name__)
+        self.assertEqual(codes, {403})
+
     def test_call_roundtrip(self):
         self.assertEqual(self.js("window.appCore.call({cmd: 'ping'})"), "pong")
         err = self.js("window.appCore.call({cmd: 'nope'}).then(() => '', (e) => e.message)")
