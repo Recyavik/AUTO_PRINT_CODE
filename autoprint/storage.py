@@ -281,6 +281,8 @@ class Settings:
     lesson_detail: str = "short"
     lesson_minutes: int = 90           # «Сценарий урока»: длительность урока
     lesson_break: int = 0              # «Сценарий урока»: перерыв, мин (0 — только если он есть в материале)
+    lesson_plan: str = ""              # «Урок через нейросеть»: последний выбранный план ("" — без плана)
+    lesson_class: str = ""             # «Урок через нейросеть»: класс / возраст учеников
 
     current_tab: str = ""
     window_geometry: str = ""
@@ -353,6 +355,7 @@ ROLE_HINTS = {
     "homework": "что сделать дома — попадёт в тетрадку учеников", "goal": "чему научатся на уроке",
 }
 STAGE_KINDS = {"": "Обычный", "break": "Перерыв", "exercise": "Зарядка"}
+KIND_PLAN = "plan"         # Template.kind: план урока
 # «Новый урок» по шаблону структуры: ключ → (название, [(этап, минуты[, вид])])
 STRUCTURES = {
     "empty": ("Пустой урок", []),
@@ -383,6 +386,9 @@ class Block:
     stage_kind: str = ""         # "" — обычный, break — перерыв, exercise — зарядка (см. STAGE_KINDS)
     part: str = ""               # раздел — группа этапов в плане урока («Тёмная тема»)
     slide: int = 0               # картинка — слайд презентации с этим номером («На экран», ◀ ▶); 0 — обычная
+    link: str = ""               # этап урока по плану: id этапа плана, который он повторяет (plans.py);
+                                 # заметка-разделитель «Из этапа «X»…» — id убранного этапа плана
+    exercise: str = ""           # этап-зарядка: название видео зарядки из оформления ("" — первое)
 
     def display_title(self, code_number: int = 0) -> str:
         if self.title.strip():
@@ -407,6 +413,8 @@ class Template:
     start: str = ""      # плановое начало урока «ЧЧ:ММ» (суфлёр урока); пусто — с момента «Начать урок»
     preset: str = ""     # до 0.10: шаблон «Эфира» с оформлением (остаётся для отката на 0.9)
     look: str = ""       # оформление экрана эфира (efir/looks.json); пусто — последнее выбранное
+    kind: str = ""       # "" — урок, "plan" — план урока: этапы и минуты для уроков по нему (plans.py)
+    plan_id: str = ""    # урок по плану: id плана, этапы урока повторяют его этапы
 
     def find_block(self, block_id: str) -> Block | None:
         return next((b for b in self.blocks if b.id == block_id), None)
@@ -491,16 +499,27 @@ def _template_from(d: dict) -> Template:
         blocks = _flatten_tasks(d["tasks"])
     else:
         blocks = [_block_from(b) for b in d.get("blocks", [])]
+    kind = "plan" if d.get("kind") == KIND_PLAN else ""
     return Template(title=d.get("title", "Без названия"), blocks=blocks, active_block=d.get("active_block", ""),
                     id=d.get("id") or new_id(), updated=d.get("updated", time.time()),
                     start=str(d.get("start") or ""), preset=str(d.get("preset") or ""),
-                    look=str(d.get("look") or ""))
+                    look=str(d.get("look") or ""), kind=kind,
+                    plan_id="" if kind else str(d.get("plan_id") or ""))
 
 
 def _fresh_ids(t: Template) -> Template:
+    """Свои id блоков и урока (копия, импорт). Связь с планом не трогает: копия урока остаётся по тому же плану."""
     for b in t.blocks:
         b.id = new_id()
     t.id, t.active_block = new_id(), ""
+    return t
+
+
+def without_plan(t: Template) -> Template:
+    """Урок без связи с планом: импорт из файла и вставка всегда дают обычный урок (план остаётся планом)."""
+    t.plan_id = ""
+    for b in t.blocks:
+        b.link = ""
     return t
 
 
@@ -540,6 +559,41 @@ class TemplateStore:
             old = TEMPLATES_FILE.with_suffix(".v2.json")
             if not old.exists():
                 old.write_text(json.dumps(raw, ensure_ascii=False, indent=2), encoding="utf-8")
+        if self.drop_dangling_links():
+            log.warning("Уроки ссылались на удалённый план — связь снята, этапы остались")
+
+    def plans(self) -> list[Template]:
+        return [t for t in self.templates if t.kind == KIND_PLAN]
+
+    def topics_of(self, plan_id: str) -> list[Template]:
+        """Уроки по плану plan_id — в порядке списка."""
+        return [t for t in self.templates if plan_id and t.kind != KIND_PLAN and t.plan_id == plan_id]
+
+    def drop_dangling_links(self) -> int:
+        """Связь с несуществующим планом (базу правили руками, сбой между сохранениями) снимается: этапы урока
+        остаются, их снова можно править. → сколько уроков отвязано."""
+        ids = {t.id for t in self.plans()}
+        n = 0
+        for t in self.templates:
+            if t.kind == KIND_PLAN:
+                t.plan_id = ""
+                for b in t.blocks:
+                    b.link = ""
+            elif t.plan_id and t.plan_id not in ids or not t.plan_id and any(b.link for b in t.blocks
+                                                                               if b.type == BLOCK_STAGE):
+                without_plan(t)
+                n += 1
+        return n
+
+    def add_plan_from_structure(self, key: str, title: str = "") -> Template:
+        """Новый план урока по шаблону структуры (STRUCTURES): только этапы с минутами; пустой — этап «Начало»."""
+        name, stages = STRUCTURES.get(key, STRUCTURES["empty"])
+        if not stages:
+            name, stages = "Новый план", [("Начало", 5)]
+        blocks = [Block(BLOCK_STAGE, "", title=s, minutes=m, stage_kind=k[0] if k else "") for s, m, *k in stages]
+        t = Template(title=title or f"План: {name}", blocks=blocks, kind=KIND_PLAN)
+        self.templates.append(t)
+        return t
 
     def _recover(self, bak: Path, why: str) -> tuple[dict, list[Template]]:
         """Основной файл не читается — берём резервную копию, испорченный файл откладываем."""
@@ -595,6 +649,7 @@ class TemplateStore:
         return t
 
     def duplicate(self, t: Template) -> Template:
+        """Копия рядом: копия урока — по тому же плану; копия плана — новый план без уроков."""
         copy = _fresh_ids(_template_from(asdict(t)))
         copy.title = t.title + " (копия)"
         self.templates.insert(self.templates.index(t) + 1, copy)
@@ -612,4 +667,4 @@ class TemplateStore:
     @staticmethod
     def read_template_file(path: str) -> Template:
         raw = json.loads(Path(path).read_text(encoding="utf-8-sig"))
-        return _fresh_ids(_template_from(raw.get("autoprintcode_template", raw)))
+        return without_plan(_fresh_ids(_template_from(raw.get("autoprintcode_template", raw))))

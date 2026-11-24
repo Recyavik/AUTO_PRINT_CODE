@@ -250,14 +250,14 @@ def parse_pasted(text: str, lang: str = "") -> tuple[Template, str]:
     """Вставленный текст → (занятие, что распознано). Понимает: ответ нейросети и наш .json, тетрадку
     Jupyter (JSON), Markdown с ```-блоками, Python с ячейками «# %%», просто код (lang — язык; "" — угадать)."""
     from .lesson_ai import extract_json, parse_lesson
-    from .storage import _fresh_ids, _template_from
+    from .storage import _fresh_ids, _template_from, without_plan
     src = text.replace("\r\n", "\n").strip("\n")
     if not src.strip():
         raise ValueError("Вставьте текст: код, Markdown или ответ нейросети.")
     data = extract_json(src) if src.lstrip()[:1] in "{`" or "```json" in src else None
     if isinstance(data, dict):
         if isinstance(data.get("autoprintcode_template"), dict):
-            return _fresh_ids(_template_from(data["autoprintcode_template"])), "занятие AutoPrintCode (.json)"
+            return without_plan(_fresh_ids(_template_from(data["autoprintcode_template"]))), "занятие AutoPrintCode (.json)"
         if isinstance(data.get("cells"), list):
             return notebook(data, "Тетрадка Jupyter"), "тетрадка Jupyter"
         if isinstance(data.get("blocks"), list):
