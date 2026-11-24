@@ -18,7 +18,7 @@ import copy
 import re
 
 from .storage import (BLOCK_CODE, BLOCK_IMAGE, BLOCK_MARKDOWN, BLOCK_STAGE, PROFILES, ROLES, STAGE_KINDS, Block,
-                      Template, _block_from)
+                      Template, _block_from, is_printable)
 
 TYPES = (BLOCK_MARKDOWN, BLOCK_CODE, BLOCK_STAGE, BLOCK_IMAGE)
 MAX_TEXT = 200_000
@@ -189,11 +189,24 @@ def _apply_one(t: Template, blocks: list[Block], op: dict, touched: list[str]) -
         raise ValueError(f"Неизвестное действие {kind!r}")
 
 
+def _keep_pointer(t: Template, old: list[Block]) -> None:
+    """Удалили код, который печатается следующим, — следующим становится код после него (или никакой):
+    иначе Ctrl+F9 сказал бы «весь код напечатан», хотя впереди ещё код."""
+    alive = {b.id: b for b in t.blocks}
+    if not t.active_block or t.active_block in alive:
+        return
+    ids = [b.id for b in old]
+    i = ids.index(t.active_block) + 1 if t.active_block in ids else len(ids)
+    nxt = next((alive[b.id] for b in old[i:] if b.id in alive and is_printable(alive[b.id])), None)
+    t.active_block = nxt.id if nxt is not None else ""
+
+
 def apply(t: Template, ops: list) -> list[str]:
     """Применить действия к уроку — все или ни одного. → id затронутых блоков (удалённые тоже)."""
     if not isinstance(ops, list):
         raise ValueError("Нет списка действий")
     title = t.title
+    old = list(t.blocks)
     blocks = copy.deepcopy(t.blocks)
     touched: list[str] = []
     try:
@@ -203,5 +216,6 @@ def apply(t: Template, ops: list) -> list[str]:
         t.title = title
         raise
     t.blocks[:] = blocks
+    _keep_pointer(t, old)
     seen: set[str] = set()
     return [x for x in touched if not (x in seen or seen.add(x))]

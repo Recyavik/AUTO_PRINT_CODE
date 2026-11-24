@@ -1316,5 +1316,147 @@ class EditServerTest(unittest.TestCase):
         self.assertEqual(get(self.port, "/static/lesson/nope.js")[0], 404)
 
 
+# ================================================================ Task 20: итоговое ревью
+
+class ReviewFixTest(unittest.TestCase):
+    """Замечания итогового ревью: указатель «следующим», распознавание во время урока, строка печати, тексты,
+    сценарий из .md, замена идущего эфира со страницы."""
+
+    def setUp(self):
+        self.L = Template("Идёт", [note(id="ln"), code("a = 1", id="ca"), code("b = 2", id="cb"),
+                                   code("c = 3", id="cc")], id="L")
+        self.win = make_window([self.L], port=18984)
+        self.win.lesson.open_page = lambda: None
+        self.p = self.win.printer
+        self.rec = Recorder(self.p)
+        self.notes: list[str] = []
+        self.p.notify.connect(lambda t, *_: self.notes.append(t))
+        self.p.set_focus("L")
+
+    def tearDown(self):
+        if self.win.efir.live_webinar() is not None:
+            self.win.efir.stop_live()
+        self.win._quitting = True
+        self.win.close()
+        pump()
+
+    def lesson(self):
+        return self.win.store.get("L")
+
+    def print_block(self, bid):
+        self.p.arm(bid)
+        self.p.job = self.p.job_for_armed()
+        self.p._on_finished()
+
+    def test_deleted_pointer_moves_on(self):
+        from autoprint import lesson_edit
+        self.print_block("ca")
+        self.assertEqual(self.lesson().active_block, "cb")
+        lesson_edit.apply(self.lesson(), [{"op": "delete", "block": "cb"}])
+        self.assertEqual(self.lesson().active_block, "cc")        # следующий код после удалённого
+        self.p.toggle()
+        self.assertEqual(self.rec.loaded, ["c = 3"])
+
+    def test_deleted_last_pointer_clears(self):
+        from autoprint import lesson_edit
+        self.print_block("cb")
+        lesson_edit.apply(self.lesson(), [{"op": "delete", "block": "cc"}])
+        self.assertEqual(self.lesson().active_block, "")
+
+    def test_new_code_after_all_printed(self):
+        from autoprint import lesson_edit
+        self.print_block("cc")
+        self.assertEqual(self.lesson().active_block, "")
+        lesson_edit.apply(self.lesson(), [{"op": "insert", "after": "cc",
+                                           "block": {"id": "cd", "type": "code", "text": "d = 4"}}])
+        self.notes.clear()                     # «весь код напечатан» было правдой до вставки — теперь нет
+        self.p.toggle()
+        self.assertEqual(self.rec.loaded, ["d = 4"])
+        self.assertFalse(any("Весь код урока напечатан" in n for n in self.notes), self.notes)
+
+    def test_step_after_all_printed_goes_forward(self):
+        from autoprint import lesson_edit
+        self.print_block("cc")
+        lesson_edit.apply(self.lesson(), [{"op": "insert", "after": "cc",
+                                           "block": {"id": "cd", "type": "code", "text": "d = 4"}}])
+        self.p.step(+1)
+        self.assertEqual(self.lesson().active_block, "cd")        # не назад к первому коду
+
+    def test_all_printed_still_said(self):
+        self.print_block("cc")
+        self.p.toggle()
+        self.assertEqual(self.rec.loaded, [])
+        self.assertTrue(any("Весь код урока напечатан" in n for n in self.notes), self.notes)
+
+    def test_recognize_keeps_live_lesson(self):
+        t = scenario_template()
+        t.id = "SC"
+        self.win.store.templates.append(t)
+        self.L.blocks.insert(0, stage("Начало", 10, id="s0"))
+        self.win.efir.confirm_replace = lambda *a: self.fail("не спрашивать: эфира, кроме урока, нет")
+        self.assertTrue(self.win.efir.launch_lesson(self.L, start=""))
+        self.assertEqual(self.win.efir.live_lesson_id(), "L")
+        self.win.recognize_lesson(t)
+        self.assertEqual(self.win.efir.live_lesson_id(), "L")        # идущий урок не завершён молча
+        self.assertEqual(self.p.focus().id, "L")
+        self.assertTrue(any(x.title == "Занятие 7 (сценарий)" for x in self.win.store.templates))
+
+    def test_print_bar_resume_counts_down(self):
+        from autoprint.typer import COUNTDOWN, PAUSED
+        self.p.arm("ca")
+        self.p.job = self.p.job_for_armed()
+        self.p.engine.state = PAUSED
+        resumed, minimized = [], []
+        self.p.engine.resume = lambda *a: resumed.append(a) or setattr(self.p.engine, "state", COUNTDOWN)
+        self.win.showMinimized = lambda: minimized.append(1)
+        self.win.print_bar.btn_pause.click()
+        self.assertEqual(resumed, [(0.0, 3)])          # отсчёт, как у кнопки в 0.9: успеть вернуться в редактор
+        self.assertEqual(minimized, [1])               # окно уходит — фокус возвращается в редактор
+
+    def test_print_bar_pause_stays_paused(self):
+        from autoprint.typer import PAUSED, RUNNING
+        self.p.arm("ca")
+        self.p.job = self.p.job_for_armed()
+        self.p.engine.state = RUNNING
+        resumed = []
+        self.p.engine.resume = lambda *a: resumed.append(a)
+        btn = self.win.print_bar.btn_pause
+        btn.pressed.emit()                             # нажали — окно программы стало активным: автопауза
+        self.p.engine.state = PAUSED
+        self.p.engine.auto_paused_at = time.monotonic()
+        btn.clicked.emit()
+        self.assertEqual(resumed, [])
+        self.assertEqual(self.p.engine.state, PAUSED)
+
+    def test_no_pult_in_messages(self):
+        root = Path(storage.__file__).resolve().parent
+        self.assertNotIn("на пульте", (root / "typer.py").read_text(encoding="utf-8"))
+
+    def test_import_md_scenario(self):
+        from autoprint.importers import load_file
+        text = "\n\n".join(t if k == "markdown" else f"```python\n{t}\n```" for k, t in SCENARIO_CELLS)
+        path = TMP / "Занятие 8.md"
+        path.write_text(text, encoding="utf-8")
+        t = load_file(str(path))
+        self.assertEqual(sum(b.type == BLOCK_STAGE for b in t.blocks), 6)
+        self.assertEqual(t.title, "Занятие 8")
+
+    def test_other_live_on_page_and_force(self):
+        from autoprint.efir.model import Activity, Webinar
+        ctl = self.win.efir
+        w = ctl.store.add([Webinar(title="1Т — первая пара", schedule=[Activity("x", 30)])])[0]
+        ctl.launch(w.id, "")
+        self.L.blocks.insert(0, stage("Начало", 10, id="s0"))
+        self.win.lesson.publish()
+        self.assertEqual(ctl.server._states["lesson"].get("other_live"), "1Т — первая пара")
+        asked = []
+        ctl.confirm_replace = lambda cur, new: asked.append(cur) or False
+        self.win.lesson.command({"cmd": "start", "force": 1})     # страница уже спросила
+        self.assertEqual(asked, [])
+        self.assertEqual(ctl.live_lesson_id(), "L")
+        self.win.lesson.publish()
+        self.assertEqual(ctl.server._states["lesson"].get("other_live"), "")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

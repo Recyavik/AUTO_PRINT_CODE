@@ -160,13 +160,16 @@ class LessonController(QObject):
             anchor = int(live.anchor.timestamp() * 1000)
             self._sync_live(t)
         preset = self.efir.lesson_look(t) if t is not None else None
+        # идёт другой эфир (вебинар по расписанию): «Начать урок» спросит на странице, заменить ли его (E9)
+        other = self.efir.live_webinar()
+        other_live = other.title if other is not None and (t is None or self.efir.live_lesson_id() != t.id) else ""
         state = scenario.lesson_state(
             t, live_anchor_ms=anchor, armed=t.active_block if t is not None else "",
             media_url=self.efir.server.media_url, presets=[(lk.id, lk.title) for lk in self.efir.store.looks],
             preset=preset.id if preset is not None else "", dark=theme.dark, efir_mode=self.efir.mode,
             tab=self.efir.tab_status()[0], hotkey=self.main.settings.hotkey_toggle,
             printer=self.main.printer.snapshot(), lessons=scenario.lessons_state(self.main.store.templates),
-            exercises=bool(preset is not None and preset.exercises), edits=self.edits)
+            exercises=bool(preset is not None and preset.exercises), edits=self.edits, other_live=other_live)
         # во время зарядки экран эфира шлёт ход видео раз в секунду: странице суфлёра от этого ничего не
         # меняется — не перерисовывать её (иначе пересоздаются кнопки и теряются щелчки)
         key = json.dumps(state, ensure_ascii=False, sort_keys=True)
@@ -298,7 +301,7 @@ class LessonController(QObject):
                     if at:
                         t.start = norm_hhmm(at)          # запомнить — подставится в следующий раз
                         self.main._save_timer.start()
-                    self.efir.launch_lesson(t, start=at)
+                    self.efir.launch_lesson(t, start=at, force=bool(d.get("force")))
             elif cmd == "stop":
                 if self.efir.live_lesson_id():
                     self.efir.stop_live()

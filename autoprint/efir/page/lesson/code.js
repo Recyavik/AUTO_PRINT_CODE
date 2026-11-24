@@ -135,12 +135,13 @@ export async function beginCode(n, it, finishOthers) {
   const host = el("div", "cmhost");
   box.insertBefore(host, box.firstChild);
   let selTimer = 0;
+  let selSet = (it.sel || []).length > 0;        // у блока есть «печатать только выделенное»
   const onChange = (u, stepsField) => {
     if (u.docChanged) {
       const fields = { text: u.state.doc.toString() };
       const steps = u.state.field(stepsField);
       fields.steps = new Set(steps).size > 1 ? steps : [];
-      if ((it.sel || []).length) fields.sel = [];             // выделение было в прежнем тексте
+      if (selSet) { fields.sel = []; selSet = false; }        // выделение было в прежнем тексте
       Q.draft(it.id, fields);
     } else if (u.transactions.some((t) => t.effects.length)) {
       const steps = u.state.field(stepsField);
@@ -150,7 +151,8 @@ export async function beginCode(n, it, finishOthers) {
       clearTimeout(selTimer);
       selTimer = setTimeout(() => {
         const r = u.view.state.selection.main;
-        if (!r.empty) Q.draft(it.id, { sel: [r.from, r.to] });   // пустое выделение прежнее не сбрасывает
+        if (!r.empty) { Q.draft(it.id, { sel: [r.from, r.to] }); selSet = true; }
+        else if (selSet) { Q.draft(it.id, { sel: [] }); selSet = false; }   // сняли выделение — печатать весь блок
       }, 400);
     }
   };

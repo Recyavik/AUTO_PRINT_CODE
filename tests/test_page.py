@@ -229,6 +229,46 @@ class PageEditTest(Page):
         self.assertEqual(self.t.blocks[ids.index("o1") + 1].type, BLOCK_IMAGE)
         self.assertTrue(self.edge.wait("!!document.querySelector('.blk[data-type=image] figure img')"))
 
+    def test_undo_insert_keeps_text(self):
+        """Ctrl+Z после «+» и набора текста: блок с текстом уходит с «Вернуть», а не пропадает насовсем."""
+        ids = lambda: [b.id for b in self.t.blocks]
+        self.mode("prep")
+        self.js("document.querySelector('.ins[data-after=n3] .insbtn').click()")
+        self.assertTrue(self.edge.wait("!!document.querySelector('.menu')"))
+        self.js("[...document.querySelectorAll('.menu .mi')].find(b => b.querySelector('.ml').textContent === 'Говоришь').click()")
+        self.assertTrue(self.wait_py(lambda: ids()[ids().index("n3") + 1] != "c1"))
+        new = ids()[ids().index("n3") + 1]
+        self.assertTrue(self.edge.wait("document.activeElement && document.activeElement.tagName === 'TEXTAREA'"))
+        self.edge.text("Определение — дословно.")
+        self.js("document.activeElement.blur()")
+        self.assertTrue(self.wait_py(lambda: (self.block(new) or Block(BLOCK_MARKDOWN, "")).text == "Определение — дословно."))
+        self.js("document.getElementById('toast').hidden = true")
+        self.edge.key("z", "KeyZ", 90, modifiers=2)                               # Ctrl+Z
+        self.assertTrue(self.wait_py(lambda: new not in ids()))
+        self.assertTrue(self.edge.wait("!document.getElementById('toast').hidden && !!document.querySelector('#toast button')"))
+        self.js("document.querySelector('#toast button').click()")
+        self.assertTrue(self.wait_py(lambda: new in ids() and self.block(new).text == "Определение — дословно."))
+        self.js(f"document.querySelector('[data-id=\"{new}\"] .lbl').click()")
+        self.edge.key("Delete", "Delete", 46)                                    # убрать за собой
+        self.assertTrue(self.wait_py(lambda: new not in ids()))
+
+    def test_code_selection_resets(self):
+        """Выделение в коде = «печатать только это», пока код не правили; пустое выделение его снимает (как в 0.9)."""
+        self.mode("prep")
+        sel = lambda: list(self.block("c1").sel)
+        self.js("document.querySelector('[data-id=c1] .codebox pre').click()")
+        self.assertTrue(self.edge.wait("!!(document.activeElement && document.activeElement.closest('[data-id=c1] .cm-editor'))", 10))
+        self.edge.key("Home", "Home", 36, modifiers=2)                            # Ctrl+Home
+        self.edge.key("ArrowDown", "ArrowDown", 40, modifiers=8)                  # Shift+↓ — первая строка
+        self.assertTrue(self.wait_py(lambda: sel() != []), sel())
+        self.edge.text("y")                                                       # набрали поверх выделения
+        self.assertTrue(self.wait_py(lambda: sel() == [] and self.block("c1").text.startswith("y")), sel())
+        self.edge.key("ArrowDown", "ArrowDown", 40, modifiers=8)
+        self.assertTrue(self.wait_py(lambda: sel() != []), sel())
+        self.edge.key("ArrowRight", "ArrowRight", 39)                              # выделение снято
+        self.assertTrue(self.wait_py(lambda: sel() == []), sel())
+        self.js("document.activeElement.blur()")
+
     def test_z_delete_undo(self):
         ids = lambda: [b.id for b in self.t.blocks]
         before = ids()[ids().index("n2") - 1]
@@ -289,6 +329,31 @@ class PageLessonTest(Page):
         self.assertTrue(self.wait_py(lambda: self.t.active_block == "c2"))
         self.assertTrue(self.edge.wait("!!document.querySelector('[data-id=c2] .armed-chip') && "
                                        "document.querySelector('[data-id=c2] .armed-chip').textContent.includes('Следующим')"))
+
+    def test_other_live_asks_on_page(self):
+        """Идёт вебинар по расписанию — «Начать урок» спрашивает на странице (окно программы может быть за браузером)."""
+        from autoprint.efir.model import Activity, Webinar
+        ctl = self.win.efir
+        w = ctl.store.add([Webinar(title="Пара 1Т", schedule=[Activity("x", 30)])])[0]
+        asked_qt = []
+        ctl.confirm_replace = lambda cur, new: asked_qt.append(cur) or False
+        ctl.launch(w.id, "")
+        try:
+            self.win.lesson.publish()
+            self.mode("lesson")
+            start = "[...document.querySelectorAll('#tools button')].find(b => b.textContent === 'Начать урок')"
+            self.assertTrue(self.edge.wait(f"!!{start}"))
+            self.js("window.__asked = ''; window.__confirm = window.confirm; window.confirm = (m) => { window.__asked = m; return false; }")
+            self.js(f"{start}.click()")
+            pump(300)
+            self.assertIn("Пара 1Т", self.js("window.__asked"))
+            self.assertEqual(asked_qt, [])
+            self.assertEqual(ctl.live_webinar().id, w.id)
+        finally:
+            ctl.stop_live()
+            del ctl.confirm_replace
+            self.js("if (window.__confirm) window.confirm = window.__confirm")
+            self.win.lesson.publish()
 
     def test_print_popover(self):
         self.js("[...document.querySelectorAll('#tools .iconbtn')].find(b => b.textContent.includes('Печать')).click()")

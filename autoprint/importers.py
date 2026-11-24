@@ -97,11 +97,15 @@ def notebook(nb: dict, title: str) -> Template:
             cells.append((kind, _cell_text(c), meta))
         elif kind == "raw":
             cells.append(("markdown", "```\n" + _cell_text(c) + "\n```"))
-    t = _build(title, cells, lang)
+    return _scenario_or(_build(title, cells, lang))
+
+
+def _scenario_or(t: Template) -> Template:
+    """Сценарий урока (⏱ этапы, 🗣 реплики — тетрадка или .md) — сразу урок с этапами и плашками."""
     from . import scenario_import
-    if scenario_import.looks_like_scenario(t.blocks):      # сценарий урока (⏱ этапы, 🗣 реплики) — сразу урок
+    if scenario_import.looks_like_scenario(t.blocks):
         r = scenario_import.recognize(t)
-        r.title = title
+        r.title = t.title
         return r
     return t
 
@@ -130,7 +134,7 @@ def markdown_text(text: str, title: str) -> Template:
     nonempty_langs = [lang for (kind, txt), lang in zip([c for c in cells if c[0] == "code"], langs) if txt.strip()]
     for b, lang in zip(code_blocks, nonempty_langs):
         b.lang = lang
-    return t
+    return _scenario_or(t)
 
 
 _PY_CELL = re.compile(r"^#[ \t]*%%(.*)$")

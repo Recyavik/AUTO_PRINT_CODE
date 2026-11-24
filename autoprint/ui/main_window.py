@@ -75,12 +75,22 @@ class PrintBar(QFrame):
         col.addWidget(self.bar)
         lay.addLayout(col, 1)
         self.btn_pause = button("Пауза", "pause")
-        self.btn_pause.clicked.connect(lambda: printer.toggle())
+        self.btn_pause.pressed.connect(printer.remember_press)    # нажатие активирует окно — печать встаёт на паузу
+        self.btn_pause.clicked.connect(self._toggle)
         self.btn_stop = button("Стоп", "stop")
         self.btn_stop.clicked.connect(printer.stop)
         lay.addWidget(self.btn_pause)
         lay.addWidget(self.btn_stop)
         self.hide()
+
+    def _toggle(self) -> None:
+        """Кнопка в окне программы: окно сейчас в фокусе, а печатать надо в редактор. Продолжение — с отсчётом,
+        окно сворачивается, фокус возвращается в редактор. Нажали во время печати — остаётся пауза."""
+        p = self.printer
+        before = p.engine.state
+        p.toggle(countdown=max(1, int(p.s.button_countdown_s)), pressed=True)
+        if before in (PAUSED, LINE_WAIT) and p.engine.state != before:
+            self.window().showMinimized()
 
     def refresh(self) -> None:
         p = self.printer
@@ -557,6 +567,13 @@ class MainWindow(FramelessWindow):
         self.touch(r)
         self._fill_library(r.id)
         stages = sum(1 for b in r.blocks if b.type == "stage")
+        live = self.efir.live_lesson_id()
+        if live:
+            # идёт урок — не завершать его молча: копия ждёт в списке уроков
+            self._notify(f"Готово: «{r.title}» — этапов {stages}, в списке уроков. Идёт урок — откройте копию "
+                         "после него.", tray=True)
+            self.lesson.schedule_publish()
+            return True
         self._notify(f"Готово: «{r.title}» — этапов {stages}. Исходный урок не изменён.", tray=True)
         self.open_lesson(r.id, ask=False)
         return True

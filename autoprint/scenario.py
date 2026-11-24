@@ -318,7 +318,8 @@ def lessons_state(templates) -> list[dict]:
 
 def lesson_state(t: Template | None, *, live_anchor_ms: int | None, media_url, presets, preset: str, dark: bool,
                  efir_mode: str, tab: str, hotkey: str, armed: str = "", printer: dict | None = None,
-                 lessons: list | None = None, exercises: bool = False, edits: int = 0) -> dict:
+                 lessons: list | None = None, exercises: bool = False, edits: int = 0,
+                 other_live: str = "") -> dict:
     """Всё, что нужно экрану урока: урок (все блоки с версиями и готовым HTML; этапы с минутами), идёт ли урок
     (якорь времени — мс; минуты этапов страница отсчитывает сама), печать (что следующим, ход), список уроков.
     Простые поля (названия, подписи) — обычным текстом: страница вставляет их как текст, не как HTML."""
@@ -327,7 +328,8 @@ def lesson_state(t: Template | None, *, live_anchor_ms: int | None, media_url, p
         armed = printer["block"]
     base = {"live": {"anchor": live_anchor_ms} if live_anchor_ms else None, "armed": armed, "dark": dark,
             "efir": {"mode": efir_mode, "tab": tab}, "hotkey": hotkey, "print": printer,
-            "lessons": lessons or [], "roles": roles_state(), "exercises": exercises, "edits": edits}
+            "lessons": lessons or [], "roles": roles_state(), "exercises": exercises, "edits": edits,
+            "other_live": other_live}
     if t is None:
         return {"lesson": None, **base}
     _intro, st = stages(t)

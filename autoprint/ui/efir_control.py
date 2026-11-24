@@ -266,15 +266,16 @@ class EfirController(QObject):
 
     lesson_preset = lesson_look
 
-    def launch_lesson(self, t, start: str | None = None, show: bool = True) -> bool:
+    def launch_lesson(self, t, start: str | None = None, show: bool = True, force: bool = False) -> bool:
         """Эфир по этапам урока из суфлёра. start: "" — сейчас, "ЧЧ:ММ" — в это время, None — тот же урок уже
-        идёт — время не сбивается, только расписание обновляется (иначе — сейчас). False — нет этапов с минутами."""
+        идёт — время не сбивается, только расписание обновляется (иначе — сейчас). False — нет этапов с минутами.
+        force — замену идущего эфира уже подтвердили (на странице урока)."""
         from ..scenario import webinar_for
         w = webinar_for(t, self.lesson_look(t))
         if not w.schedule:
             self.message.emit("У урока нет этапов с минутами — эфир по нему не начать", True)
             return False
-        if not self._may_replace(w.id, w.title):
+        if not force and not self._may_replace(w.id, w.title):
             return False
         live = self.store.live
         now = datetime.now().replace(microsecond=0)

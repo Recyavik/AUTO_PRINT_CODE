@@ -160,7 +160,12 @@ class PrintController(QObject):
         if t is None:
             return
         cur = t.active_block if self.armed() else ""
-        nxt = t.next_code(cur, back=d < 0) if cur or d > 0 else None
+        if cur:
+            nxt = t.next_code(cur, back=d < 0)
+        elif self.last and t.find_block(self.last):       # всё напечатано: вперёд — от последнего напечатанного
+            nxt = t.next_code(self.last) if d > 0 else t.find_block(self.last)
+        else:
+            nxt = t.next_code() if d > 0 else None
         if nxt is None:
             return        # на краю урока переходить некуда — печать на паузе не сбрасываем
         if self.engine.state in BUSY:
@@ -435,9 +440,12 @@ class PrintController(QObject):
             self.notify.emit("В уроке нет кода — печатать нечего.", True, False)
             return False
         if self.last and t.find_block(self.last):
-            self.notify.emit(f"Весь код урока напечатан. {self.s.hotkey_restart or 'Ctrl+F10'} — ещё раз последний "
-                             "блок.", False, False)
-            return False
+            nxt = t.next_code(self.last)         # после напечатанного могли дописать код
+            if nxt is None:
+                self.notify.emit(f"Весь код урока напечатан. {self.s.hotkey_restart or 'Ctrl+F10'} — ещё раз "
+                                 "последний блок.", False, False)
+                return False
+            first = nxt
         self._set_pointer(t, first)
         return True
 

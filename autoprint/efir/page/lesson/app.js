@@ -177,6 +177,12 @@ function moreMenu(anchor) {
   menu(anchor, items, { right: true });
 }
 
+// идёт другой эфир (вебинар по расписанию) — спросить здесь, а не окном программы, которое может быть за браузером
+function mayReplace() {
+  const other = A.S && A.S.other_live;
+  return !other || confirm("Сейчас идёт эфир «" + other + "». Завершить его и начать урок?");
+}
+
 function toolsBusy() { const a = document.activeElement; return !!a && a !== document.body && $("tools").contains(a); }
 $("tools").addEventListener("focusout", () => setTimeout(() => { if (headerStale && !toolsBusy()) { headerStale = false; renderTools(); } }, 0));
 
@@ -218,7 +224,7 @@ export function renderTools() {
     if (!A.S.live) {
       const go = el("button", "primary", "Начать урок");
       go.title = "Урок начинается с этой минуты: этапы пойдут по часам, таймер — в окне «Эфира»";
-      go.onclick = () => cmd({ cmd: "start" });
+      go.onclick = () => { if (mayReplace()) cmd({ cmd: "start", force: !!A.S.other_live }); };
       t.appendChild(go);
       const atBox = el("label", "chip");
       atBox.title = "Начать урок в это время: до начала таймер считает «до начала»";
@@ -230,7 +236,7 @@ export function renderTools() {
       atBox.appendChild(tm);
       t.appendChild(atBox);
       const at = el("button", "", "Начать в это время");
-      at.onclick = () => { if (tm.value) cmd({ cmd: "start", at: tm.value }); };
+      at.onclick = () => { if (tm.value && mayReplace()) cmd({ cmd: "start", at: tm.value, force: !!A.S.other_live }); };
       t.appendChild(at);
     } else {
       const startBox = el("label", "chip");

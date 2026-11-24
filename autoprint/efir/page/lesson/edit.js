@@ -29,7 +29,10 @@ export function act(op, inverse, record = true) {
 export function undo() {
   const inv = A.undo.pop();
   if (!inv) { toast("Отменять нечего"); return; }
-  for (const op of [].concat(inv)) Q.push(op);
+  const ops = [].concat(inv);
+  // отмена вставки — удаление; в новый блок могли уже написать текст — удалять с «Вернуть», как обычное удаление
+  if (ops.length === 1 && ops[0].op === "delete" && item(ops[0].block)) { deleteBlock(ops[0].block); return; }
+  for (const op of ops) Q.push(op);
   refresh();
 }
 
