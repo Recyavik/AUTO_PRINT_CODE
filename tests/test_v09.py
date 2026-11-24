@@ -266,6 +266,9 @@ class PrompterWinTest(unittest.TestCase):
     def test_relaunch_when_no_window(self):
         w = self.make(window=False)              # процесс жив (фоновый режим Edge), а окна нет
         w.open("http://x/lesson")
+        w.open("http://x/lesson")                # 0.12: окно ещё открывается — второй Edge не запускаем
+        self.assertEqual(len(self.launched), 1)
+        w._started -= 60                         # прошла минута, окна так и нет (закрыли) — запустить снова
         w.open("http://x/lesson")
         self.assertEqual(len(self.launched), 2)
 
