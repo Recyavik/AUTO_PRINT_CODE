@@ -944,6 +944,8 @@ class PageV12Test(Page):
         self.mode("lesson")
         self.go_live(1)
         try:
+            # сначала страница должна увидеть, что урок идёт (иначе пришедшее «идёт» вернёт режим «Урок»)
+            self.assertTrue(self.edge.wait("document.getElementById('status').textContent.startsWith('Урок идёт')"))
             self.mode("prep")
             self.js("window.__confirmText = ''; window.confirm = (t) => { window.__confirmText = t; return false; }")
             self.js("document.querySelector('#st-ts1 .smore').click()")
