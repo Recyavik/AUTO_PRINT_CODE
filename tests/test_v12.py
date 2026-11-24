@@ -266,5 +266,121 @@ class FormatTest(unittest.TestCase):
         self.assertEqual([(b.text, b.slide) for b in filled.template.blocks if b.type == BLOCK_IMAGE], [("media/s3.png", 3)])
 
 
+# ================================================================ Task 3: правка этапов — только в плане
+
+def window(templates, port):
+    win = make_window(templates, port=port)
+    win.lesson.open_page = lambda: None
+    return win
+
+
+class PlanEditTest(unittest.TestCase):
+    def test_fixed_stage_ops_refused(self):
+        from autoprint import lesson_edit
+        p = plan90()
+        t = plans.new_topic(p)
+        sid = stages_of(t)[0].id
+        for op in ({"op": "set", "block": sid, "fields": {"minutes": 7}}, {"op": "delete", "block": sid},
+                   {"op": "insert", "after": "", "block": {"id": "zz1", "type": "stage"}},
+                   {"op": "restore", "after": "", "block": {"id": "zz2", "type": "stage", "title": "Х"}},
+                   {"op": "move_stage", "stage": sid, "after_stage": ""}):
+            with self.assertRaisesRegex(ValueError, "Этапы этого урока задаёт план «Онлайн 90» — меняйте их в плане"):
+                lesson_edit.apply(t, [op], fixed_stages="Онлайн 90")
+        self.assertEqual(stages_of(t)[0].minutes, 5)
+        n = next(b.id for b in t.blocks if b.type == BLOCK_MARKDOWN)
+        lesson_edit.apply(t, [{"op": "set", "block": n, "fields": {"text": "ок"}}], fixed_stages="Онлайн 90")   # заметки — можно
+        self.assertEqual(t.find_block(n).text, "ок")
+
+    def test_last_plan_stage_kept(self):
+        from autoprint import lesson_edit
+        p = Template("П", [stage("А", 5, id="a"), stage("Б", 5, id="b")], kind="plan")
+        lesson_edit.apply(p, [{"op": "delete", "block": "b"}], keep_one_stage=True)
+        with self.assertRaisesRegex(ValueError, "В плане должен остаться хотя бы один этап"):
+            lesson_edit.apply(p, [{"op": "delete", "block": "a"}], keep_one_stage=True)
+        self.assertEqual([b.id for b in p.blocks], ["a"])
+
+    def test_page_edit_of_plan_syncs_topics(self):
+        p = plan90()
+        t = plans.new_topic(p, "Функции")
+        win = window([p, t], 18901)
+        try:
+            p, t = win.store.get("P"), win.store.get(t.id)
+            res = win.lesson.apply_edit({"lesson": "P", "ops": [{"op": "set", "block": "p2", "fields": {"minutes": 25}}]})
+            self.assertTrue(res["ok"])
+            self.assertEqual(next(b.minutes for b in t.blocks if b.link == "p2"), 25)
+            with self.assertRaisesRegex(ValueError, "задаёт план"):
+                win.lesson.apply_edit({"lesson": t.id, "ops": [{"op": "set", "fields": {"minutes": 3},
+                                                                  "block": next(b.id for b in t.blocks if b.link == "p2")}]})
+            code_, body = win.lesson._edit_from_server({"lesson": t.id, "ops": [
+                {"op": "delete", "block": next(b.id for b in t.blocks if b.link == "p2")}]})
+            self.assertEqual(code_, 400)
+            self.assertIn("задаёт план «Онлайн 90»", body["error"])
+            with self.assertRaisesRegex(ValueError, "хотя бы один этап"):
+                win.lesson.apply_edit({"lesson": "P", "ops": [{"op": "delete", "block": x}
+                                                              for x in ("p1", "p2", "p3", "p4")]})
+        finally:
+            close(win)
+
+    def test_live_topic_keeps_current_stage_clock(self):   # Review Focus 1
+        from datetime import timedelta
+        p = plan90()
+        t = plans.new_topic(p, "Функции")
+        win = window([p, t], 18902)
+        try:
+            t = win.store.get(t.id)
+            win.printer.set_focus(t.id)
+            win.efir.launch_lesson(t, start="")
+            live = win.efir.store.live
+            win.efir.store.set_live(live.webinar_id, live.anchor - timedelta(minutes=12))   # идёт «Теория» (5..25)
+            win.lesson.publish()
+            before = win.efir.store.live.anchor
+            win.lesson.apply_edit({"lesson": "P", "ops": [{"op": "set", "block": "p1", "fields": {"minutes": 8}}]})
+            pump(400)
+            win.lesson.publish()
+            self.assertEqual(win.efir.store.live.anchor, before - timedelta(minutes=3))   # «Теория» — на тех же часах
+            self.assertEqual([a.min for a in win.efir.live_webinar().schedule][:2], [8, 20])
+        finally:
+            win.efir.stop_live()
+            close(win)
+
+    def test_delete_plan_unlinks_topics(self):
+        p = plan90()
+        t = plans.new_topic(p, "Функции")
+        win = window([p, t], 18903)
+        try:
+            p, t = win.store.get("P"), win.store.get(t.id)
+            self.assertTrue(win.delete_lesson(p, ask=False))
+            self.assertEqual(t.plan_id, "")
+            self.assertIn(t, win.store.templates)
+            self.assertEqual(len(stages_of(t)), 4)
+        finally:
+            close(win)
+
+    def test_main_window_plan_actions(self):
+        win = window([Template("Функции", [stage("А", 5), note("x")], id="F")], 18904)
+        try:
+            f = win.store.get("F")
+            p = win.make_plan(f)
+            self.assertEqual((f.plan_id, p.kind), (p.id, "plan"))
+            self.assertIn(p, win.store.templates)
+            topic = win.new_topic(p.id)
+            self.assertEqual(topic.plan_id, p.id)
+            self.assertIn(topic, win.store.templates)
+            win.unlink_plan(topic)
+            self.assertEqual(topic.plan_id, "")
+            notes = win.link_plan(topic, p.id)
+            self.assertEqual(topic.plan_id, p.id)
+            self.assertIsInstance(notes, list)
+            q = win.new_plan("school45")
+            self.assertEqual((q.kind, len(stages_of(q))), ("plan", 7))
+            c = win.store.duplicate(f)
+            self.assertEqual(c.plan_id, p.id)                                       # копия урока — с тем же планом
+            cp = win.store.duplicate(p)
+            self.assertEqual(win.store.topics_of(cp.id), [])
+            self.assertIsNone(win.make_plan(win.store.get(topic.id)))                # уже по плану — нового не делаем
+        finally:
+            close(win)
+
+
 if __name__ == "__main__":
     unittest.main()

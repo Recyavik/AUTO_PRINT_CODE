@@ -401,11 +401,18 @@ class LessonController(QObject):
         return {"ok": True, "rev": scenario.lesson_rev(t), "items": items, "title": t.title, "edits": self.edits}
 
     def apply_edit(self, data: dict) -> dict:
-        """Правка со страницы (поток интерфейса): действия над уроком → новые версии и HTML затронутых блоков."""
+        """Правка со страницы (поток интерфейса): действия над уроком → новые версии и HTML затронутых блоков.
+        Урок по плану: этапы правятся только в плане. План: после правки — уроки по нему приводятся к нему."""
         from .. import lesson_edit
+        from ..storage import KIND_PLAN
         t = self._lesson_for_edit(data.get("lesson"))
-        ids = lesson_edit.apply(t, data.get("ops"))
-        return self._after_edit(t, ids)
+        plan = self.main.store.get(t.plan_id) if t.plan_id else None
+        ids = lesson_edit.apply(t, data.get("ops"), fixed_stages=plan.title if plan is not None else "",
+                                keep_one_stage=t.kind == KIND_PLAN)
+        res = self._after_edit(t, ids)
+        if t.kind == KIND_PLAN:
+            self.main.plan_changed(t)
+        return res
 
     def add_image(self, data: dict) -> dict:
         """Картинка со страницы (Ctrl+V, перетаскивание): копия в data/media и блок-картинка после after."""

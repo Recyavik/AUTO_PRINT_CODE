@@ -205,8 +205,25 @@ def _keep_pointer(t: Template, old: list[Block]) -> None:
     t.active_block = nxt.id if nxt is not None else ""
 
 
-def apply(t: Template, ops: list) -> list[str]:
-    """Применить действия к уроку — все или ни одного. → id затронутых блоков (удалённые тоже)."""
+def _touches_stage(blocks: list[Block], op) -> bool:
+    """Действие меняет этапы: их поля, состав или порядок."""
+    if not isinstance(op, dict):
+        return False
+    kind = op.get("op")
+    if kind == "move_stage":
+        return True
+    if kind in ("insert", "restore"):
+        return isinstance(op.get("block"), dict) and op["block"].get("type") == BLOCK_STAGE
+    if kind in ("set", "delete"):
+        i = _index(blocks, str(op.get("block") or ""))
+        return i >= 0 and blocks[i].type == BLOCK_STAGE
+    return False
+
+
+def apply(t: Template, ops: list, fixed_stages: str = "", keep_one_stage: bool = False) -> list[str]:
+    """Применить действия к уроку — все или ни одного. → id затронутых блоков (удалённые тоже).
+    fixed_stages — название плана урока: этапы задаёт план, их правка — ValueError. keep_one_stage — это план:
+    последний этап не удаляется."""
     if not isinstance(ops, list):
         raise ValueError("Нет списка действий")
     title = t.title
@@ -215,7 +232,11 @@ def apply(t: Template, ops: list) -> list[str]:
     touched: list[str] = []
     try:
         for op in ops:
+            if fixed_stages and _touches_stage(blocks, op):
+                raise ValueError(f"Этапы этого урока задаёт план «{fixed_stages}» — меняйте их в плане")
             _apply_one(t, blocks, op, touched)
+        if keep_one_stage and any(b.type == BLOCK_STAGE for b in old) and not any(b.type == BLOCK_STAGE for b in blocks):
+            raise ValueError("В плане должен остаться хотя бы один этап")
     except ValueError:
         t.title = title
         raise

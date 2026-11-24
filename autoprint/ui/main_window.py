@@ -15,7 +15,7 @@ from .. import APP_NAME, __version__, system, taskbar, updater
 from ..guard import InputGuard
 from ..hotkeys import HotkeyManager, parse_hotkey
 from ..importers import export_ipynb
-from ..storage import Settings, Template, TemplateStore
+from ..storage import KIND_PLAN, Settings, Template, TemplateStore
 from ..typer import COUNTDOWN, FINISHED, IDLE, LINE_WAIT, PAUSED, RUNNING
 from . import icons, logo
 from .efir_control import EfirController
@@ -615,13 +615,88 @@ class MainWindow(FramelessWindow):
         self.touch(c)
         self._fill_library(c.id)
 
+    # ================================================================ планы уроков
+    def plan_changed(self, plan: Template) -> list[Template]:
+        """План правили — уроки по нему приводятся к нему (идущий урок — тоже: таймер подстроит publish)."""
+        from .. import plans
+        changed = [t for t in self.store.topics_of(plan.id) if plans.sync_topic(t, plan)]
+        for t in changed:
+            self.touch(t)
+        self.refresh_library_item(plan)
+        self.lesson.schedule_publish()
+        return changed
+
+    def _added(self, t: Template, open_it: bool = True) -> Template:
+        self.touch(t)
+        self._fill_library(t.id)
+        if open_it:
+            self.open_lesson(t.id)
+        return t
+
+    def new_topic(self, plan_id: str) -> Template | None:
+        """«Новый урок → По плану «X»»: этапы плана и его заготовки — сразу на экран урока."""
+        from .. import plans
+        p = self.store.get(plan_id)
+        if p is None or p.kind != KIND_PLAN:
+            return None
+        return self._added(self.store.insert(plans.new_topic(p, "Новый урок")))
+
+    def new_plan(self, structure: str = "empty") -> Template:
+        """«Новый план урока ▸ …»: план по шаблону структуры — сразу на экран урока (правка этапов)."""
+        return self._added(self.store.add_plan_from_structure(structure if isinstance(structure, str) else "empty"))
+
+    def make_plan(self, t: Template) -> Template | None:
+        """«Сделать из этапов план»: план из этапов урока, урок — по нему. Урок уже по плану или без этапов — нет."""
+        from .. import plans
+        from ..storage import BLOCK_STAGE
+        if t.kind == KIND_PLAN or t.plan_id or not any(b.type == BLOCK_STAGE for b in t.blocks):
+            return None
+        p = self.store.insert(plans.plan_from_lesson(t))
+        self.touch(t)
+        self._added(p, open_it=False)
+        self._notify(f"План «{p.title}»: этапы и минуты урока «{t.title}». Урок теперь по этому плану.")
+        self.lesson.schedule_publish()
+        return p
+
+    def link_plan(self, t: Template, plan_id: str) -> list[str]:
+        """«Привязать к плану ▸ X»: этапы урока сопоставляются плану; заметки не теряются. → замечания."""
+        from .. import plans
+        p = self.store.get(plan_id)
+        if p is None or p.kind != KIND_PLAN or t.kind == KIND_PLAN:
+            return []
+        notes = plans.link_topic(t, p)
+        self.touch(t)
+        self.lesson.schedule_publish()
+        self._notify(f"Урок «{t.title}» теперь по плану «{p.title}». " + " ".join(notes), tray=bool(notes))
+        return notes
+
+    def unlink_plan(self, t: Template) -> None:
+        """«Отвязать от плана»: этапы остаются, правятся в самом уроке."""
+        from .. import plans
+        if not t.plan_id:
+            return
+        plans.unlink(t)
+        self.touch(t)
+        self.lesson.schedule_publish()
+
     def delete_lesson(self, t: Template, ask: bool = True) -> bool:
-        if ask and QMessageBox.question(
-                self, "Удалить урок", f"Удалить урок «{t.title}»?\n"
-                "(Резервная копия прошлой версии базы — data/templates.json.bak)") != QMessageBox.StandardButton.Yes:
+        topics = self.store.topics_of(t.id) if t.kind == KIND_PLAN else []
+        if t.kind == KIND_PLAN:
+            q = (f"Удалить план «{t.title}»? Уроки по нему ({len(topics)}) останутся с этими этапами, но без связи."
+                 if topics else f"Удалить план «{t.title}»?")
+            box = ("Удалить план", q + "\n(Резервная копия прошлой версии базы — data/templates.json.bak)")
+        else:
+            box = ("Удалить урок", f"Удалить урок «{t.title}»?\n"
+                   "(Резервная копия прошлой версии базы — data/templates.json.bak)")
+        if ask and QMessageBox.question(self, *box) != QMessageBox.StandardButton.Yes:
             return False
         if self.efir.live_lesson_id() == t.id:
             self.efir.stop_live()
+        from .. import plans
+        for x in topics:                      # уроки по плану остаются обычными уроками с теми же этапами
+            plans.unlink(x)
+            x.updated = time.time()
+            self.refresh_library_item(x)
         self.store.remove(t)
         if self.printer.focus_id == t.id:
             self.printer.set_focus(self.store.templates[0].id if self.store.templates else "")
