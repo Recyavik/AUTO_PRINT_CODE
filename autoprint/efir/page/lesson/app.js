@@ -423,7 +423,9 @@ export function renderTools() {
   zb.setAttribute("aria-label", "Мои настройки");
   zb.onclick = () => prefsMenu(zb);
   t.appendChild(zb);
+  const hasCode = A.items.some((x) => x.type === "code");
   const pb = el("button", "iconbtn");
+  pb.hidden = !hasCode;                       // урок без кода — печатать нечего, кнопка не мешает
   pb.title = "Печать: режим, скорость, «как человек»";
   pb.appendChild(icon("gear"));
   pb.appendChild(el("span", "", "Печать"));

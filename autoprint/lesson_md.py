@@ -37,7 +37,9 @@ from .storage import BLOCK_CODE, BLOCK_IMAGE, BLOCK_MARKDOWN, BLOCK_STAGE, ROLES
 KIND_WORDS = {"break": "перерыв", "exercise": "зарядка"}
 _KIND_BY_WORD = {"перерыв": "break", "зарядка": "exercise", "break": "break", "exercise": "exercise"}
 _ROLE_BY_NAME = {**{k: k for k in ROLES}, **{v[1].lower(): k for k, v in ROLES.items()},
-                 "расскажи про": "tell", "важно!": "important", "ловушка": "trap", "показываешь на экране": "show"}
+                 "расскажи про": "tell", "важно!": "important", "ловушка": "trap", "показываешь на экране": "show",
+                 # названия до 0.11
+                 "ловушки": "trap", "вывод": "output", "подсказка": "hint", "домашка": "homework", "цель": "goal"}
 
 _STAGE = re.compile(r"^##\s+(.+?)\s*$")
 _STAGE_TAIL = re.compile(r"\s*·\s*(\d+)\s*мин(?:\s*·\s*(\S+))?\s*$", re.I)

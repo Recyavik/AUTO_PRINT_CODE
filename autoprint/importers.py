@@ -261,6 +261,9 @@ def export_ipynb(t: Template, path: str, students: bool = False) -> None:
     cells = []
     lang = "python"
     for b in t.blocks:
+        if students and b.type == BLOCK_MARKDOWN and b.role == "homework" and b.text.strip():
+            cells.append({"cell_type": "markdown", "source": src("## Домашнее задание\n\n" + b.text.strip()), "metadata": {}})
+            continue
         if students and b.type != BLOCK_CODE:
             continue
         if b.type == BLOCK_STAGE:

@@ -173,5 +173,55 @@ class TimerBreakTest(Base):
         self.assertEqual(started, [15])
 
 
+# ================================================================ Task 7: роли и палитра
+
+class RolesV11Test(unittest.TestCase):
+    def test_roles(self):
+        R = storage.ROLES
+        self.assertEqual([R[k][1] for k in ("trap", "output", "hint", "homework", "goal")],
+                         ["Типичные ошибки", "Результат кода", "Если застрял", "Домашнее задание", "Цель урока"])
+        self.assertNotIn("hint", storage.ROLE_MORE)
+        groups = dict(storage.ROLE_GROUPS)
+        self.assertEqual(list(groups), ["Урок", "Речь", "Ученикам", "Действия", "Для себя", "Материалы"])
+        self.assertEqual(groups["Речь"], ["say", "tell", "term", "ask"])
+        self.assertEqual(groups["Ученикам"], ["task", "hint", "extra", "homework"])
+        self.assertEqual(sorted(k for g in groups.values() for k in g), sorted(storage.ROLE_ORDER))
+
+    def test_state_roles_how(self):
+        from autoprint import scenario
+        roles = {r["key"]: r for r in scenario.roles_state()}
+        self.assertEqual(roles["say"]["how"], "дословно")
+        self.assertEqual(roles["tell"]["how"], "своими словами")
+        self.assertEqual(roles["ask"]["how"], "ответы учеников")
+        self.assertEqual([g["title"] for g in scenario.role_groups_state()][0], "Урок")
+
+    def test_md_names_old_and_new(self):
+        from autoprint.lesson_md import _role
+        for name, key in (("Ловушки", "trap"), ("Типичные ошибки", "trap"), ("Вывод", "output"),
+                          ("Результат кода", "output"), ("Подсказка", "hint"), ("Если застрял", "hint"),
+                          ("Домашнее задание", "homework"), ("Цель урока", "goal")):
+            self.assertEqual(_role(name), key, name)
+
+    def test_students_notebook_homework(self):
+        import json
+        from autoprint.importers import export_ipynb
+        t = Template("У", [note("Скажи", id="a"), code("x = 1", id="b"),
+                           note("Решить задачи 1–3", role="homework", id="c")])
+        path = TMP / "students.ipynb"
+        export_ipynb(t, str(path), students=True)
+        cells = json.loads(path.read_text(encoding="utf-8"))["cells"]
+        self.assertEqual([c["cell_type"] for c in cells], ["code", "markdown"])
+        self.assertIn("Домашнее задание", "".join(cells[1]["source"]))
+        self.assertIn("Решить задачи 1–3", "".join(cells[1]["source"]))
+
+    def test_ai_knows_new_roles(self):
+        from autoprint import lesson_ai as L
+        prompt = L.build_prompt("материал", L.Options(style=L.STYLE_SCENARIO))
+        for word in ('"homework"', "Домашнее задание", '"goal"', "Цель урока", "Если застрял", "Типичные ошибки"):
+            self.assertIn(word, prompt)
+        self.assertEqual(L._TYPE_ROLE.get("домашнее задание"), "homework")
+        self.assertEqual(L._TYPE_ROLE.get("цель"), "goal")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

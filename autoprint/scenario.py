@@ -302,10 +302,16 @@ def lesson_rev(t: Template) -> int:
 
 
 def roles_state() -> list[dict]:
-    """Роли заметок для страницы: порядок меню, название, как с ней обращаться («Обозначения»)."""
-    from .storage import ROLE_HINTS, ROLE_MORE, ROLE_ORDER, ROLES
-    return [{"key": k, "name": ROLES[k][1], "hint": ROLE_HINTS.get(k, ""), "more": k in ROLE_MORE}
-            for k in ROLE_ORDER + ROLE_MORE]
+    """Роли заметок для страницы: порядок меню, название, как с ней обращаться («Обозначения»), как читать."""
+    from .storage import ROLE_HINTS, ROLE_HOW, ROLE_MORE, ROLE_ORDER, ROLES
+    return [{"key": k, "name": ROLES[k][1], "hint": ROLE_HINTS.get(k, ""), "how": ROLE_HOW.get(k, ""),
+             "more": k in ROLE_MORE} for k in ROLE_ORDER + ROLE_MORE]
+
+
+def role_groups_state() -> list[dict]:
+    """Группы палитры «+» и меню роли: «Урок», «Речь», «Ученикам», «Действия», «Для себя», «Материалы»."""
+    from .storage import ROLE_GROUPS
+    return [{"title": title, "roles": list(keys)} for title, keys in ROLE_GROUPS]
 
 
 def lessons_state(templates) -> list[dict]:
@@ -329,7 +335,7 @@ def lesson_state(t: Template | None, *, live_anchor_ms: int | None, media_url, p
         armed = printer["block"]
     base = {"live": {"anchor": live_anchor_ms, "shift": live_shift} if live_anchor_ms else None, "armed": armed, "dark": dark,
             "efir": {"mode": efir_mode, "tab": tab, **(efir_extra or {})}, "hotkey": hotkey, "print": printer,
-            "lessons": lessons or [], "roles": roles_state(), "exercises": exercises, "edits": edits,
+            "lessons": lessons or [], "roles": roles_state(), "role_groups": role_groups_state(), "exercises": exercises, "edits": edits,
             "other_live": other_live, "prefs": prefs or {}}
     if t is None:
         return {"lesson": None, **base}

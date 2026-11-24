@@ -605,6 +605,32 @@ class PageV11Test(Page):
             del ef.open_tab
             ef.show_background()
 
+    # ---------------------------------------------------------------- Task 7: роли и палитра
+    def test_palette_groups(self):
+        self.mode("prep")
+        self.assertEqual(self.js("document.querySelector('[data-id=n1] .lbl .how').textContent"), "· дословно")
+        self.js("document.querySelector('.ins[data-after=n1] .insbtn').click()")
+        self.assertTrue(self.edge.wait("!!document.querySelector('.menu')"))
+        heads = self.js("[...document.querySelectorAll('.menu .mhead')].map(h => h.textContent)")
+        self.assertEqual(heads, ["Урок", "Речь", "Ученикам", "Действия", "Для себя", "Материалы"])
+        labels = self.js("[...document.querySelectorAll('.menu .mi .ml')].map(x => x.textContent)")
+        self.assertEqual(labels[-1], "Код")
+        for name in ("Этап", "Цель урока", "Если застрял", "Домашнее задание", "Типичные ошибки", "Результат кода"):
+            self.assertIn(name, labels)
+        self.js("document.body.dispatchEvent(new MouseEvent('mousedown', {bubbles: true}))")
+        printbtn = "[...document.querySelectorAll('#tools .iconbtn')].find(b => b.textContent.includes('Печать'))"
+        self.assertTrue(self.js(f"!{printbtn}.hidden"))
+        self.win.store.templates.append(Template("Без кода", [stage("Один", 10, id="z1"), note("Текст", id="z2")], id="NC"))
+        try:
+            self.win.open_lesson("NC", ask=False)
+            self.win.lesson.publish()
+            self.assertTrue(self.edge.wait(f"document.getElementById('titleText').textContent === 'Без кода' && {printbtn}.hidden"))
+        finally:
+            self.win.open_lesson(self.t.id, ask=False)
+            self.win.store.templates[:] = [x for x in self.win.store.templates if x.id != "NC"]
+            self.win.lesson.publish()
+            self.assertTrue(self.edge.wait(f"document.getElementById('titleText').textContent === '{self.t.title}'"))
+
     # ---------------------------------------------------------------- Task 3: план строкой
     def test_plan_strip(self):
         self.mode("lesson")

@@ -19,6 +19,7 @@ const PROFILES = [["", "Как в настройках"], ["ide", "IDE: VS Code,
   ["terminal", "Терминал"]];
 const ROLE_COLORS = { say: "--say", term: "--term", tell: "--tell", ask: "--ask", do: "--do", show: "--show",
   output: "--output", important: "--imp", trap: "--trap", extra: "--extra", task: "--accent", text: "--faint",
+  homework: "--accent", goal: "--say",
   explain: "--say", hint: "--show" };
 
 // ---------------------------------------------------------------- действия (с отменой)
@@ -416,20 +417,45 @@ export function editTitle(n, it) {
 }
 
 // ---------------------------------------------------------------- меню
-export function roleMenu(anchor, it) {
+// роли по группам («Урок», «Речь», «Ученикам», «Действия», «Для себя», «Материалы»)
+function roleGroups() {
   const roles = (A.S && A.S.roles) || [];
-  const items = [{ head: "Роль заметки" }];
-  for (const r of roles) {
-    if (r.more && !items.some((x) => x.head === "Ещё")) items.push({ head: "Ещё" });
-    items.push({ label: r.name, hint: r.hint, checked: r.key === it.role, dot: `var(${ROLE_COLORS[r.key] || "--faint"})`,
-      on: () => setFields(it.id, { role: r.key }) });
+  const byKey = new Map(roles.map((r) => [r.key, r]));
+  const groups = ((A.S && A.S.role_groups) || []).map((g) => ({ title: g.title, roles: g.roles.map((k) => byKey.get(k)).filter(Boolean) }));
+  return { groups, more: roles.filter((r) => r.more) };
+}
+
+function roleItem(r, extra) {
+  return Object.assign({ label: r.name, hint: r.hint, dot: `var(${ROLE_COLORS[r.key] || "--faint"})` }, extra);
+}
+
+export function roleMenu(anchor, it) {
+  const { groups, more } = roleGroups();
+  const items = [];
+  for (const g of groups) {
+    items.push({ head: g.title });
+    for (const r of g.roles) items.push(roleItem(r, { checked: r.key === it.role, on: () => setFields(it.id, { role: r.key }) }));
   }
-  menu(anchor, items, { cls: "roles" });
+  if (more.length) {
+    items.push({ head: "Ещё" });
+    for (const r of more) items.push(roleItem(r, { checked: r.key === it.role, on: () => setFields(it.id, { role: r.key }) }));
+  }
+  menu(anchor, items, { cls: "roles tall" });
 }
 
 function langMenu(anchor, it) {
   menu(anchor, [{ head: "Язык кода" }, ...LANGS.map(([k, n]) => ({ label: n, checked: (it.lang || "") === k,
     on: () => setFields(it.id, { lang: k }) }))], { cls: "tall" });
+}
+
+function copyForChat(it) {
+  const d = document.createElement("div");
+  d.innerHTML = mdHtml(it.text || "");
+  for (const li of d.querySelectorAll("li")) li.prepend("• ");
+  for (const b of d.querySelectorAll("p, li, h2, h3, h4")) b.append("\n");
+  const text = ("Домашнее задание:\n" + d.textContent).replace(/\n{3,}/g, "\n\n").trim();
+  (navigator.clipboard ? navigator.clipboard.writeText(text) : Promise.reject())
+    .then(() => toast("Скопировано — вставьте в чат группы"), () => toast("Не удалось скопировать — выделите текст вручную"));
 }
 
 export function blockMenu(anchor, it) {
@@ -444,6 +470,9 @@ export function blockMenu(anchor, it) {
     for (const [k, n] of PROFILES) list.push({ label: n, checked: (it.profile || "") === k, on: () => setFields(it.id, { profile: k }) });
     list.push({ sep: true });
     list.push({ label: it.title ? "Изменить заголовок" : "Добавить заголовок", on: () => editTitle(nodeOf(it.id), it) });
+    if (it.role === "homework") {
+      list.push({ label: "Скопировать для чата", hint: "текст домашнего задания", on: () => copyForChat(it) });
+    }
   } else if (it.type === "image") {
     list.push({ label: "Заменить картинку…", on: () => pickImage(it.id, true) });
     list.push({ label: it.title ? "Изменить подпись" : "Добавить подпись", on: () => editTitle(nodeOf(it.id), it) });
@@ -458,25 +487,29 @@ export function blockMenu(anchor, it) {
 }
 
 export function insertMenu(anchor, after) {
-  const roles = ((A.S && A.S.roles) || []).filter((r) => !r.more);
-  const items = [{ head: "Заметка" }];
-  for (const r of roles) {
-    items.push({ label: r.name, hint: r.hint, dot: `var(${ROLE_COLORS[r.key] || "--faint"})`,
-      on: () => startEditingSoon(insertBlock(after, "markdown", { role: r.key })) });
+  const { groups } = roleGroups();
+  const note = (r) => roleItem(r, { on: () => startEditingSoon(insertBlock(after, "markdown", { role: r.key })) });
+  const items = [];
+  for (const g of groups) {
+    items.push({ head: g.title });
+    if (g.title === "Урок") {
+      items.push({ label: "Этап", hint: "строка плана с минутами", on: () => {
+        const id = insertBlock(after, "stage");
+        requestAnimationFrame(() => requestAnimationFrame(() => {
+          const art = $("st-" + id);
+          const h = art && art.querySelector(".stitle");
+          if (h) editStageTitle(h, item(id));
+        }));
+      } });
+    }
+    for (const r of g.roles) items.push(note(r));
+    if (g.title === "Материалы") {
+      items.push({ label: "Картинка или слайд…", hint: "файл; или Ctrl+V / перетащите в ленту", on: () => pickImage(after, false) });
+      items.push({ label: "Код", hint: "печатается по " + ((A.S && A.S.hotkey) || "Ctrl+F9"),
+        on: () => startEditingSoon(insertBlock(after, "code")) });
+    }
   }
-  items.push({ sep: true });
-  items.push({ label: "Код", hint: "печатается по " + ((A.S && A.S.hotkey) || "Ctrl+F9"),
-    on: () => startEditingSoon(insertBlock(after, "code")) });
-  items.push({ label: "Картинка…", hint: "файл; или Ctrl+V / перетащите в ленту", on: () => pickImage(after, false) });
-  items.push({ label: "Этап", hint: "строка плана с минутами", on: () => {
-    const id = insertBlock(after, "stage");
-    requestAnimationFrame(() => requestAnimationFrame(() => {
-      const art = $("st-" + id);
-      const h = art && art.querySelector(".stitle");
-      if (h) editStageTitle(h, item(id));
-    }));
-  } });
-  menu(anchor, items, { cls: "roles insert" });
+  menu(anchor, items, { cls: "roles insert tall" });
 }
 
 // ---------------------------------------------------------------- этапы

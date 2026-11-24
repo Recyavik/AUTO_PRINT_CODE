@@ -59,10 +59,10 @@ class RolesTest(unittest.TestCase):
         self.assertEqual(ROLES["task"][1], "Задание")
         self.assertEqual(ROLES["text"][1], "Заметка")
         self.assertEqual(ROLES["term"][1], "Термин")
-        self.assertEqual(ROLES["output"][1], "Вывод")
+        self.assertEqual(ROLES["output"][1], "Результат кода")       # 0.11: было «Вывод»
         self.assertEqual(set(ROLE_ORDER + ROLE_MORE), set(ROLES))
         self.assertEqual(len(ROLE_ORDER + ROLE_MORE), len(ROLES))
-        self.assertEqual(ROLE_ORDER[0], "say")
+        self.assertEqual(ROLE_ORDER[0], "goal")                      # 0.11: группы, «Урок» первым
         self.assertEqual(set(ROLE_HINTS), set(ROLES))
         self.assertIn("дословно", ROLE_HINTS["say"])
         self.assertIn("своими словами", ROLE_HINTS["tell"])
@@ -532,8 +532,9 @@ class StateTest(unittest.TestCase):
         t = Template("Урок", [stage("A", 5), code("x")], id="L1")
         st = page_state(t, lessons=[{"id": "L1", "title": "Урок"}])
         self.assertEqual([r["key"] for r in st["roles"]], ROLE_ORDER + ROLE_MORE)
-        self.assertEqual(st["roles"][0]["name"], "Говоришь")
-        self.assertIn("дословно", st["roles"][0]["hint"])
+        say = next(r for r in st["roles"] if r["key"] == "say")
+        self.assertEqual(say["name"], "Говоришь")
+        self.assertIn("дословно", say["hint"])
         self.assertEqual(st["lessons"], [{"id": "L1", "title": "Урок"}])
 
     def test_print_in_state(self):
@@ -886,7 +887,7 @@ class SampleLessonTest(unittest.TestCase):
         self.assertEqual(sorted(b.stage_kind for b in stages if b.stage_kind), ["break", "exercise"])
         self.assertEqual({b.part for b in stages}, {"Первая половина", "Вторая половина"})
         roles = {b.role for b in t.blocks if b.type == BLOCK_MARKDOWN}
-        self.assertTrue(set(ROLE_ORDER) <= roles, set(ROLE_ORDER) - roles)
+        self.assertTrue(set(ROLE_ORDER) - {"goal", "homework", "hint"} <= roles, set(ROLE_ORDER) - roles)   # v3 — test_v11
         codes = [i for i, b in enumerate(t.blocks) if b.type == BLOCK_CODE]
         self.assertGreaterEqual(len(codes), 5)
         imgs = [b for b in t.blocks if b.type == BLOCK_IMAGE]

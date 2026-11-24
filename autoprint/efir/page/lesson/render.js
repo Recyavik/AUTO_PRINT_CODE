@@ -39,6 +39,8 @@ function label(it, kind) {
   const name = el("span", "rname", kind === "code" ? "Код" : kind === "image" ? "Картинка" : roleName(kind));
   if (it.type === "markdown") name.title = "Роль заметки — щёлкните, чтобы сменить";
   lbl.appendChild(name);
+  const how = it.type === "markdown" && ((A.S && A.S.roles) || []).find((r) => r.key === kind);
+  if (how && how.how) lbl.appendChild(el("span", "how", "· " + how.how));
   if (it.title) lbl.appendChild(el("span", "sub", "· " + it.title));
   else lbl.appendChild(el("span", "addtitle", "+ заголовок"));
   return lbl;
