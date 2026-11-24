@@ -113,6 +113,25 @@ def _scenario_or(t: Template) -> Template:
 _FENCE = re.compile(r"^```[ \t]*([\w+#.-]*)[^\n]*\n(.*?)^```[ \t]*$", re.M | re.S)
 
 
+def chat_lesson(text: str, title: str) -> Template | None:
+    """Ответ своего чата целиком — урок в обёртке «~~~markdown … ~~~» (так просит промпт), скопированный со всем
+    сообщением или сохранённый чатом в файл .md → урок. None — обёртки нет или до неё уже идёт урок
+    (тогда «~~~markdown» — пример внутри урока, а не обёртка)."""
+    from . import lesson_md
+    from .lesson_ai import _MD_OPEN, LessonError, _parse_md_answer, md_answer
+    lines = text.replace("\r\n", "\n").split("\n")
+    head = next((i for i, ln in enumerate(lines) if _MD_OPEN.match(ln)), None)
+    if head is None or lesson_md.looks_like_lesson("\n".join(lines[:head])):
+        return None
+    md = md_answer(text)
+    if md is None or not lesson_md.looks_like_lesson(md):
+        return None
+    try:
+        return _parse_md_answer(md, title, None).template      # слайдов без PDF нет — «slide:N» пропускаются
+    except LessonError:
+        return None
+
+
 def import_markdown(path: str) -> Template:
     return markdown_text(Path(path).read_text(encoding="utf-8-sig").replace("\r\n", "\n"), Path(path).stem)
 
@@ -189,6 +208,9 @@ def load_file(path: str) -> Template:
     if ext == ".md":
         from . import lesson_md
         text = Path(path).read_text(encoding="utf-8-sig")
+        chat = chat_lesson(text, Path(path).stem)      # ответ чата, сохранённый файлом (в «~~~markdown»)
+        if chat is not None:
+            return chat
         if lesson_md.looks_like_lesson(text):          # урок: этапы, подсказки, картинки рядом с файлом
             return lesson_md.parse(text, Path(path).parent, Path(path).stem)
         return import_markdown(path)
@@ -241,6 +263,9 @@ def parse_pasted(text: str, lang: str = "") -> tuple[Template, str]:
         if isinstance(data.get("blocks"), list):
             return parse_lesson(src).template, "занятие от нейросети"
     from . import lesson_md
+    chat = chat_lesson(src, "Вставленный урок")            # весь ответ чата: фраза и урок в «~~~markdown»
+    if chat is not None:
+        return chat, "урок в Markdown"
     if lesson_md.looks_like_lesson(src):
         return lesson_md.parse(src, None, "Вставленный урок"), "урок в Markdown"
     if _FENCE.search(src):

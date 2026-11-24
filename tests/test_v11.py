@@ -629,6 +629,43 @@ class ChatPromptTest(unittest.TestCase):
             win.close()
             pump()
 
+    def test_chat_answer_saved_as_md_file(self):
+        """ChatGPT прислал урок файлом .md — внутри строки ~~~markdown, их просит промпт."""
+        import tempfile
+        from autoprint.importers import load_file
+        for text in (CHAT_ANSWER, CHAT_ANSWER.split("\n", 2)[2]):        # с фразой до блока и без неё
+            with tempfile.TemporaryDirectory() as d:
+                p = Path(d) / "урок.md"
+                p.write_text(text, encoding="utf-8")
+                t = load_file(str(p))
+            self.assertEqual(t.title, "Функции по слайдам")
+            self.assertEqual([b.title for b in t.blocks if b.type == BLOCK_STAGE], ["Вступление", "Разбор"])
+            self.assertTrue(any(b.type == BLOCK_CODE and b.text == "print(1)" for b in t.blocks))
+            self.assertFalse(any(b.type == BLOCK_IMAGE for b in t.blocks))   # слайдов без PDF нет — не битые картинки
+
+    def test_chat_answer_pasted_whole(self):
+        """Скопирован весь ответ чата — с фразой и строками ~~~markdown — во вкладку «Вставить»."""
+        from autoprint.importers import parse_pasted
+        t, kind = parse_pasted(CHAT_ANSWER)
+        self.assertEqual(kind, "урок в Markdown")
+        self.assertEqual(t.title, "Функции по слайдам")
+        self.assertEqual([b.title for b in t.blocks if b.type == BLOCK_STAGE], ["Вступление", "Разбор"])
+
+    def test_markdown_example_inside_lesson_stays(self):
+        """Урок про Markdown: пример ~~~markdown внутри этапа — пример кода, а не обёртка ответа."""
+        import tempfile
+        from autoprint.importers import load_file, parse_pasted
+        text = ("## Разметка · 10 мин\n\n> [!say]\n> Заголовок — решётка.\n\n~~~markdown\n# Заголовок\n~~~\n\n"
+                "## Практика · 5 мин\n\n> [!task]\n> Сделайте заголовок.\n")
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "разметка.md"
+            p.write_text(text, encoding="utf-8")
+            t = load_file(str(p))
+        t2, _kind = parse_pasted(text)
+        for les in (t, t2):
+            self.assertEqual([b.title for b in les.blocks if b.type == BLOCK_STAGE], ["Разметка", "Практика"])
+            self.assertTrue(any(b.type == BLOCK_CODE and "# Заголовок" in b.text for b in les.blocks))
+
     def test_dialog_copy_enabled_without_material(self):
         from PySide6.QtGui import QGuiApplication
         from autoprint import lesson_ai as L

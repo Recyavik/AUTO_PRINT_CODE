@@ -173,7 +173,8 @@ class ImportDialog(QDialog):
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(10)
         self.paste_edit = self._editor("Вставьте сюда (Ctrl+V): код, Markdown с ```-блоками, тетрадку Jupyter "
-                                       "или ответ нейросети в формате JSON — программа сама поймёт, что это.")
+                                       "или ответ нейросети (урок в ~~~markdown или JSON) — программа сама поймёт, "
+                                       "что это.")
         lay.addWidget(self.paste_edit, 1)
         row = QHBoxLayout()
         row.addWidget(label("Если это просто код, язык:", "importLabel"))
