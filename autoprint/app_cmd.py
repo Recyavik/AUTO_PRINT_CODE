@@ -124,9 +124,11 @@ class AppCommands(QObject):
 
     def cmd_notice_action(self, d: dict) -> None:
         """Кнопка в тосте: повторить команду из уведомления (например, «Завершить и открыть»)."""
-        act = (self.app.notice or {}).get("action") or {}
+        seq = int(d.get("seq") or -1)
+        n = next((x for x in getattr(self.app, "notices", [self.app.notice]) if x.get("seq") == seq), None)
+        act = (n or {}).get("action") or {}
         inner = act.get("cmd") if isinstance(act, dict) else None
-        if isinstance(inner, dict) and int(d.get("seq") or -1) == self.app.notice.get("seq"):
+        if isinstance(inner, dict):
             if inner.get("cmd") == "open":
                 self.app.open_lesson(str(inner.get("lesson") or ""), ask=not inner.get("force"))
             else:

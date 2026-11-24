@@ -81,6 +81,7 @@ def app_state(app) -> dict:
         "ai": ai_state(s),
         "jobs": app.jobs.state() if app.jobs is not None else [],
         "notice": dict(app.notice),
+        "notices": [dict(n) for n in getattr(app, "notices", [])],
         "window": {"compact": bool(win.compact), "pinned": bool(win.pinned), "maximized": bool(win.isMaximized())},
         "drop": dict(app.drop_info),
         "nav": dict(app.nav),

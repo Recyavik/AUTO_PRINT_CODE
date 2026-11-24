@@ -835,6 +835,8 @@ class App(QObject):
                 action: dict | None = None) -> None:
         """Сообщение: тостом в окне (и на экране урока), в трее — если окно не на виду."""
         self.notice = {"seq": self.notice["seq"] + 1, "text": str(text)[:600], "warn": bool(warn), "action": action}
+        # несколько сообщений подряд (быстрее, чем уходит состояние) — окно покажет каждое, а не только последнее
+        self.notices = (getattr(self, "notices", []) + [dict(self.notice)])[-6:]
         self.changed.emit("notice")
         lesson = getattr(self, "lesson", None)
         if lesson is not None:

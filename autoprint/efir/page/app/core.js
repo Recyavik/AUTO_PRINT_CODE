@@ -46,8 +46,9 @@ function onApp(s) {
   }
   if (S.notice && S.notice.seq !== noticeSeq) {
     const first = noticeSeq === -1;
+    const fresh = (S.notices || [S.notice]).filter((n) => n.seq > noticeSeq && n.text);
     noticeSeq = S.notice.seq;
-    if (!first && S.notice.text) emit("notice", S.notice);
+    if (!first) fresh.forEach((n) => emit("notice", n));     // каждое новое, а не только последнее
   }
   if (S.drop && S.drop.seq !== dropSeq) {
     const first = dropSeq === -1;
