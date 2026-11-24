@@ -490,6 +490,27 @@ class PageV11Test(Page):
             self.win.settings.page_past = "dim"
             self.stop_live()
 
+    # ---------------------------------------------------------------- Task 3: план строкой
+    def test_plan_strip(self):
+        self.mode("lesson")
+        try:
+            self.assertTrue(self.edge.wait("getComputedStyle(document.getElementById('plan')).display === 'none'"))
+            self.go_live(6)
+            self.assertTrue(self.edge.wait("document.querySelector('#strip .cur') && "
+                                           "document.querySelector('#strip .cur').textContent.includes('Разбор')"))
+            self.assertIn("Приветствие", self.js("document.querySelector('#strip .prev').textContent"))
+            self.assertIn("Итоги", self.js("document.querySelector('#strip .next').textContent"))
+            self.assertIn("конец", self.js("document.querySelector('#strip').textContent"))
+            self.js("document.querySelector('#strip .more').click()")
+            self.assertTrue(self.edge.wait("getComputedStyle(document.getElementById('plan')).display !== 'none'"))
+            self.js("document.querySelector('#strip .more').click()")
+            self.assertTrue(self.edge.wait("getComputedStyle(document.getElementById('plan')).display === 'none'"))
+            self.mode("prep")
+            self.assertTrue(self.edge.wait("getComputedStyle(document.getElementById('plan')).display !== 'none' && "
+                                           "getComputedStyle(document.getElementById('strip')).display === 'none'"))
+        finally:
+            self.stop_live()
+
 
 def big_lesson() -> list[Template]:
     blocks = []

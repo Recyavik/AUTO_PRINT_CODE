@@ -444,6 +444,73 @@ export function collapseStages(which) {
   applyCollapse();
 }
 
+// план строкой: ‹ прошлый · ● текущий 3:12 из 8 · следующий (8) › · конец 19:30 · План ▾
+function goStage(id) {
+  const st = $("st-" + id);
+  document.body.classList.remove("plan-open");
+  if (!st) return;
+  A.userOpen[id] = true;
+  applyCollapse();
+  st.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+function stripEl() {
+  const s = $("strip");
+  if (!s.firstChild) {
+    for (const [cls, tag] of [["prev", "button"], ["cur", "button"], ["next", "button"], ["end", "span"], ["screen", "span"], ["more", "button"]]) {
+      s.appendChild(el(tag, cls));
+    }
+    const more = s.querySelector(".more");
+    more.textContent = "План ▾";
+    more.title = "Весь план урока";
+    s.addEventListener("click", (e) => {
+      const b = e.target.closest("button");
+      if (!b) return;
+      if (b.classList.contains("more")) { document.body.classList.toggle("plan-open"); return; }
+      if (b.dataset.id) goStage(b.dataset.id);
+    });
+  }
+  return s;
+}
+
+function renderStrip(elapsed, cur, stages) {
+  const s = $("strip");
+  s.hidden = !stages.length;
+  if (!stages.length) return;
+  stripEl();
+  const [pb, cb, nb, end] = ["prev", "cur", "next", "end"].map((c) => s.querySelector("." + c));
+  const set = (e, text, id) => {
+    if (e.textContent !== text) e.textContent = text;
+    e.hidden = !text;
+    e.dataset.id = id || "";
+  };
+  const name = (x) => x.item.title || "Этап";
+  const total = stages.reduce((a, x) => a + x.minutes, 0);
+  const first = stages[0], last = stages[stages.length - 1];
+  if (cur >= 0) {
+    const c = stages[cur], pv = stages[cur - 1], nx = stages[cur + 1];
+    const timer = prefs().page_stage_timer !== false ? " · " + mmss((c.end - elapsed) * 60) + " из " + c.minutes : "";
+    set(pb, pv ? "‹ " + name(pv) : "", pv && pv.id);
+    set(cb, "● " + name(c) + timer, c.id);
+    set(nb, nx ? name(nx) + " (" + nx.minutes + ") ›" : "", nx && nx.id);
+  } else if (elapsed !== null && elapsed >= total) {
+    set(pb, "‹ " + name(last), last.id);
+    set(cb, "Урок окончен", "");
+    set(nb, "", "");
+  } else {
+    set(pb, "", "");
+    set(cb, elapsed !== null && elapsed < 0 ? "До начала " + mmss(-elapsed * 60) : "Не начат · " + durText(total), first.id);
+    set(nb, name(first) + " (" + first.minutes + ") ›", first.id);
+  }
+  let endText = "";
+  if (A.S && A.S.live) {
+    endText = "конец " + clockAt(A.S.live.anchor + total * 60000);
+    const sh = A.S.live.shift || 0;
+    if (sh) endText += (sh > 0 ? " · +" : " · −") + Math.abs(sh) + " мин";
+  }
+  set(end, endText, "");
+}
+
 // текущий этап вне экрана — плашка «↓ Идёт: …» (лента сама не прокручивается: учитель может дочитывать)
 function updateNowbar(cur, stages) {
   const bar = $("nowbar");
@@ -483,6 +550,7 @@ function tick() {
     applyCollapse();            // без «сворачивать пройденные» раскрытое учителем не трогаем
   }
   updateNowbar(cur, stages);
+  renderStrip(elapsed, cur, stages);
   for (const s of stages) {
     const st = $("st-" + s.id), pr = $("pr-" + s.id);
     if (!st) continue;
@@ -626,9 +694,7 @@ $("plan").addEventListener("click", (e) => {
     if (confirm("Урок пойдёт с этапа «" + (s.item.title || "Этап") + "» — время сдвинется на сейчас. Так?")) cmd({ cmd: "start_at", index: s.i });
     return;
   }
-  A.userOpen[s.id] = true;
-  applyCollapse();
-  $("st-" + s.id)?.scrollIntoView({ behavior: "smooth", block: "start" });
+  goStage(s.id);
 });
 
 function commitPlanMinutes(inp) {

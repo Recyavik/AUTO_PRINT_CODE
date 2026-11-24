@@ -367,6 +367,19 @@ input.inl-h1 { font: 800 20px/1.25 var(--ui); width: min(32em, 60vw); }
   padding: 8px 8px 8px 16px; border-radius: 12px; background: var(--menu); border: 1px solid var(--stroke2); box-shadow: var(--shadow); font-size: 14px; }
 #toast button { min-height: 32px; }
 
+/* ---------------- план строкой (в «Уроке») */
+#strip { flex: 1 1 100%; display: none; align-items: center; gap: 6px 10px; flex-wrap: wrap; min-width: 0; }
+body.mode-lesson.plan-strip #strip { display: flex; }
+#strip button { min-height: 34px; padding: 0 14px; border-radius: 999px; font-size: 15px; }
+#strip .prev, #strip .next { background: transparent; color: var(--dim); }
+#strip .cur { background: var(--accent-soft); border-color: var(--accent-line); font-weight: 800; color: var(--text);
+  font-variant-numeric: tabular-nums; }
+#strip .end { color: var(--dim); font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums; }
+#strip .more { margin-left: auto; }
+body.mode-lesson.plan-strip nav#plan, body.mode-lesson.plan-hidden nav#plan { display: none; }
+body.mode-lesson.plan-strip.plan-open nav#plan { display: block; position: fixed; top: calc(var(--hh, 64px) + 8px); left: 24px;
+  width: min(340px, 90vw); max-height: calc(100vh - var(--hh, 64px) - 24px); z-index: 40; box-shadow: var(--shadow); }
+
 /* ---------------- «Мои настройки» */
 .prefsbtn { font-weight: 800; letter-spacing: -.02em; min-width: 40px; }
 .prefs .zrow { display: flex; align-items: center; gap: 8px; margin: 4px 0 2px; }
@@ -387,7 +400,7 @@ input.inl-h1 { font: 800 20px/1.25 var(--ui); width: min(32em, 60vw); }
     --show:#6B2FB0; --extra:#6B2FB0; --term:#0E7C6E; --output:#237A32;
     --t-c:#777; --t-k:#9A5500; --t-b:#0F6A85; --t-f:#1F5FBF; --t-cl:#7A4E00; --t-d:#7A4E00; --t-t:#B00020; --t-a:#8A4513;
     --t-s:#1E6B2B; --t-n:#6B2FB0; --t-o:#555; font-size: 12px; }
-  header { position: static; border: none; padding: 0 0 8px; } .tools, #legend, #offline, #toast, #nowbar, .armbtn, .efirbtn, .phint, .ins,
+  header { position: static; border: none; padding: 0 0 8px; } .tools, #legend, #offline, #toast, #nowbar, #strip, .armbtn, .efirbtn, .phint, .ins,
   .blk > .tools, .sedit, #lessonsBtn, .pmin { display: none !important; }
   #wrap { display: block; padding: 0; } nav#plan { position: static; max-height: none; overflow: visible; margin-bottom: 14px; }
   .stage { break-inside: auto; margin-bottom: 10px; } .stage .body, .stage.collapsed .body { display: block !important; }
@@ -407,6 +420,7 @@ input.inl-h1 { font: 800 20px/1.25 var(--ui); width: min(32em, 60vw); }
     </div>
   </div>
   <div class="tools" id="tools"></div>
+  <div id="strip" aria-label="План урока строкой" hidden></div>
 </header>
 <section id="legend" hidden aria-label="Обозначения"><div class="grid" id="legendGrid"></div></section>
 <div id="wrap">

@@ -81,5 +81,24 @@ class PrefsTest(Base):
         self.assertEqual(p["start_timer"], True)
 
 
+# ================================================================ Task 3: план строкой — сдвиг конца урока
+
+class ShiftTest(Base):
+    port = 18971
+
+    def test_shift_after_restart_stage(self):
+        from datetime import datetime, timedelta
+        at = (datetime.now() - timedelta(minutes=15)).strftime("%H:%M")
+        cmd = self.win.lesson.command
+        cmd({"cmd": "start", "at": at})
+        self.assertEqual(self.win.efir.live_lesson_id(), "L")
+        self.assertEqual(self.state()["live"]["shift"], 0)
+        cmd({"cmd": "shift_now"})                       # этап-перерыв (10–20 мин) начат заново сейчас
+        shift = self.state()["live"]["shift"]
+        self.assertTrue(5 <= shift <= 6, shift)
+        cmd({"cmd": "set_start", "start": at})          # новое время начала — новый план, сдвига нет
+        self.assertEqual(self.state()["live"]["shift"], 0)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -317,6 +317,7 @@ def lessons_state(templates) -> list[dict]:
 
 
 def lesson_state(t: Template | None, *, live_anchor_ms: int | None, media_url, presets, preset: str, dark: bool,
+                 live_shift: int = 0,
                  efir_mode: str, tab: str, hotkey: str, armed: str = "", printer: dict | None = None,
                  lessons: list | None = None, exercises: bool = False, edits: int = 0,
                  other_live: str = "", prefs: dict | None = None) -> dict:
@@ -326,7 +327,7 @@ def lesson_state(t: Template | None, *, live_anchor_ms: int | None, media_url, p
     printer = dict(printer or {})
     if printer.get("block"):
         armed = printer["block"]
-    base = {"live": {"anchor": live_anchor_ms} if live_anchor_ms else None, "armed": armed, "dark": dark,
+    base = {"live": {"anchor": live_anchor_ms, "shift": live_shift} if live_anchor_ms else None, "armed": armed, "dark": dark,
             "efir": {"mode": efir_mode, "tab": tab}, "hotkey": hotkey, "print": printer,
             "lessons": lessons or [], "roles": roles_state(), "exercises": exercises, "edits": edits,
             "other_live": other_live, "prefs": prefs or {}}

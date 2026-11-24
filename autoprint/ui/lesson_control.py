@@ -122,6 +122,7 @@ class LessonController(QObject):
         self._cmd.connect(self.command)
         self._call.connect(self._do_call)
         self.edits = 0           # сколько правок со страницы применено — страница знает, какие уже в состоянии
+        self._plan = None          # (урок, плановое начало) идущего урока — для «конец 19:30 · +5 мин»
         self._timeline: dict[str, tuple[int, int]] = {}   # этапы идущего урока: id → (с минуты, по минуту)
         self._timer = QTimer(self, singleShot=True, interval=300, timeout=self.publish)
         self._last = ""          # что ушло на страницу в последний раз: то же самое второй раз не шлём
@@ -168,7 +169,7 @@ class LessonController(QObject):
         other = self.efir.live_webinar()
         other_live = other.title if other is not None and (t is None or self.efir.live_lesson_id() != t.id) else ""
         state = scenario.lesson_state(
-            t, live_anchor_ms=anchor, armed=t.active_block if t is not None else "",
+            t, live_anchor_ms=anchor, live_shift=self._shift_min(t) if anchor else 0, armed=t.active_block if t is not None else "",
             media_url=self.efir.server.media_url, presets=[(lk.id, lk.title) for lk in self.efir.store.looks],
             preset=preset.id if preset is not None else "", dark=theme.dark, efir_mode=self.efir.mode,
             tab=self.efir.tab_status()[0], hotkey=self.main.settings.hotkey_toggle,
@@ -182,6 +183,18 @@ class LessonController(QObject):
             return
         self._last = key
         self.efir.server.publish(state, channel="lesson")
+
+    def _remember_plan(self, t: Template) -> None:
+        """Плановое начало идущего урока: от него — «конец 19:30» и сдвиг «+5 мин» после «Начать этот этап сейчас»."""
+        live = self.efir.store.live
+        self._plan = (t.id, live.anchor) if live is not None else None
+
+    def _shift_min(self, t: Template) -> int:
+        live = self.efir.store.live
+        plan = self._plan
+        if live is None or plan is None or plan[0] != t.id:
+            return 0
+        return round((live.anchor - plan[1]).total_seconds() / 60)
 
     def _set_pref(self, key: str, value) -> None:
         """«Мои настройки» со страницы: только поля из PREFS и только допустимые значения."""
@@ -329,7 +342,8 @@ class LessonController(QObject):
                     if at:
                         t.start = norm_hhmm(at)          # запомнить — подставится в следующий раз
                         self.main._save_timer.start()
-                    self.efir.launch_lesson(t, start=at, force=bool(d.get("force")))
+                    if self.efir.launch_lesson(t, start=at, force=bool(d.get("force"))):
+                        self._remember_plan(t)
             elif cmd == "stop":
                 if self.efir.live_lesson_id():
                     self.efir.stop_live()
@@ -438,6 +452,7 @@ class LessonController(QObject):
         self.main._save_timer.start()
         if self.efir.live_lesson_id() == t.id and start:
             self.efir.set_start(start)
+            self._remember_plan(t)          # новое время начала — новый план: сдвига нет
 
     def _set_preset(self, t: Template, lid: str) -> None:
         """Оформление экрана эфира для урока (Template.look; preset 0.9 не трогаем — откат)."""
