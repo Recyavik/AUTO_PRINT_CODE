@@ -377,6 +377,28 @@ def apply_chat_answer(t: Template, text: str) -> tuple[Template, list[str]]:
     return new, notes
 
 
+def fill_slides(t: Template, pdf: str, render=None) -> list[str]:
+    """«Подставить слайды из презентации»: места «Слайд N» урока t (картинка без файла, slide = N) получают
+    картинку страницы N из pdf. → замечания («Нет слайдов: 14, 15»)."""
+    from .materials import render_page
+    from .storage import DATA_DIR, MEDIA_FOLDER, media_ref
+    render = render or render_page
+    missing: list[int] = []
+    done: dict[int, str] = {}
+    for b in t.blocks:
+        if b.type != BLOCK_IMAGE or not b.slide or (b.text or "").strip():
+            continue
+        if b.slide not in done:
+            out = render(pdf, b.slide, DATA_DIR / MEDIA_FOLDER)
+            done[b.slide] = media_ref(out) if out else ""
+        if done[b.slide]:
+            b.text = done[b.slide]
+        else:
+            missing.append(b.slide)
+    missing = list(dict.fromkeys(missing))
+    return ["Нет слайдов: " + ", ".join(map(str, missing))] if missing else []
+
+
 # ---------------------------------------------------------------- PowerPoint → PDF (без окна)
 
 def powerpoint_installed() -> bool:

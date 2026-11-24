@@ -899,6 +899,7 @@ def plan_lessons() -> list[Template]:
     for i, b in enumerate(b for b in t.blocks if b.type == BLOCK_STAGE):
         b.id = f"ts{i + 1}"
     return [t, p, Template("Свободный", [stage("А", 5, id="fa"), note("Текст", id="fn"),
+                                         Block(BLOCK_IMAGE, "", title="Кот", id="ph"), Block(BLOCK_IMAGE, "", slide=3, id="ps"),
                                          stage("Зарядка", 3, id="fz", stage_kind="exercise")], id="F")]
 
 
@@ -1043,6 +1044,31 @@ class PageV12Test(Page):
         self.js("[...document.querySelectorAll('.menu .mi')].find(b => b.textContent.includes('Шея')).click()")
         self.assertTrue(self.wait_py(lambda: self.store.get("F").find_block("fz").exercise == "Шея"))
         self.assertTrue(self.edge.wait("document.querySelector('#st-fz .efirbtn').textContent.includes('Шея')"))
+
+    # ---------------------------------------------------------------- Task 11: места для картинок
+    def test_places_render_and_replace(self):
+        self.open_lesson("F")
+        self.mode("prep")
+        self.assertTrue(self.edge.wait("!!document.querySelector('[data-id=ph] .placebox')"))
+        self.assertIn("Нужна картинка: Кот", self.js("document.querySelector('[data-id=ph]').textContent"))
+        self.assertIn("Слайд 3 — картинки нет", self.js("document.querySelector('[data-id=ps]').textContent"))
+        self.assertTrue(self.js("!!document.querySelector('[data-id=ph] .find')"))
+        self.assertTrue(self.js("!!document.querySelector('[data-id=ps] .fillslides')"))
+        self.assertFalse(self.js("!!document.querySelector('[data-id=ps] .toscreen')"))      # места — не «На экран»
+        self.js("document.querySelector('[data-id=ps] .lbl').click()")                    # выделить место
+        self.js(f"""(() => {{
+            const bin = atob('{PNG_1x1}'); const a = new Uint8Array(bin.length);
+            for (let i = 0; i < bin.length; i++) a[i] = bin.charCodeAt(i);
+            const dt = new DataTransfer(); dt.items.add(new File([a], 'p.png', {{type: 'image/png'}}));
+            document.dispatchEvent(new ClipboardEvent('paste', {{clipboardData: dt, bubbles: true}}));
+        }})()""")
+        F = lambda: self.store.get("F")
+        self.assertTrue(self.wait_py(lambda: F().find_block("ps") is None and any(b.slide == 3 and b.text for b in F().blocks)))
+        self.edge.call("Emulation.setEmulatedMedia", {"media": "print"})
+        try:
+            self.assertEqual(self.js("getComputedStyle(document.querySelector('[data-id=ph]')).display"), "none")
+        finally:
+            self.edge.call("Emulation.setEmulatedMedia", {"media": ""})
 
     def test_start_at_button_label(self):
         self.mode("lesson")

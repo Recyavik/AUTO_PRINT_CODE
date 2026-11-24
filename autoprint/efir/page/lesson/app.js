@@ -326,6 +326,9 @@ function moreMenu(anchor) {
     hint: "ChatGPT, GigaChat, Алиса, DeepSeek",
     on: () => cmd({ cmd: "chat_prompt" }) });
   items.push({ label: "Вставить ответ нейросети…", hint: "копия урока", on: answerBox });
+  if (A.items.some((x) => x.type === "image" && x.place === "slide")) {
+    items.push({ label: "Подставить слайды из презентации…", hint: "PDF или PowerPoint — картинки к «Слайд N»", on: () => cmd({ cmd: "fill_slides" }) });
+  }
   // план урока: открыть / отвязать; обычный урок — сделать из этапов план или привязать к плану
   const isPlan = L.kind === "plan";
   if (!isPlan) {
@@ -946,6 +949,9 @@ $("main").addEventListener("click", (e) => {
     } else if (a === "exercise") cmd({ cmd: "exercise", stage: actBtn.dataset.stage || "", index: 0 });
     else if (a === "slide") cmd({ cmd: "slide", block: actBtn.closest(".blk").dataset.id });
     else if (a === "clear-sel") { const b = actBtn.closest(".blk"); E.setFields(b.dataset.id, { sel: [] }); }
+    else if (a === "place-insert") E.pickImage(actBtn.closest(".blk").dataset.id, true);       // место → картинка
+    else if (a === "find-image") cmd({ cmd: "find_image", block: actBtn.closest(".blk").dataset.id });
+    else if (a === "fill-slides") cmd({ cmd: "fill_slides" });
     return;
   }
   const arm = t.closest(".armbtn");
@@ -1119,6 +1125,8 @@ document.addEventListener("paste", (e) => {
   const f = [...(e.clipboardData && e.clipboardData.items || [])].find((x) => x.kind === "file" && /^image\//.test(x.type));
   if (!f) return;
   e.preventDefault();
+  const sel = A.selected && A.byId.get(A.selected);
+  if (sel && sel.type === "image" && sel.place) { E.uploadImage(f.getAsFile(), sel.id, sel.id); return; }   // выбрано место — заменить
   E.uploadImage(f.getAsFile(), E.pastePlace());
 });
 

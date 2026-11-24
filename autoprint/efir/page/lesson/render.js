@@ -168,7 +168,29 @@ function buildBlock(it) {
     }
     row.appendChild(lbl);
     const c = el("div", "c");
-    if (it.missing || !it.url) {
+    if (it.place) {                       // место: картинку подставят из презентации или вставят
+      n.classList.add("place");
+      const box = el("div", "missing placebox");
+      box.appendChild(el("div", "ptxt", it.place === "slide" ? "Слайд " + it.slide + " — картинки нет"
+        : "Нужна картинка: " + (it.title || "без подписи")));
+      const acts = el("div", "pacts");
+      const ins = el("button", "pins", "Вставить картинку…");
+      ins.dataset.act = "place-insert";
+      ins.title = "Выбрать файл — или выделите это место и нажмите Ctrl+V";
+      acts.appendChild(ins);
+      if (it.place === "slide") {
+        const fs = el("button", "fillslides", "Подставить слайды из презентации…");
+        fs.dataset.act = "fill-slides";
+        acts.appendChild(fs);
+      } else {
+        const fi = el("button", "find", "Найти в интернете");
+        fi.dataset.act = "find-image";
+        fi.title = "Поиск картинок по подписи — в обычном браузере";
+        acts.appendChild(fi);
+      }
+      box.appendChild(acts);
+      c.appendChild(box);
+    } else if (it.missing || !it.url) {
       c.appendChild(el("div", "missing", it.text ? "Нет файла картинки" + (it.name ? ": " + it.name : "")
         : "Картинки нет — вставьте её сюда (Ctrl+V) или перетащите файл"));
     } else {

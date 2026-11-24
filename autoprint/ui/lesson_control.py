@@ -111,6 +111,7 @@ def close_app_window() -> None:
 class LessonController(QObject):
     _cmd = Signal(dict)          # из потока сервера → в поток интерфейса
     _call = Signal(object)       # (функция, Future) — выполнить в потоке интерфейса и вернуть результат
+    _fetched = Signal(object)    # (исходный урок, новый урок, замечания): фото из ответа нейросети скачаны
 
     def __init__(self, main) -> None:
         super().__init__(main)
@@ -122,6 +123,9 @@ class LessonController(QObject):
         self.efir.screen_key.connect(self._screen_key)
         self._cmd.connect(self.command)
         self._call.connect(self._do_call)
+        self._fetched.connect(lambda x: self._insert_answer(*x))
+        from .. import web_images
+        self.fetch = web_images.fetch_images     # картинки по ссылкам из ответа нейросети (тесты подменяют)
         self.edits = 0           # сколько правок со страницы применено — страница знает, какие уже в состоянии
         self._plan = None          # (урок, плановое начало) идущего урока — для «конец 19:30 · +5 мин»
         self._tab_warned = False   # «вкладка экрана учеников не открыта» уже сказали
@@ -223,13 +227,37 @@ class LessonController(QObject):
                           "презентации или методички. Ответ — «⋯ → Вставить ответ нейросети».")
 
     def _apply_answer(self, t: Template, text: str) -> None:
-        """«⋯ → Вставить ответ нейросети»: копия урока по ответу (слайды — по номерам), рядом с исходным."""
-        from .. import slides
+        """«⋯ → Вставить ответ нейросети»: копия урока по ответу (слайды — по номерам), рядом с исходным. Урок по
+        плану или сам план — новый урок по этому плану. Фото по ссылкам — скачиваются в фоне, потом урок добавляется."""
+        import threading
+        from .. import plans, slides
         try:
             new, notes = slides.apply_chat_answer(t, text)
         except ValueError as e:
             self.main._notify(str(e), warn=True)
             return
+        plan = t if t.kind == KIND_PLAN else (self.main.store.get(t.plan_id) if t.plan_id else None)
+        new.kind = ""
+        if t.kind == KIND_PLAN and new.title == t.title:
+            new.title = "Новый урок"
+        if plan is not None:
+            notes = plans.link_topic(new, plan) + notes
+        from ..storage import BLOCK_IMAGE
+        if not any(b.type == BLOCK_IMAGE and "://" in (b.text or "") for b in new.blocks):
+            self._insert_answer(t, new, notes)
+            return
+        self.main._notify("Урок по ответу нейросети: скачиваю картинки — урок появится в списке через минуту.")
+        fetch = self.fetch
+
+        def work() -> None:
+            try:
+                more = fetch(new) or []
+            except Exception as e:   # noqa: BLE001 — урок добавляется и без фото
+                more = [f"Картинки не скачались: {e}"]
+            self._fetched.emit((t, new, notes + list(more)))
+        threading.Thread(target=work, name="lesson-answer-images", daemon=True).start()
+
+    def _insert_answer(self, t: Template, new: Template, notes: list[str]) -> None:
         st = self.main.store
         st.templates.insert(st.templates.index(t) + 1 if t in st.templates else len(st.templates), new)
         self.main.touch(new)
@@ -241,6 +269,41 @@ class LessonController(QObject):
             return
         self.main._notify(msg, tray=bool(notes))
         self.main.open_lesson(new.id, ask=False)
+
+    def _fill_slides(self, t: Template) -> None:
+        """«Подставить слайды из презентации…»: выбрать PDF или PowerPoint — места «Слайд N» получают картинки."""
+        from PySide6.QtWidgets import QFileDialog
+        path, _ = QFileDialog.getOpenFileName(self.main, "Презентация — для картинок слайдов", "",
+                                              "Презентация (*.pdf *.pptx)")
+        if path:
+            self.fill_slides_from(t, path)
+
+    def fill_slides_from(self, t: Template, path: str) -> bool:
+        from .. import slides
+        if self.efir.live_webinar() is not None:
+            self.main._notify("Идёт эфир — слайды из презентации подставьте после него: сохранение PowerPoint в PDF "
+                              "занимает до минуты, и программа на это время занята.", warn=True)
+            return False
+        pdf = slides.export_pdf(path) if path.lower().endswith(".pptx") else path
+        if not pdf:
+            self.main._notify("PowerPoint не сохранил презентацию в PDF — выберите PDF этой презентации.", warn=True)
+            return False
+        before = sum(1 for b in t.blocks if b.type == "image" and b.slide and not b.text)
+        notes = slides.fill_slides(t, pdf)
+        after = sum(1 for b in t.blocks if b.type == "image" and b.slide and not b.text)
+        self.main.touch(t)
+        self.edits += 1
+        self.schedule_publish()
+        self.main._notify(f"Слайды подставлены: {before - after}. " + " ".join(notes), tray=bool(notes))
+        return True
+
+    def _find_image(self, t: Template, bid: str) -> None:
+        """«Найти в интернете» у места «Нужна картинка: …» — поиск картинок по подписи в обычном браузере."""
+        from urllib.parse import quote
+        b = t.find_block(bid)
+        if b is None:
+            return
+        QDesktopServices.openUrl(QUrl("https://yandex.ru/images/search?text=" + quote((b.title or "картинка").strip())))
 
     def _screen_key(self, key: str) -> None:
         """Кликер нажали на вкладке учеников (её могли щёлкнуть мышью) — листаем слайды так же, как с экрана урока."""
@@ -505,6 +568,10 @@ class LessonController(QObject):
                 self._chat_prompt(t)
             elif cmd == "apply_answer" and t is not None:
                 self._apply_answer(t, str(d.get("text") or ""))
+            elif cmd == "fill_slides" and t is not None:
+                self._fill_slides(t)
+            elif cmd == "find_image" and t is not None:
+                self._find_image(t, str(d.get("block") or ""))
             elif cmd == "open_tab":
                 self.efir.open_tab()
             elif cmd == "timer":

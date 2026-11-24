@@ -322,6 +322,11 @@ figure { margin: 0; }
 figure img { display: block; max-width: 100%; max-height: 520px; border-radius: 10px; border: 1px solid var(--stroke2);
   cursor: zoom-in; background: var(--card2); }
 .missing { font-size: 14px; color: var(--dim); border: 1px dashed var(--stroke2); border-radius: 10px; padding: 12px 14px; }
+/* место для картинки: «Слайд 5 — картинки нет», «Нужна картинка: кот у ноутбука» */
+.placebox { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; border-color: var(--accent-line); }
+.placebox .ptxt { font-weight: 600; color: var(--text); flex: 1 1 220px; }
+.placebox .pacts { display: flex; flex-wrap: wrap; gap: 8px; }
+.placebox button { min-height: 32px; height: 32px; padding: 0 12px; font-size: 13px; }
 
 /* перерыв и зарядка на этапе */
 .blk.efir .row { margin-top: 6px; }
@@ -461,7 +466,7 @@ body.mode-lesson.plan-strip.plan-open nav#plan { display: block; position: fixed
     --t-c:#777; --t-k:#9A5500; --t-b:#0F6A85; --t-f:#1F5FBF; --t-cl:#7A4E00; --t-d:#7A4E00; --t-t:#B00020; --t-a:#8A4513;
     --t-s:#1E6B2B; --t-n:#6B2FB0; --t-o:#555; font-size: 12px; }
   header { position: static; border: none; padding: 0 0 8px; } .tools, #legend, #offline, #toast, #nowbar, #strip, .rtb, .toscreen, .armbtn, .efirbtn, .phint, .ins,
-  .blk > .tools, .sedit, #lessonsBtn, .pmin, #planlink, #planbanner { display: none !important; }
+  .blk > .tools, .sedit, #lessonsBtn, .pmin, #planlink, #planbanner, .blk.place { display: none !important; }
   #wrap { display: block; padding: 0; } nav#plan { position: static; max-height: none; overflow: visible; margin-bottom: 14px; }
   .stage { break-inside: auto; margin-bottom: 10px; } .stage .body, .stage.collapsed .body { display: block !important; }
   body.mode-prep .body { padding-left: 20px; } .prow .m { display: inline !important; }

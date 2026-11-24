@@ -836,5 +836,96 @@ class ImportLessonTest(unittest.TestCase):
             close(win)
 
 
+# ================================================================ Task 11: места для картинок, слайды, ответ на странице
+
+class PlacesTest(unittest.TestCase):
+    def test_fill_slides(self):
+        from autoprint import slides
+        png = TMP / "s1.png"
+        png.write_bytes(PNG)
+        t = Template("У", [Block(BLOCK_IMAGE, "", title="", slide=1, id="a"), Block(BLOCK_IMAGE, "", slide=9, id="b"),
+                           Block(BLOCK_IMAGE, "", title="Кот", id="c")])
+        notes = slides.fill_slides(t, "x.pdf", render=lambda pdf, n, out: png if n == 1 else None)
+        self.assertTrue(storage.media_path(t.find_block("a").text))
+        self.assertEqual((t.find_block("b").text, t.find_block("c").text), ("", ""))
+        self.assertEqual(notes, ["Нет слайдов: 9"])
+        self.assertEqual(slides.fill_slides(Template("П", [stage("А")]), "x.pdf", render=lambda *a: None), [])
+
+    def test_fill_slides_command(self):
+        from test_v11 import make_pdf
+        t = Template("У", [stage("А", 5), Block(BLOCK_IMAGE, "", slide=2, id="a")], id="U")
+        win = window([t], 18913)
+        try:
+            t = win.store.get("U")
+            pdf = make_pdf(TMP / "fill.pdf", ["Один", "Два"])
+            self.assertTrue(win.lesson.fill_slides_from(t, pdf))
+            self.assertTrue(storage.media_path(t.find_block("a").text))
+            t.find_block("a").text = ""
+            win.efir.launch_lesson(t, start="")                                    # идёт эфир — не подставляем
+            try:
+                self.assertFalse(win.lesson.fill_slides_from(t, pdf))
+                self.assertEqual(t.find_block("a").text, "")
+            finally:
+                win.efir.stop_live()
+        finally:
+            close(win)
+
+    def test_places_not_in_slide_stepping(self):
+        from autoprint.ui.lesson_control import LessonController
+        png = TMP / "s2.png"
+        png.write_bytes(PNG)
+        t = Template("У", [Block(BLOCK_IMAGE, "", slide=1), Block(BLOCK_IMAGE, storage.import_media(png), slide=2, id="s2")])
+        self.assertEqual([b.id for b in LessonController._slides(t)], ["s2"])
+
+    def test_item_state_places_and_local_links(self):
+        from autoprint import scenario
+        for u in ("http://localhost/a.png", "http://192.168.0.5/a.png", "http://[::1]/a.png", "http://printer.local/a.png",
+                  "file:///C:/secret.png"):
+            d = scenario.item_state(Block(BLOCK_IMAGE, u, title="Кот"), lambda p: "")
+            self.assertEqual((d["url"], d["missing"], d["place"]), ("", True, "photo"), u)
+        d = scenario.item_state(Block(BLOCK_IMAGE, "https://ex.org/a.png"), lambda p: "")
+        self.assertEqual((d["url"], d["place"]), ("https://ex.org/a.png", ""))
+        self.assertEqual(scenario.item_state(Block(BLOCK_IMAGE, "", slide=3), lambda p: "")["place"], "slide")
+        self.assertEqual(scenario.item_state(Block(BLOCK_IMAGE, "", title="Кот"), lambda p: "")["place"], "photo")
+
+    def test_find_image_opens_search(self):
+        from PySide6.QtGui import QDesktopServices
+        t = Template("У", [stage("А", 5), Block(BLOCK_IMAGE, "", title="Кот у ноутбука", id="c")], id="U")
+        win = window([t], 18914)
+        opened = []
+        orig = QDesktopServices.openUrl
+        QDesktopServices.openUrl = staticmethod(lambda url: opened.append(url.toString()) or True)
+        try:
+            win.printer.set_focus("U")
+            win.lesson.command({"cmd": "find_image", "block": "c"})
+            self.assertEqual(len(opened), 1)
+            self.assertTrue(opened[0].startswith("https://yandex.ru/images/search?text="), opened[0])
+            self.assertIn("text=Кот у ноутбука", opened[0])                     # QUrl показывает раскодированным
+        finally:
+            QDesktopServices.openUrl = orig
+            close(win)
+
+    def test_page_answer_links_plan_and_fetches_in_background(self):
+        p = plan90()
+        t = plans.new_topic(p, "Функции")
+        win = window([p, t], 18915)
+        fetched = []
+
+        def fake_fetch(tt, **kw):
+            fetched.append(tt.title)
+            return ["Не скачалось: 1 — эти картинки покажутся из интернета."]
+        win.lesson.fetch = fake_fetch
+        try:
+            win.printer.set_focus("P")
+            win.lesson.command({"cmd": "apply_answer", "text": ANSWER_PLAN})
+            self.assertTrue(wait(lambda: len(win.store.topics_of("P")) == 2))
+            new = win.store.topics_of("P")[-1]
+            self.assertEqual((new.plan_id, new.title, new.kind), ("P", "Функции", ""))
+            self.assertEqual([b.link for b in stages_of(new)], ["p1", "p2", "p3", "p4"])
+            self.assertEqual(fetched, ["Функции"])
+        finally:
+            close(win)
+
+
 if __name__ == "__main__":
     unittest.main()

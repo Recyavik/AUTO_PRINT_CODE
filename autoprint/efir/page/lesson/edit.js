@@ -610,7 +610,11 @@ export async function uploadImage(blob, after, replaceId) {
   Q.Q.recent.push({ edits: res.edits || 0, ops: [{ op: "insert", after: after || "", block: { id, type: "image", text: "" } }] });
   if (res.item) A.fresh.set(id, res.item);
   A.undo.push({ op: "delete", block: id });
-  if (replaceId) act({ op: "delete", block: replaceId }, null, false);
+  if (replaceId) {
+    const old = item(replaceId);                // замена (и место «Слайд N» / «Нужна картинка»): подпись и номер слайда — те же
+    if (old && (old.title || old.slide)) act({ op: "set", block: id, fields: { title: old.title || "", slide: old.slide || 0 } }, null, false);
+    act({ op: "delete", block: replaceId }, null, false);
+  }
   refresh();
 }
 

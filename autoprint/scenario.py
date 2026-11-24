@@ -281,15 +281,18 @@ def item_state(b: Block, media_url) -> dict:
         d.update(lang=b.lang, label=label, icon=icon, html=code_html(b.text, b.lang), steps=list(b.steps),
                  sel=list(b.sel), profile=b.profile)
     elif b.type == BLOCK_IMAGE:
+        from .web_images import is_local_url
         src = (b.text or "").strip()
         url, missing = "", True
-        local = media_path(src)
-        if re.match(r"https?://", src, re.I):
+        # место: «Слайд N — картинки нет» / «Нужна картинка: …»; адрес в локальной сети странице не отдаём
+        place = "slide" if not src and b.slide else "photo" if not src or ("://" in src and is_local_url(src)) else ""
+        local = media_path(src) if not place else None
+        if not place and re.match(r"https?://", src, re.I):
             url, missing = src, False
         elif local is not None:
             url, missing = media_url(str(local)), False
-        d.update(url=url, missing=missing, name=Path(src).name if src and not url.startswith("http") else "",
-                 slide=int(b.slide or 0))
+        d.update(url=url, missing=missing, name=Path(src).name if src and not place and not url.startswith("http") else "",
+                 slide=int(b.slide or 0), place=place)
     elif b.type == BLOCK_STAGE:
         d.update(minutes=max(0, int(b.minutes or 0)), kind=b.stage_kind, part=b.part, note=b.text.strip(),
                  exercise=b.exercise)
