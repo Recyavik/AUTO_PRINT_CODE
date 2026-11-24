@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from . import __version__, scenario
 from .scenario_import import looks_like_scenario
-from .storage import BLOCK_IMAGE, BLOCK_STAGE, KIND_PLAN
+from .storage import BLOCK_IMAGE, BLOCK_STAGE, KIND_PLAN, STRUCTURES
 
 PREF_KEYS = ("page_plan", "page_past", "page_stage_timer", "start_screen", "start_timer")
 
@@ -92,4 +92,11 @@ def app_state(app) -> dict:
         "nav": dict(app.nav),
         "efir": {},
         "settings": {},
+        # «Новый урок»: что выбрано в прошлый раз, шаблоны «Начать с» для своего плана, видео зарядок
+        "wizard": {"plan": s.lesson_plan, "cls": s.lesson_class, "minutes": s.lesson_minutes, "brk": s.lesson_break,
+                   "style": s.lesson_style, "task": s.lesson_task, "explain": s.lesson_explain,
+                   "keep": s.lesson_keep_code, "detail": s.lesson_detail},
+        "structures": [{"key": k, "title": v[0], "stages": [{"title": x[0], "minutes": x[1], "kind": x[2] if len(x) > 2 else ""}
+                                                          for x in v[1]]} for k, v in STRUCTURES.items()],
+        "exercises": app.exercise_titles(None),
     }

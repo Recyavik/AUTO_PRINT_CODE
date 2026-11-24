@@ -1,5 +1,6 @@
-"""Окно «Импорт урока» и ⚙ → Нейросеть — как пользуется человек: вставка, промпт, ответ нейросети,
-«Разобрать нейросетью» на подставном сервере, проверка связи. Тихий режим: на экран ничего не выводится.
+"""⚙ → Нейросеть — как пользуется человек: провайдер, ключ (зашифрован), «Проверить» на подставном сервере,
+модели Claude Code и Codex. Тихий режим: на экран ничего не выводится. («Импорт урока» с 1.0 — «Новый урок» в окне:
+tests/test_app_wizard.py и tests/test_wizard_core.py.)
 
     python tests/ui_import.py [папка для снимков]
 """
@@ -39,18 +40,6 @@ from autoprint.app_core import App  # noqa: E402
 from autoprint.ui.theme import theme  # noqa: E402
 
 failed: list[str] = []
-
-
-def open_import(win, tab: str = "file"):
-    """Окно «Импорт урока» поверх окна программы — как открывало его прежнее главное окно (до «Нового урока»
-    в окне, Task 11)."""
-    from autoprint.ui.import_dialog import ImportDialog
-    d = ImportDialog(win.window, win.settings, tab=tab, open_ai_settings=lambda: None, plans=win.store.plans(),
-                     exercises=win.exercise_titles)
-    d.live_check = lambda: win.efir.live_webinar() is not None
-    d.accepted.connect(lambda: win._take_import(d))
-    d.show()
-    return d
 
 
 def open_settings_window(win, page: str):
@@ -108,9 +97,6 @@ class Fake(http.server.BaseHTTPRequestHandler):
         self._send({"choices": [{"message": {"content": "готово" if short else L._EXAMPLES[L.STYLE_STEPS]}}]})
 
 
-CODE = "grades = [5, 4, 3, 5]\naverage = sum(grades) / len(grades)\nprint(average)"
-
-
 def main() -> int:
     s = Settings()
     s.sound_enabled = False
@@ -121,93 +107,12 @@ def main() -> int:
     win.window.show()
     pump()
 
-    # --- «Вставить»: просто код JavaScript
-    n0 = len(win.store.templates)
-    d = open_import(win)
-    pump()
-    check("окно импорта открылось на «Из файла»", d.isVisible() and d.tabs.value() == "file")
-    d.grab().save(str(SHOTS / "import-file.png"))
-    d.tabs.set_value("paste")
-    d._show_tab("paste")
-    d.paste_edit.setPlainText("function double(a) {\n  return a * 2;\n}")
-    wait_for(lambda: "Распознано" in d.status.text(), 3)
-    check("вставка: распознан код JavaScript", "javascript" in d.status.text() and d.add_btn.isEnabled(),
-          d.status.text())
-    d.grab().save(str(SHOTS / "import-paste.png"))
-    d.add_btn.click()
-    pump()
-    check("вставка: урок добавлен и открыт на экране урока", len(win.store.templates) == n0 + 1
-          and win.printer.focus().code_blocks()[0].lang == "javascript" and not d.isVisible())
-
-    # --- «С помощью нейросети» без подключения: промпт и ответ своего чата
-    d = open_import(win, "ai")
-    pump()
-    d.material.setPlainText(CODE)
-    pump(0.2)
-    check("без подключения: «Разобрать» недоступно, «Скопировать промпт» — да, подсказка «Подключить»",
-          not d.ask_btn.isEnabled() and d.copy_btn.isEnabled() and "Подключить" in d.ai_info.text())
-    d.style_seg.set_value(L.STYLE_STEPS)
-    d._style_changed(L.STYLE_STEPS)
-    d.copy_btn.click()
-    clip = QGuiApplication.clipboard().text()
-    check("промпт скопирован: материал, формат, разбор по шагам", CODE in clip and L.FORMAT in clip
-          and "ПОШАГОВОЙ" in clip)
-    d.grab().save(str(SHOTS / "import-ai-empty.png"))
-    d.answer_edit.setPlainText("Вот занятие:\n```json\n" + L._EXAMPLES[L.STYLE_STEPS] + "\n```")
-    wait_for(lambda: d.add_btn.isEnabled(), 3)
-    check("ответ своего чата разобран — видно, что получится", "шагов: 3" in d.answer_info.text(),
-          d.answer_info.text()[:120])
-    d.grab().save(str(SHOTS / "import-ai-answer.png"))
-    win.settings.print_mode, win.settings.strip_comments = "block", False
-    win._apply_settings()
-    d.add_btn.click()
-    pump()
-    t = win.printer.focus()
-    check("занятие по шагам добавлено, включены «По шагам» и «Без комментариев»",
-          t.title == "Оценки" and win.settings.print_mode == "steps" and win.settings.strip_comments
-          and any(len(set(b.steps)) > 1 for b in t.code_blocks()), f"{win.settings.print_mode}")
-    check("выбор разбора запомнен в настройках", win.settings.lesson_style == L.STYLE_STEPS)
-
-    # --- большой код: нейросеть только размечает строки, код берётся из материала
-    d = open_import(win, "ai")
-    pump()
-    big = "\n".join(f"value_{i} = compute({i})" for i in range(L.BIG_LINES + 30))
-    d.material.setPlainText(big)
-    d._update_ai_buttons()
-    d.copy_btn.click()
-    clip = QGuiApplication.clipboard().text()
-    check("большой код: подсказка «разметит строки», промпт — разметкой с номерами строк",
-          "разметит" in d.ai_info.text() and "1| value_0" in clip and "НЕ ПЕРЕПИСЫВАЙ" in clip, d.ai_info.text()[:90])
-    d.answer_edit.setPlainText('{"mode": "marks", "title": "Большой", "lang": "python", "marks": ['
-                               '{"from": 1, "to": 60, "step": 1, "say": "Первая половина"},'
-                               '{"from": 61, "to": 150, "step": 2, "say": "Вторая половина"}]}')
-    wait_for(lambda: d.add_btn.isEnabled(), 3)
-    check("разметка собрана в занятие: код целиком, 2 шага, замечаний нет",
-          "шагов: 2" in d.answer_info.text() and "Внимание" not in d.answer_info.text()
-          and d._ai_parsed.template.code_blocks()[0].text.count("\n") + 1 == L.BIG_LINES + 30 + 2,
-          d.answer_info.text()[:120])
-    d.close()
-    pump()
-
-    # --- подключённая нейросеть (подставной сервер): «Разобрать нейросетью»
+    # --- подключённая нейросеть (подставной сервер) — для «Проверить»
     srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Fake)
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     s.ai_provider = "custom"
     s.ai_urls["custom"] = f"http://127.0.0.1:{srv.server_address[1]}"
     s.ai_models["custom"] = "teacher-7b"
-    d = open_import(win, "ai")
-    pump()
-    d.material.setPlainText(CODE)
-    d._update_ai_buttons()
-    check("подключено: «Разобрать нейросетью» доступно, видно, кто ответит",
-          d.ask_btn.isEnabled() and "Своё" in d.ai_info.text(), d.ai_info.text()[:100])
-    d.ask_btn.click()
-    ok = wait_for(lambda: d.add_btn.isEnabled(), 15)
-    check("нейросеть ответила — ответ в поле и разобран", ok and L.FORMAT in d.answer_edit.toPlainText()
-          and "ответил" in d.answer_info.text(), d.answer_info.text()[:120])
-    d.close()
-    pump()
-
     # --- ⚙ → Нейросеть
     sw = open_settings_window(win, "ai")
     pump()

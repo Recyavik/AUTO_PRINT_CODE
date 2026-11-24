@@ -7,6 +7,7 @@
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="/static/app/app.css">
 <link rel="stylesheet" href="/static/app/lesson.css">
+<link rel="stylesheet" href="/static/app/wizard.css">
 </head>
 <body>
 <div id="app"></div>
@@ -20,10 +21,12 @@ import { lessonView } from "/static/app/lessonview.js";
 import "/static/app/screenctl.js";
 import "/static/app/lessonedit.js";
 import "/static/app/sheets.js";
+import { wizardView } from "/static/app/wizard.js";
 Object.assign(views, placeholders);
 views.dev = devView;
 views.lessons = lessonsView;
 views.lesson = lessonView;
+views.new = wizardView;
 mountShell(document.getElementById("app"));
 boot();
 </script>

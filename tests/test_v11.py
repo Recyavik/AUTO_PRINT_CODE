@@ -488,22 +488,26 @@ class PresentationTest(unittest.TestCase):
         t = load_file(pdf)
         self.assertEqual(sum(b.type == BLOCK_IMAGE for b in t.blocks), 2)
 
-    def test_import_dialog_pptx_with_pdf(self):
-        from autoprint.ui.import_dialog import ImportDialog
+    def test_import_pptx_with_pdf(self):
+        """1.0: «Уже есть файл урока?» / файлы на окне — App.import_paths (вместо окна «Импорт урока»)."""
         deck = make_pptx(TMP / "pair.pptx", [{"file": 1, "title": "Раз", "notes": "Скажи: привет"},
                                              {"file": 2, "title": "Два", "notes": "", "hidden": True},
                                              {"file": 3, "title": "Три", "notes": ""}])
         pdf = make_pdf(TMP / "pair.pdf", ["Раз", "Три"])
-        d = ImportDialog(None, storage.Settings())
+        win = make_window([lesson_with_stages()], port=18975)
+        notes = []
+        orig = win._notify
+        win._notify = lambda text, *a, **k: notes.append(text) or orig(text, *a, **k)
         try:
-            d._take_files([deck, pdf])                              # PDF той же презентации — картинки, не урок
-            self.assertEqual(len(d.result), 1)
-            imgs = [(b.slide, bool(b.text)) for b in d.result[0].blocks if b.type == BLOCK_IMAGE]
+            res = win.import_paths([deck, pdf])                     # PDF той же презентации — картинки, не урок
+            self.assertEqual(len(res["added"]), 1)
+            t = win.store.get(res["added"][0])
+            imgs = [(b.slide, bool(b.text)) for b in t.blocks if b.type == BLOCK_IMAGE]
             self.assertEqual(imgs, [(1, True), (3, True)])
-            self.assertTrue(any("скрыт" in n.lower() for n in d.result_notes), d.result_notes)
+            self.assertTrue(any("скрыт" in n.lower() for n in notes), notes)
         finally:
-            d.close()
-            d.deleteLater()
+            win._quitting = True
+            win.close()
 
     def test_new_lesson_from_presentation(self):
         win = make_window([lesson_with_stages()], port=18976)
@@ -667,20 +671,11 @@ class ChatPromptTest(unittest.TestCase):
             self.assertEqual([b.title for b in les.blocks if b.type == BLOCK_STAGE], ["Разметка", "Практика"])
             self.assertTrue(any(b.type == BLOCK_CODE and "# Заголовок" in b.text for b in les.blocks))
 
-    def test_dialog_copy_enabled_without_material(self):
-        from PySide6.QtGui import QGuiApplication
-        from autoprint import lesson_ai as L
-        from autoprint.ui.import_dialog import TAB_LESSON, ImportDialog
-        s = storage.Settings()
-        s.lesson_style = L.STYLE_SCENARIO
-        d = ImportDialog(None, s, tab=TAB_LESSON)          # 0.12: урок — на вкладке «Урок через нейросеть»
-        try:
-            self.assertTrue(d.lesson_page.copy_btn.isEnabled())
-            d.lesson_page.copy_prompt()
-            self.assertIn("приложен к сообщению", QGuiApplication.clipboard().text())
-        finally:
-            d.close()
-            d.deleteLater()
+    def test_copy_prompt_without_material(self):
+        """1.0: «Скопировать задание» в «Новом уроке» — и без материала (его прикладывают в своём чате)."""
+        from autoprint import lesson_ai as L, wizard
+        text = wizard.copy_prompt("lesson", L.Options(style=L.STYLE_SCENARIO))
+        self.assertIn("приложен к сообщению", text)
 
 
 # ================================================================ Task 12: новый урок по шаблону структуры

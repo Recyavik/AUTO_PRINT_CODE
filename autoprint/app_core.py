@@ -86,7 +86,10 @@ class App(QObject):
         self.nav = {"seq": 0, "hash": ""}   # просьба странице открыть экран (seq растёт)
         self.drop_info = {"seq": 0, "files": []}   # файлы, перетащенные в окно
         self.update_info: dict | None = None
-        self.jobs = None                    # фоновые работы (jobs.py) — Task 11
+        from .jobs import Jobs
+        self.jobs = Jobs(self)              # фоновые работы: нейросеть составляет урок, качаются картинки
+        self.jobs.changed.connect(lambda: self.changed.emit("jobs"))
+        self.fetch_images = None            # скачать фото урока по ссылкам (None — web_images.fetch_images; тесты подменяют)
 
         self.guard = InputGuard()
         self.printer = PrintController(settings, store, self.guard, self)
@@ -531,6 +534,21 @@ class App(QObject):
         self._notify(msg)
         self.open_lesson(last.id)          # идёт урок — спросит, а не завершит его молча
         return last
+
+    def add_new_lesson(self, t: Template, notes=(), style: str = "") -> str:
+        """Урок из «Нового урока» (нейросеть, вставка): фото по ссылкам сначала скачиваются фоном («Пропустить» —
+        урок сразу, фото остаются ссылками), потом урок — в список и на экран. → id работы ("" — урок уже добавлен)."""
+        if not any(b.type == "image" and "://" in (b.text or "") for b in t.blocks):
+            self.add_imported([t], notes=list(notes), style=style)
+            return ""
+        from . import web_images
+        fetch = self.fetch_images or web_images.fetch_images
+
+        def work(job) -> list:
+            more = fetch(t, cancel=job.cancel_event, progress=lambda a, b: job.progress("photos", a, f"{a} из {b}"))
+            return list(more or [])
+        return self.jobs.start("photos", work, lambda more: self.add_imported([t], notes=list(notes) + more, style=style),
+                               f"Картинки к уроку «{t.title}»")
 
     def import_paths(self, paths: list[str]) -> dict:
         """Файлы урока (перетащили в окно, «Уже есть файл урока?», Ctrl+O): пакеты .autoprint/.zip — с планами и

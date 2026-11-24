@@ -1,0 +1,132 @@
+/* AutoPrintCode 1.0 — «Новый урок» по шагам: план, свой план, тема и текст; ход фоновых работ. */
+
+.page.wizard { padding-bottom: 0; }      /* подвал прилипает к самому низу (отступ прокрутки сдвинул бы его вверх) */
+.wizard .wwrap { max-width: 920px; display: flex; flex-direction: column; gap: 16px; }
+.wizard h1 { font-size: 26px; font-weight: 700; letter-spacing: -.01em; margin: 4px 0 0; }
+.wizard .lead { margin: -8px 0 4px; }
+.wizard .wh2 { font-size: 17px; font-weight: 650; margin: 10px 0 0; }
+
+/* шаги: номера — это последовательность */
+.wsteps { list-style: none; display: flex; gap: 10px; margin: 0; padding: 0; align-items: center; }
+.wsteps li { display: flex; align-items: center; gap: 8px; color: var(--faint); font-size: 14px; font-weight: 600; }
+.wsteps li + li::before { content: ""; width: 36px; height: 2px; border-radius: 1px; background: var(--line2); margin-right: 2px; }
+.wsteps .n { width: 26px; height: 26px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center;
+  border: 1.5px solid var(--line2); font-family: var(--mono); font-size: 13px; }
+.wsteps li.on { color: var(--text); }
+.wsteps li.on .n { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+.wsteps li.done { color: var(--dim); }
+.wsteps li.done .n { border-color: var(--accent-line); color: var(--accent); }
+
+/* шаг 1: планы карточками */
+.wplans { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 12px; }
+.wplan, .wown { display: flex; flex-direction: column; gap: 10px; text-align: left; padding: 14px 16px 16px; min-height: 150px;
+  border-radius: var(--r-lg); border: 1.5px solid var(--line); background: var(--panel); color: var(--text); cursor: pointer; }
+.wplan:hover, .wown:hover { border-color: var(--accent-line); }
+.wplan[aria-pressed="true"] { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 7%, var(--panel));
+  box-shadow: 0 0 0 3px var(--accent-soft); }
+.wplan .wph { display: flex; flex-direction: column; gap: 2px; }
+.wplan .wph b { font-size: 16px; }
+.wbar { display: flex; gap: 2px; height: 6px; }
+.wbar i { display: block; flex: 1 1 0; border-radius: 2px; background: color-mix(in srgb, var(--accent) 55%, transparent); }
+.wbar i.br { background: repeating-linear-gradient(135deg, var(--line2) 0 3px, transparent 3px 6px); }
+.wbar i.ex { background: color-mix(in srgb, var(--ok) 60%, transparent); }
+.wlist { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 3px; font-size: 13px; }
+.wlist li { display: flex; gap: 8px; align-items: baseline; }
+.wlist .t { color: var(--faint); width: 34px; flex: none; font-size: 12px; }
+.wlist .sn { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.wlist .m { color: var(--dim); font-size: 12px; }
+.wlist .more { color: var(--faint); padding-left: 42px; }
+.wplan.none p { margin: 0; font-size: 13.5px; }
+.wown { border-style: dashed; align-items: flex-start; justify-content: center; color: var(--dim); }
+.wown .i { width: 22px; height: 22px; color: var(--accent); }
+.wown b { color: var(--text); font-size: 16px; }
+.wfile { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 12px 16px; border-radius: var(--r-lg);
+  background: var(--sunken); border: 1px solid var(--line); }
+.wfile > .i { color: var(--dim); }
+.wfile > span:first-of-type { font-weight: 600; }
+
+/* подвал шага: «Назад / Отмена» и главное действие — всегда видны */
+.wfoot { position: sticky; bottom: 0; z-index: 5; display: flex; align-items: center; gap: 10px; margin-top: 8px;
+  padding: 14px 0; background: var(--ground); border-top: 1px solid var(--line); box-shadow: 0 -12px 16px -12px rgba(0, 0, 0, .35); }
+.wfoot .spacer { flex: 1; }
+
+/* свой план */
+.pstages { display: flex; flex-direction: column; gap: 6px; }
+.pstage { display: grid; grid-template-columns: 26px minmax(160px, 1fr) 128px 140px auto auto; align-items: center; gap: 8px;
+  padding: 6px 8px; border-radius: var(--r); background: var(--panel); border: 1px solid var(--line); }
+.pstage.k-break { background: repeating-linear-gradient(135deg, var(--panel) 0 8px, var(--raised) 8px 16px); }
+.pstage.k-exercise { border-color: color-mix(in srgb, var(--ok) 40%, var(--line)); }
+.pstage .pn { color: var(--faint); text-align: center; font-size: 13px; }
+.pstage .pex { grid-column: 3 / span 2; }
+.pstage .pacts { display: flex; gap: 2px; grid-column: -2; }
+.prow2 { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.ptotal { font-weight: 650; font-size: 15px; }
+
+/* шаг 2 */
+.planline { display: flex; align-items: center; gap: 10px; color: var(--dim); }
+.planline .i { color: var(--accent); }
+.wfields { display: grid; grid-template-columns: 2fr 1fr; gap: 14px; }
+.wfields.four { grid-template-columns: 2fr 1fr 150px 150px; }
+.inp.big { height: 46px; font-size: 17px; }
+.wsrcs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+.wsrc { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; padding: 14px 16px; text-align: left;
+  border-radius: var(--r-lg); border: 1.5px solid var(--line); background: var(--panel); color: var(--text); cursor: pointer; }
+.wsrc .i { width: 22px; height: 22px; color: var(--dim); margin-bottom: 4px; }
+.wsrc b { font-size: 15.5px; }
+.wsrc:hover { border-color: var(--accent-line); }
+.wsrc[aria-pressed="true"] { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 7%, var(--panel)); }
+.wsrc[aria-pressed="true"] .i { color: var(--accent); }
+.srcpanel { display: flex; flex-direction: column; gap: 12px; padding: 16px; border-radius: var(--r-lg); background: var(--panel);
+  border: 1px solid var(--line); }
+.mdrop { display: flex; align-items: center; gap: 14px; padding: 14px 16px; border-radius: var(--r); border: 1.5px dashed var(--line2); }
+.mdrop > .i { width: 24px; height: 24px; color: var(--accent); flex: none; }
+.mdrop .mtext { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
+body.dragging .mdrop { border-color: var(--accent); background: var(--accent-soft); }
+.mfiles { display: flex; flex-wrap: wrap; gap: 6px; }
+.mfiles:empty { display: none; }
+.mfile { display: inline-flex; align-items: center; gap: 6px; padding: 2px 4px 2px 10px; border-radius: 999px; background: var(--raised);
+  font-size: 13.5px; }
+.codeopts { display: flex; flex-direction: column; gap: 10px; padding-left: 12px; border-left: 2px solid var(--line2); }
+.codeopts[hidden] { display: none; }
+.codeopts .seg { align-self: flex-start; }
+.who { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; font-size: 14px; color: var(--dim); }
+.who b { color: var(--text); }
+.who .i { color: var(--accent); }
+.who.off { color: var(--text); }
+.ownchat summary { cursor: pointer; color: var(--dim); font-size: 14px; }
+.ownchat[open] summary { margin-bottom: 10px; }
+.ownchat .ta { margin-top: 8px; }
+.wrow { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.wrow .sel { width: auto; }
+.psteps { margin: 0; padding-left: 22px; display: flex; flex-direction: column; gap: 6px; }
+.psteps li > span { margin-right: 10px; }
+.psum { font-size: 14px; display: flex; flex-direction: column; gap: 2px; }
+.psum:empty { display: none; }
+.psum.bad { color: var(--live); }
+.psum small { color: var(--dim); }
+
+/* фоновые работы */
+.jobs { display: flex; flex-direction: column; gap: 8px; }
+.jobs[hidden] { display: none; }
+.job { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-radius: var(--r-lg); background: var(--panel);
+  border: 1px solid var(--accent-line); }
+.job .jspin { width: 16px; height: 16px; border-radius: 50%; border: 2px solid var(--accent-soft); border-top-color: var(--accent);
+  animation: jspin 1s linear infinite; flex: none; }
+.job.ok .jspin, .job.err .jspin { animation: none; border-color: var(--ok); }
+.job.err { border-color: color-mix(in srgb, var(--live) 45%, transparent); }
+.job.err .jspin { border-color: var(--live); }
+.job .jtext { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.job .jp { color: var(--dim); font-size: 13.5px; }
+.job.err .jp { color: var(--live); }
+.job .jtail { color: var(--faint); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.job .jtail:empty { display: none; }
+.job .jact { display: flex; gap: 6px; }
+@keyframes jspin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .job .jspin { animation: none; } }
+.libjobs { margin-bottom: 6px; }
+
+@media (max-width: 760px) {
+  .wfields, .wfields.four, .wsrcs { grid-template-columns: 1fr; }
+  .pstage { grid-template-columns: 22px 1fr 110px; }
+  .pstage .pkind, .pstage .pex, .pstage .pacts { grid-column: 2 / -1; }
+}

@@ -10,7 +10,7 @@
 Ключи хранятся в settings.json зашифрованными Windows (DPAPI, «dpapi:…»): прочитать их может только эта
 учётная запись на этом компьютере. На другом компьютере ключ придётся ввести заново.
 
-Модуль без Qt: функции блокирующие, вызываются из фонового потока (ui/import_dialog.py).
+Модуль без Qt: функции блокирующие, вызываются из фонового потока (jobs.py: «Новый урок» через нейросеть).
 """
 from __future__ import annotations
 
@@ -28,6 +28,7 @@ import urllib.error
 import urllib.request
 from ctypes import wintypes
 from dataclasses import dataclass
+from pathlib import Path
 
 log = logging.getLogger("autoprint.ai")
 
@@ -359,13 +360,14 @@ def _empty_dir() -> str:
     return d
 
 
-def _cli_args(c: Config, system_file: str) -> list[str]:
+def _cli_args(c: Config, system_file: str, files: bool = False) -> list[str]:
     exe = cli_path(c.provider)
     if c.provider.id == "claudeCli":
-        # «голая» модель: свой системный промпт вместо агентского, без инструментов, MCP, хуков и настроек —
-        # ей нужно только переписать текст. Ход работы — потоком событий
+        # «голая» модель: свой системный промпт вместо агентского, без MCP, хуков и настроек. Инструментов нет —
+        # ей нужно только переписать текст; есть файлы материала — только чтение (Read) в папке запроса
+        tools = ["--tools", "Read", "--allowedTools", "Read"] if files else ["--tools", ""]
         args = [exe, "-p", "--output-format", "stream-json", "--verbose", "--include-partial-messages",
-                "--system-prompt-file", system_file, "--tools", "", "--strict-mcp-config",
+                "--system-prompt-file", system_file, *tools, "--strict-mcp-config",
                 "--setting-sources", "", "--no-session-persistence", "--disable-slash-commands"]
         if c.model:
             args += ["--model", c.model]
@@ -426,21 +428,52 @@ def _cli_event(c: Config, ev: dict, state: dict, progress) -> None:
         state["result"] = json.dumps(ev, ensure_ascii=False)[:300]
 
 
+def _request_dir(files) -> tuple[str, list[str]]:
+    """Своя пустая папка запроса с копиями файлов материала (агент читает только их). → (папка, имена)."""
+    import shutil
+    import tempfile
+    d = tempfile.mkdtemp(prefix="req-", dir=_empty_dir())
+    names: list[str] = []
+    for f in files:
+        src = Path(f)
+        if not src.is_file():
+            continue
+        name = re.sub(r'[\\/:*?"<>|]', "_", src.name) or "material"
+        while name in names:
+            name = "_" + name
+        shutil.copy2(src, os.path.join(d, name))
+        names.append(name)
+    return d, names
+
+
 def _cli_chat(c: Config, system: str, user: str, timeout: float, cancel: threading.Event | None,
-              progress=None) -> str:
+              progress=None, files=()) -> str:
+    import shutil
     import tempfile
     flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
     fd, sys_file = tempfile.mkstemp(prefix="apc-system-", suffix=".txt")
     with os.fdopen(fd, "w", encoding="utf-8") as f:
         f.write("Ты — молчаливый инструмент: выполни задание и выведи только результат, без вступлений.\n\n" + system)
+    work, names = _request_dir(files) if files else (_empty_dir(), [])
+    if names:
+        user = (user + "\n\n" if user.strip() else "") + ("Файлы материала лежат в текущей папке: " + ", ".join(names)
+                                                         + ". Прочитай их целиком (и картинки слайдов) — урок по ним.")
     stdin_text = user if c.provider.id == "claudeCli" else (
         "Ты — молчаливый инструмент: выполни задание и выведи только результат, без вступлений.\n\n"
         + system + "\n\n" + user)
+
+    def cleanup() -> None:
+        try:
+            os.unlink(sys_file)
+        except OSError:
+            pass
+        if names:
+            shutil.rmtree(work, ignore_errors=True)
     try:
-        proc = subprocess.Popen(_cli_args(c, sys_file), stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                                stderr=subprocess.PIPE, creationflags=flags, cwd=_empty_dir())
+        proc = subprocess.Popen(_cli_args(c, sys_file, files=bool(names)), stdin=subprocess.PIPE,
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, creationflags=flags, cwd=work)
     except OSError as e:
-        os.unlink(sys_file)
+        cleanup()
         raise AIError(f"Не удалось запустить {c.provider.name}: {e}") from None
     state = {"text": "", "think": 0, "result": None, "error": False}
     err_buf: list[bytes] = []
@@ -483,10 +516,7 @@ def _cli_chat(c: Config, system: str, user: str, timeout: float, cancel: threadi
         for th in threads[1:]:
             th.join(5)
     finally:
-        try:
-            os.unlink(sys_file)
-        except OSError:
-            pass
+        cleanup()
     err = b"".join(err_buf).decode("utf-8", errors="replace")
     result = state["result"] if state["result"] is not None else state["text"]
     if state.get("cut"):
@@ -501,13 +531,14 @@ def _cli_chat(c: Config, system: str, user: str, timeout: float, cancel: threadi
 
 
 def chat(c: Config, system: str, user: str, timeout: float, cancel: threading.Event | None = None,
-         json_mode: bool = True, progress=None) -> str:
-    """Один запрос к провайдеру. AIError — с понятной причиной."""
+         json_mode: bool = True, progress=None, files=()) -> str:
+    """Один запрос к провайдеру. AIError — с понятной причиной. files — файлы материала: Claude Code и Codex читают
+    их сами (копии в папке запроса, только чтение); остальным текст материала передают в user."""
     why = problem(c)
     if why:
         raise AIError(why)
     if c.provider.kind == "cli":
-        return _cli_chat(c, system, user, timeout, cancel, progress)
+        return _cli_chat(c, system, user, timeout, cancel, progress, files=files)
     result: dict = {}
 
     def run():
@@ -528,12 +559,14 @@ def chat(c: Config, system: str, user: str, timeout: float, cancel: threading.Ev
     return result["t"]
 
 
-def _ask_one(settings, c: Config, system: str, user: str, cancel, progress) -> str:
+def _ask_one(settings, c: Config, system: str, user: str, cancel, progress, files=()) -> str:
     n = len(system) + len(user)
     t0 = time.monotonic()
-    log.info("Нейросеть: запрос → %s · модель %s · %d знаков", c.provider.name, c.model or "по умолчанию", n)
+    log.info("Нейросеть: запрос → %s · модель %s · %d знаков · файлов %d", c.provider.name, c.model or "по умолчанию",
+             n, len(files))
     try:
-        text = chat(c, system, user, timeout_for(settings, n, c.provider.kind == "cli"), cancel, progress=progress)
+        text = chat(c, system, user, timeout_for(settings, n, c.provider.kind == "cli"), cancel, progress=progress,
+                    files=files)
     except Cancelled:
         log.info("Нейросеть: отменено через %.0f с", time.monotonic() - t0)
         raise
@@ -545,15 +578,16 @@ def _ask_one(settings, c: Config, system: str, user: str, cancel, progress) -> s
 
 
 def ask(settings, system: str, user: str, cancel: threading.Event | None = None,
-        on_status=None, on_progress=None) -> tuple[str, str]:
-    """Запрос основному провайдеру, при ошибке — запасному. → (ответ, имя провайдера)."""
+        on_status=None, on_progress=None, files=()) -> tuple[str, str]:
+    """Запрос основному провайдеру, при ошибке — запасному. → (ответ, имя провайдера). files — файлы материала
+    (читают только Claude Code и Codex; для остальных текст материала уже в user)."""
     main = config(settings)
     if main is None:
         raise AIError("Нейросеть не подключена — ⚙ Настройки → Нейросеть, или «Скопировать промпт».")
     try:
         if on_status:
             on_status(main.provider.name)
-        return _ask_one(settings, main, system, user, cancel, on_progress), main.provider.name
+        return _ask_one(settings, main, system, user, cancel, on_progress, files), main.provider.name
     except Cancelled:
         raise
     except AIError as e:
@@ -568,7 +602,7 @@ def ask(settings, system: str, user: str, cancel: threading.Event | None = None,
         if on_status:
             on_status(back.provider.name + f" (запасная: {main.provider.name} не ответил)")
         try:
-            return _ask_one(settings, back, system, user, cancel, on_progress), back.provider.name
+            return _ask_one(settings, back, system, user, cancel, on_progress, files), back.provider.name
         except AIError as e2:
             if isinstance(e2, Cancelled):
                 raise

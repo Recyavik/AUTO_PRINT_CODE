@@ -70,6 +70,7 @@ class Options:
     minutes: int = 90            # сценарий урока: длительность урока
     break_min: int = 0           # сценарий урока: перерыв (0 — только если он есть в материале)
     cls: str = ""                 # сценарий урока: класс / возраст учеников
+    topic: str = ""               # сценарий урока: тема (без материала нейросеть составляет урок по ней)
 
 
 def source_lines(material: str) -> list[str]:
@@ -821,9 +822,23 @@ def lesson_instruction(opt: Options, *, plan: Template | None = None, exercises=
         brk = f", перерыв {opt.break_min} мин отдельным этапом в середине" if opt.break_min else ""
         head += f"УРОК: {minutes} мин{brk}. Сумма минут всех этапов — ровно {minutes}.\n"
     cls = (opt.cls or "").strip()
+    topic = (opt.topic or "").strip()
+    if topic:
+        head += f"ТЕМА УРОКА: {topic}.\n"
     head += f"Класс / возраст учеников: {cls or '___ (если не указан — определи по материалу)'}.\n"
     if source == "below":
         head += "Опирайся только на материал ниже; не выдумывай фактов, которых в нём нет.\n\n"
+    elif source == "topic":
+        head += ("Материала нет: составь урок по теме, плану и классу сам — только надёжные факты из школьной программы "
+                 "и учебников; в чём не уверен — не пиши.\n\n")
+    elif source == "attached_or_topic":
+        head += ("Материал урока (методичка, презентация) может быть приложен к сообщению — тогда опирайся только на "
+                 "него. Если материала нет — составь урок по теме, плану и классу сам: только надёжные факты из школьной "
+                 "программы; в чём не уверен — не пиши.\n\n")
+    elif source == "files":
+        head += ("Материал урока — файлы в текущей папке (их имена — в сообщении). Прочитай их целиком, вместе с "
+                 "картинками слайдов; опирайся только на них; не выдумывай фактов, которых в них нет. Страницы и слайды "
+                 "называй по их номерам в файле.\n\n")
     elif source == "next":
         head += ("Материал урока пришлю следующим сообщением: страницы и слайды в нём помечены «=== Страница N ===» и "
                  "«=== Слайд N ===». Опирайся только на него; не выдумывай фактов, которых в нём нет.\n\n")
@@ -869,7 +884,8 @@ def lesson_instruction(opt: Options, *, plan: Template | None = None, exercises=
 def lesson_prompt(opt: Options, *, material: str = "", plan: Template | None = None, exercises=(), slides=None) -> str:
     """Промпт урока целиком — для «Скопировать промпт». Нет материала — его прикладывают в чате."""
     body = lesson_instruction(opt, plan=plan, exercises=exercises, slides=slides,
-                              source="below" if material.strip() else "attached")
+                              source="below" if material.strip() else ("attached_or_topic" if (opt.topic or "").strip()
+                                                                       and slides is None else "attached"))
     if material.strip():
         body += "\nМАТЕРИАЛ:\n<<<\n" + material.strip() + "\n>>>\n"
     return body

@@ -167,6 +167,165 @@ class AppCommands(QObject):
         path, _ = QFileDialog.getOpenFileName(self.app.window, title, str(d.get("dir") or ""), flt)
         return [str(path)] if path else []
 
+    # ------------------------------------------------------------ «Новый урок» (Task 11)
+    def _wizard_plan(self, d: dict):
+        """План шага 1: id плана или "none" / "" — без плана."""
+        from .storage import KIND_PLAN
+        pid = str(d.get("plan") or "")
+        p = self.app.store.get(pid) if pid and pid != "none" else None
+        return p if p is not None and p.kind == KIND_PLAN else None
+
+    def _remember_wizard(self, d: dict, plan) -> None:
+        s = self.app.settings
+        s.lesson_plan = plan.id if plan is not None else ""
+        if "cls" in d:
+            s.lesson_class = str(d.get("cls") or "").strip()
+        for key, field, lo, hi in (("minutes", "lesson_minutes", 10, 600), ("brk", "lesson_break", 0, 60)):
+            if d.get(key) not in (None, ""):
+                try:
+                    setattr(s, field, max(lo, min(hi, int(d[key]))))
+                except (TypeError, ValueError):
+                    pass
+        code = d.get("code") or {}
+        if code:
+            from . import wizard
+            o = wizard.code_options(code)
+            s.lesson_style, s.lesson_task, s.lesson_explain = o.style, o.task, o.explain
+            s.lesson_keep_code, s.lesson_detail = o.keep_code, o.detail
+        self.app._settings_timer.start()
+
+    def _lesson_options(self, d: dict, plan):
+        from . import lesson_ai as L
+        s = self.app.settings
+        return L.Options(style=L.STYLE_SCENARIO, minutes=s.lesson_minutes, break_min=s.lesson_break,
+                         cls=str(d.get("cls") or "").strip(), topic=str(d.get("topic") or "").strip(), marks=False)
+
+    def call_plan_create(self, d: dict) -> dict:
+        """«Новый план» → план в списке навсегда и сразу выбран в «Новом уроке»."""
+        from . import wizard
+        p = wizard.plan_from_spec(str(d.get("title") or ""), list(d.get("stages") or []))
+        self.app.store.insert(p)
+        self.app.touch(p)
+        self.app.settings.lesson_plan = p.id
+        self.app._settings_timer.start()
+        self.app.publish_now()
+        return {"id": p.id}
+
+    def call_use_cli(self, d: dict) -> dict:
+        """«Использовать Claude Code / Codex (по подписке)» — нейросеть подключается одним щелчком."""
+        from . import ai
+        pid = {"claude": "claudeCli", "codex": "codexCli"}.get(str(d.get("which") or ""))
+        p = ai.provider(pid) if pid else None
+        if p is None or ai.cli_path(p) is None:
+            raise ValueError("Эта программа не найдена на компьютере")
+        self.app.settings.ai_provider = pid
+        self.app.save_settings()
+        self.app.publish_now()
+        return {"provider": p.name}
+
+    def call_copy_prompt(self, d: dict) -> bool:
+        """«Скопировать задание»: урок (план, тема, класс, видео зарядок) или разбор кода — в буфер обмена."""
+        from PySide6.QtGui import QGuiApplication
+        from . import wizard
+        plan = self._wizard_plan(d)
+        self._remember_wizard(d, plan)
+        material = str(d.get("material") or "")
+        if d.get("what") == "code":
+            text = wizard.copy_prompt("code", wizard.code_options(d.get("code") or {}, material), material=material)
+        else:
+            text = wizard.copy_prompt("lesson", self._lesson_options(d, plan), material=material, plan=plan,
+                                      exercises=self.app.exercise_titles(plan))
+        QGuiApplication.clipboard().setText(text)
+        self.app._notify("Задание скопировано: вставьте его в свой чат (ChatGPT, GigaChat, DeepSeek…) вместе с "
+                         "методичкой, а ответ — в поле ниже.", quiet=True)
+        return True
+
+    def call_paste_preview(self, d: dict) -> dict:
+        """Что получится из вставленного: одна строка итога и замечания."""
+        from . import wizard
+        plan = self._wizard_plan(d)
+        try:
+            r = wizard.paste_parse(str(d.get("text") or ""), str(d.get("lang") or ""), plan=plan,
+                                   slide=wizard.slide_maker(self._slides_pdf(d)))
+        except ValueError as e:
+            return {"ok": False, "summary": str(e)}
+        empty = any(b.type == "image" and b.slide and not (b.text or "").strip() for b in r.template.blocks)
+        return {"ok": True, "kind": r.kind, "summary": r.summary, "notes": r.notes, "slides_empty": empty}
+
+    def _slides_pdf(self, d: dict) -> str:
+        """Презентация для мест «Слайд N» (pdf; pptx — PowerPoint сохраняет PDF)."""
+        path = str(d.get("slides") or "")
+        if not path:
+            return ""
+        if path.lower().endswith(".pptx"):
+            from . import slides
+            return slides.export_pdf(path) or ""
+        return path
+
+    def call_clipboard_text(self, _d: dict) -> str:
+        from PySide6.QtGui import QGuiApplication
+        return QGuiApplication.clipboard().text()
+
+    def call_wizard_create(self, d: dict) -> dict:
+        """«Создать урок»: source manual | paste | ai. → {lesson} (урок открыт) или {job} (работа идёт)."""
+        from . import ai, plans, wizard
+        plan = self._wizard_plan(d)
+        self._remember_wizard(d, plan)
+        topic = str(d.get("topic") or "").strip()
+        source = str(d.get("source") or "manual")
+        if source == "manual":
+            if plan is not None:
+                t = self.app.store.insert(plans.new_topic(plan, topic or "Новый урок"))
+            else:
+                t = self.app.store.add(topic or "Новый урок")
+            self.app.touch(t)
+            self.app.open_lesson(t.id, ask=False)
+            return {"lesson": t.id}
+        if source == "paste":
+            r = wizard.paste_parse(str(d.get("text") or ""), str(d.get("lang") or ""), plan=plan,
+                                   slide=wizard.slide_maker(self._slides_pdf(d)))
+            if topic and r.kind == "ответ нейросети":
+                r.template.title = topic
+            style = (wizard.code_options(d.get("code") or {}).style if d.get("what") == "code" else r.style)
+            job = self.app.add_new_lesson(r.template, r.notes, style)
+            return {"job": job} if job else {"lesson": r.template.id}
+        if source != "ai":
+            raise ValueError("неизвестный способ")
+        if not ai.configured(self.app.settings):
+            raise ValueError("Нейросеть не подключена — подключите её или «Скопировать задание» для своего чата")
+        c = ai.config(self.app.settings)
+        what = "code" if d.get("what") == "code" else "lesson"
+        m = wizard.gather(list(d.get("files") or []), str(d.get("material") or ""),
+                          agent=c is not None and c.provider.kind == "cli" and what == "lesson")
+        if what == "code":
+            if not m.text.strip():
+                raise ValueError("Вставьте код или выберите файл с кодом")
+            opt = wizard.code_options(d.get("code") or {}, m.text)
+            fn = wizard.lesson_task(self.app.settings, opt, material=m.text, what="code")
+            title = "Разбор кода" + (f" «{topic}»" if topic else "")
+        else:
+            opt = self._lesson_options(d, plan)
+            fn = wizard.lesson_task(self.app.settings, opt, plan=plan, exercises=self.app.exercise_titles(plan),
+                                    material=m.text, files=m.files, pdf=m.pdf)
+            title = f"Урок «{topic}»" if topic else "Новый урок"
+        notes = list(m.notes)
+
+        def done(res: dict) -> None:
+            t = res["template"]
+            if what == "code" and topic:
+                t.title = topic
+            self.app.add_new_lesson(t, notes + list(res.get("notes") or []), res.get("style") or "")
+        return {"job": self.app.jobs.start("ai", fn, done, title)}
+
+    def cmd_job_cancel(self, d: dict) -> None:
+        self.app.jobs.cancel(str(d.get("id") or ""))
+
+    def cmd_job_skip(self, d: dict) -> None:
+        self.app.jobs.skip(str(d.get("id") or ""))
+
+    def cmd_job_dismiss(self, d: dict) -> None:
+        self.app.jobs.dismiss(str(d.get("id") or ""))
+
     # ------------------------------------------------------------ листы урока (Task 10)
     def _many(self, d: dict) -> list:
         """Уроки листа: all — все, ids / id — эти."""

@@ -1063,8 +1063,8 @@ class VersionTest(unittest.TestCase):
     def test_ui_texts_current(self):
         """Справка и окно импорта не ссылаются на ленту блоков, янтарную рамку и «Суфлёр урока» в шапке занятия."""
         root = Path(storage.__file__).resolve().parent / "ui"
-        src = (root / "settings_window.py").read_text(encoding="utf-8") + (root / "import_dialog.py").read_text(
-            encoding="utf-8")
+        src = (root / "settings_window.py").read_text(encoding="utf-8") + (
+            root.parent / "efir" / "page" / "app" / "wizard.js").read_text(encoding="utf-8")      # 1.0: «Новый урок»
         stale = [w for w in ("янтарная рамка", "Занятие — лента", "на суфлёре", "в шапке занятия",
                              "Добавить занятие") if w in src]
         self.assertEqual(stale, [])

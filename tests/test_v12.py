@@ -663,96 +663,74 @@ def f(x):
 
 
 class ImportLessonTest(unittest.TestCase):
-    def dialog(self, plans_=(), exercises=lambda plan: []):
-        from autoprint.ui.import_dialog import TAB_LESSON, ImportDialog
-        d = ImportDialog(None, storage.Settings(), tab=TAB_LESSON, plans=list(plans_), exercises=exercises)
-        d.lesson_page.fetch = lambda t, **kw: []                                   # сеть не трогаем
-        self.addCleanup(lambda: (d.close(), d.deleteLater()))
-        return d
+    """1.0: «Новый урок» — «Вставить текст» и «Составит нейросеть» (wizard.py) вместо вкладки «Урок через нейросеть»."""
 
     def test_copy_prompt_with_plan_and_class(self):
-        from PySide6.QtGui import QGuiApplication
-        p = plan90()
-        d = self.dialog([p], exercises=lambda plan: ["Глаза"] if plan is p else [])
-        s = d.settings
-        pg = d.lesson_page
-        pg.plan_combo.setCurrentIndex(pg.plan_combo.findData("P"))
-        pg.class_edit.setText("5 класс")
-        self.assertTrue(pg.copy_btn.isEnabled())                                  # без материала — можно
-        self.assertTrue(pg.minutes_row.isHidden())                                # минуты — из плана
-        pg.copy_prompt()
-        txt = QGuiApplication.clipboard().text()
+        from autoprint import lesson_ai as L, wizard
+        txt = wizard.copy_prompt("lesson", L.Options(style=L.STYLE_SCENARIO, cls="5 класс"), plan=plan90(),
+                                 exercises=["Глаза"])
         self.assertIn("## Теория · 20 мин", txt)
         self.assertIn("5 класс", txt)
         self.assertIn("«Глаза»", txt)
-        self.assertEqual((s.lesson_plan, s.lesson_class), ("P", "5 класс"))
-        self.assertEqual(d.tabs.value(), "lesson")
 
     def test_answer_preview_and_add_links_plan(self):
-        p = plan90()
-        d = self.dialog([p])
-        pg = d.lesson_page
-        pg.plan_combo.setCurrentIndex(pg.plan_combo.findData("P"))
-        pg.answer_edit.setPlainText(ANSWER_PLAN)
-        pump(400)
-        info = pg.info.text()
-        for part in ("по плану «Онлайн 90»", "Слайды: 1", "Фото по ссылкам: 1", "Нужно вставить: 1",
-                     "«Практика» в ответе пустой"):
-            self.assertIn(part, info)
-        self.assertFalse(pg.slides_btn.isHidden())                                # слайд без картинки — подставить
-        self.assertTrue(d.add_btn.isEnabled())
-        d._add()
-        self.assertTrue(wait(lambda: bool(d.result)))
-        t = d.result[0]
+        from autoprint import wizard
+        r = wizard.paste_parse(ANSWER_PLAN, plan=plan90())
+        for part in ("по плану «Онлайн 90»", "Слайды: 1", "Фото по ссылкам: 1", "Нужно вставить: 1"):
+            self.assertIn(part, r.summary)
+        self.assertTrue(any("«Практика» в ответе пустой" in n for n in r.notes), r.notes)
+        t = r.template
         self.assertEqual(t.plan_id, "P")
         self.assertEqual([b.link for b in stages_of(t)], ["p1", "p2", "p3", "p4"])
-        self.assertTrue(any("пустой" in n for n in d.result_notes))
 
-    def test_close_while_downloading_adds_nothing(self):
-        d = self.dialog([plan90()])
+    def _paste(self, win):
+        from autoprint import wizard
+        r = wizard.paste_parse(ANSWER_PLAN, plan=win.store.get("P"))
+        return r.template, r.notes
+
+    def test_cancel_while_downloading_adds_nothing(self):
+        win = window([plan90()], 18904)
         started = []
 
         def slow(t, cancel=None, progress=None, **kw):
             started.append(1)
             cancel.wait(5)
             return []
-        d.lesson_page.fetch = slow
-        d.lesson_page.answer_edit.setPlainText(ANSWER_PLAN)
-        pump(400)
-        d._add()
-        self.assertTrue(wait(lambda: bool(started)))
-        self.assertIn("Скачиваю картинки", d.status.text())
-        d.reject()
-        pump(300)
-        self.assertEqual(d.result, [])
+        win.fetch_images = slow
+        try:
+            n0 = len(win.store.templates)
+            t, notes = self._paste(win)
+            jid = win.add_new_lesson(t, notes)
+            self.assertTrue(wait(lambda: bool(started)))
+            win.jobs.cancel(jid)
+            pump(300)
+            self.assertEqual(len(win.store.templates), n0)
+        finally:
+            close(win)
 
     def test_skip_download_adds_lesson(self):
-        d = self.dialog([plan90()])
+        win = window([plan90()], 18905)
+        said = []
+        orig = win._notify
+        win._notify = lambda text, *a, **k: said.append(text) or orig(text, *a, **k)
 
         def slow(t, cancel=None, progress=None, **kw):
             cancel.wait(5)
             return ["Не скачалось: 1 — эти картинки покажутся из интернета."]
-        d.lesson_page.fetch = slow
-        d.lesson_page.answer_edit.setPlainText(ANSWER_PLAN)
-        pump(400)
-        d._add()
-        self.assertTrue(wait(lambda: d.lesson_page.downloading()))
-        d.lesson_page.skip_download()
-        self.assertTrue(wait(lambda: bool(d.result)))
-        self.assertTrue(any("Не скачалось" in n for n in d.result_notes))
-
-    def test_code_tab_has_no_scenario(self):
-        from autoprint import lesson_ai as L
-        from autoprint.ui.import_dialog import TAB_AI, ImportDialog
-        s = storage.Settings()
-        s.lesson_style = L.STYLE_SCENARIO                                          # 0.11 запомнил сценарий
-        d = ImportDialog(None, s, tab=TAB_AI)
+        win.fetch_images = slow
         try:
-            self.assertNotIn(L.STYLE_SCENARIO, d.style_seg.buttons)
-            self.assertEqual(d.style_seg.value(), L.STYLE_STEPS)
+            n0 = len(win.store.templates)
+            t, notes = self._paste(win)
+            jid = win.add_new_lesson(t, notes)
+            win.jobs.skip(jid)
+            self.assertTrue(wait(lambda: len(win.store.templates) == n0 + 1))
+            self.assertTrue(any("Не скачалось" in x for x in said), said)
         finally:
-            d.close()
-            d.deleteLater()
+            close(win)
+
+    def test_code_options_never_scenario(self):
+        from autoprint import lesson_ai as L, wizard
+        self.assertEqual(wizard.code_options({"style": L.STYLE_SCENARIO}).style, L.STYLE_STEPS)
 
 
 # ================================================================ Task 11: места для картинок, слайды, ответ на странице
@@ -1165,9 +1143,8 @@ class PackageTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             package.read_package(f)
 
-    def test_import_through_dialog_and_window(self):
+    def test_import_through_window(self):
         from autoprint import package
-        from autoprint.ui.import_dialog import ImportDialog
         p, t = self.lesson_with_media()
         look = self.look_with_media()
         t.look = look.id
@@ -1175,15 +1152,12 @@ class PackageTest(unittest.TestCase):
         package.export_package(f, lessons=[t], plans=[p], looks=[look])
         win = window([Template("Мой", [stage("А", 5)], id="M")], 18928)
         try:
-            d = ImportDialog(win.window, win.settings)
-            d._take_files([str(f)])
-            self.assertEqual(len(d.result), 2)
-            win._take_import(d)
+            res = win.import_paths([str(f)])                       # 1.0: «Уже есть файл урока?» / файл на окне
+            self.assertEqual(len(res["added"]), 2)
             self.assertEqual(len(win.store.plans()), 1)
             lesson = next(x for x in win.store.templates if x.title == "Функции")
             self.assertEqual(lesson.plan_id, win.store.plans()[0].id)
             self.assertIsNotNone(win.efir.store.look(look.id))                     # оформление с видео — у получателя
-            d.deleteLater()
         finally:
             close(win)
 
@@ -1296,21 +1270,6 @@ class LiveSafetyTest(unittest.TestCase):
         finally:
             win.efir.stop_live()
             close(win)
-
-    def test_lesson_tab_says_why_builtin_ai_is_off(self):
-        """«Составить встроенной нейросетью» недоступна — рядом видно почему и ссылка «Подключить…»."""
-        from autoprint.ui.import_dialog import TAB_LESSON, ImportDialog
-        asked = []
-        d = ImportDialog(None, storage.Settings(), tab=TAB_LESSON, open_ai_settings=lambda: asked.append(1))
-        try:
-            pg = d.lesson_page
-            self.assertFalse(pg.ask_btn.isEnabled())
-            self.assertIn("Подключить", pg.ai_info.text())
-            pg.ai_info.linkActivated.emit("ai")
-            self.assertEqual(asked, [1])
-        finally:
-            d.close()
-            d.deleteLater()
 
     def test_notice_reaches_lesson_page(self):
         """Сообщения программы — и на экране урока (окно программы скрыто, трей пропадает за 3 с)."""

@@ -6,6 +6,7 @@ import { icon } from "./icons.js";
 import { setCrumbs, registerDrop } from "./shell.js";
 import { lessonMenuItems, menuAt, lessonById } from "./lessonmenu.js";
 import { exportSheet } from "./sheets.js";
+import { jobsBox } from "./jobsbox.js";
 
 export function plural(n, one, few, many) {
   const a = Math.abs(n) % 100, b = a % 10;
@@ -57,12 +58,13 @@ export function lessonsView(root) {
   exportAll.id = "exportAll";
   const newBtn = h("a", { class: "btn primary", id: "newLessonBtn", href: "#/new" }, icon("plus"), h("span", null, "Новый урок"));
   const cont = h("section", { id: "continueCard", class: "today", hidden: true });
+  const jobs = jobsBox("libjobs");                // нейросеть составляет урок — ход виден и здесь
   const plansGrid = h("div", { id: "plansGrid", class: "plans" });
   const list = h("div", { id: "lessonList", class: "list", role: "list" });
   const plansSect = h("section", { class: "sect" }, h("h2", null, "Планы", h("span", { class: "meta" }, "этапы и время, по которым строятся уроки")), plansGrid);
   const page = h("div", { class: "page" }, h("div", { class: "wrap" },
     h("div", { class: "pagehead" }, h("h1", null, "Уроки"), h("label", { class: "search" }, icon("search", "sm"), search), exportAll, newBtn),
-    cont, plansSect, h("section", { class: "sect" }, h("h2", null, "Все уроки"), list)));
+    jobs.el, cont, plansSect, h("section", { class: "sect" }, h("h2", null, "Все уроки"), list)));
   root.append(page);
 
   let sig = "", renaming = "", lastOpen = { id: "", at: 0 };
@@ -215,5 +217,5 @@ export function lessonsView(root) {
     }
   }
 
-  return { update: render, destroy: () => clearInterval(timer) };
+  return { update: render, destroy: () => { clearInterval(timer); jobs.destroy(); } };
 }

@@ -857,65 +857,40 @@ class EditorTest(unittest.TestCase):
 
 
 class ImportTest(unittest.TestCase):
-    def dialog(self):
-        from autoprint.storage import Settings
-        from autoprint.ui.import_dialog import TAB_AI, ImportDialog
-        d = ImportDialog(None, Settings(), tab=TAB_AI)
-        self.addCleanup(d.close)
-        return d
-
-    def lesson_tab(self):
-        """0.12: сценарий урока — на своей вкладке «Урок через нейросеть»."""
-        from autoprint.storage import Settings
-        from autoprint.ui.import_dialog import TAB_LESSON, ImportDialog
-        d = ImportDialog(None, Settings(), tab=TAB_LESSON)
-        self.addCleanup(d.close)
-        return d
-
-    def test_scenario_options(self):
-        from autoprint import lesson_ai as L
-        d = self.lesson_tab()
-        pg = d.lesson_page
-        pg.plan_combo.setCurrentIndex(pg.plan_combo.findData(""))      # без плана — минуты и перерыв
-        pg.minutes_spin.setValue(80)
-        pg.break_spin.setValue(10)
-        pg.material.setPlainText("x\n" * 400)               # большой текст — но это методичка, не разметка кода
-        o = pg.options()
-        self.assertEqual((o.style, o.minutes, o.break_min, o.marks), (L.STYLE_SCENARIO, 80, 10, False))
-        self.assertFalse(pg.minutes_row.isHidden())
-        c = self.dialog()                                   # «Код через нейросеть»: про код, без сценария
-        self.assertFalse(c.row_keep.isHidden())
-        self.assertTrue(c.scenario_row.isHidden())
+    """Материал «Нового урока» (1.0: вместо окна «Импорт урока»): текст из PDF и Word, слайды из PDF картинками."""
 
     def test_material_from_pdf_and_slides(self):
-        from autoprint.storage import DATA_DIR
-        d = self.lesson_tab()
-        pg = d.lesson_page
+        from autoprint import lesson_ai as L, wizard
+        from autoprint.storage import DATA_DIR, media_path
         pdf = make_pdf(TMP / "lesson3.pdf", ["Цель урока", "Правила", "Пример YouTube"])
-        pg.load_material(str(pdf))
-        self.assertIn("=== Страница 3 ===", pg.material.toPlainText())
-        pg.answer_edit.setPlainText(SCENARIO_ANSWER)
-        pg.reparse()
-        self.assertIsNotNone(pg.parsed())
-        t = pg.parsed()[0]
-        img = next(b for b in t.blocks if b.type == BLOCK_IMAGE)
-        from autoprint.storage import media_path
+        m = wizard.gather([str(pdf)])
+        self.assertIn("=== Страница 3 ===", m.text)
+        self.assertEqual(Path(m.pdf), Path(pdf))
+        parsed = L.parse_lesson(SCENARIO_ANSWER, material=m.text, style=L.STYLE_SCENARIO, slide=wizard.slide_maker(m.pdf))
+        img = next(b for b in parsed.template.blocks if b.type == BLOCK_IMAGE)
         self.assertTrue(img.text.startswith("media/"), img.text)
         self.assertEqual(media_path(img.text).parent, DATA_DIR / "media")
-        self.assertTrue(d.add_btn.isEnabled())
+
+    def test_agent_reads_pdf_itself(self):
+        from autoprint import wizard
+        pdf = make_pdf(TMP / "lesson4.pdf", ["Одна страница"])
+        m = wizard.gather([str(pdf)], agent=True)            # Claude Code / Codex — сам файл, без выдержки текста
+        self.assertEqual((m.files, m.text), ([str(pdf)], ""))
+        self.assertEqual(m.pdf, str(pdf))
 
     def test_broken_material_no_crash(self):
-        d = self.dialog()
+        from autoprint import wizard
         f = TMP / "broken2.docx"
         f.write_bytes(b"not a zip")
-        d.material.setPlainText("прежний текст")
-        d.load_material(str(f))                         # не исключение, а сообщение
-        self.assertEqual(d.material.toPlainText(), "прежний текст")
+        m = wizard.gather([str(f)], "прежний текст")         # не исключение, а замечание
+        self.assertEqual(m.text, "прежний текст")
+        self.assertTrue(any("broken2.docx" in n for n in m.notes), m.notes)
 
     def test_material_docx(self):
-        d = self.dialog()
-        d.load_material(str(make_docx(TMP / "plan.docx", ["План урока", "Летучка — 5 минут"])))
-        self.assertIn("Летучка — 5 минут", d.material.toPlainText())
+        from autoprint import wizard
+        m = wizard.gather([str(make_docx(TMP / "plan.docx", ["План урока", "Летучка — 5 минут"]))], agent=True)
+        self.assertIn("Летучка — 5 минут", m.text)          # .docx агент не откроет — уходит текстом
+        self.assertEqual(m.files, [])
 
 
 if __name__ == "__main__":
