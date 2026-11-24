@@ -84,19 +84,28 @@ def _rels(z: zipfile.ZipFile, name: str) -> dict[str, str]:
 
 def _shapes_text(root, skip=("sldNum", "sldImg", "hdr", "ftr", "dt")) -> tuple[str, str]:
     """(заголовок, весь текст) фигур; служебные поля (номер слайда, картинка в заметках) — мимо."""
-    title, parts = "", []
+    title = ""
+    skipped = set()
     for sp in root.iter(P_NS + "sp"):
         ph = sp.find(f"{P_NS}nvSpPr/{P_NS}nvPr/{P_NS}ph")
         kind = ph.get("type", "") if ph is not None else ""
         if kind in skip:
-            continue
-        lines = ["".join(t.text or "" for t in p.iter(A_NS + "t")).strip() for p in sp.iter(A_NS + "p")]
-        text = "\n".join(lines).strip("\n")
-        if kind in ("title", "ctrTitle") and not title:
-            title = " ".join(x for x in lines if x)
-        if text:
-            parts.append(text)
-    return title, "\n".join(parts)
+            skipped.add(sp)
+        elif kind in ("title", "ctrTitle") and not title:
+            title = " ".join(x for x in ("".join(t.text or "" for t in p.iter(A_NS + "t")).strip()
+                                         for p in sp.iter(A_NS + "p")) if x)
+    parent = {c: p for p in root.iter() for c in p}
+    lines = []
+    for para in root.iter(A_NS + "p"):           # весь текст слайда: фигуры, таблицы, группы — кроме служебных полей
+        node, inside = para, False
+        while node is not None:
+            if node in skipped:
+                inside = True
+                break
+            node = parent.get(node)
+        if not inside:
+            lines.append("".join(t.text or "" for t in para.iter(A_NS + "t")).strip())
+    return title, "\n".join(lines).strip("\n")
 
 
 def pptx_info(path: str) -> tuple[list[dict], list[tuple[str, list[int]]]]:
@@ -247,6 +256,57 @@ def from_pptx(path: str, pdf: str | None = None, minutes: int = DEFAULT_MINUTES,
         warns.append("Картинок слайдов нет: сохраните презентацию как PDF (Файл → Сохранить как → PDF) и выберите "
                      "оба файла — заметки возьмём из PPTX.")
     return Template(Path(path).stem, blocks), warns, need_pdf
+
+
+# ---------------------------------------------------------------- ответ своего чата → урок по слайдам
+
+def apply_chat_answer(t: Template, text: str) -> tuple[Template, list[str]]:
+    """«⋯ → Вставить ответ нейросети»: урок в Markdown со строками «![Слайд N](slide:N)» → копия урока t: этапы и
+    плашки по ответу, слайды — картинки t с теми же номерами. → (новый урок, замечания)."""
+    from . import lesson_md
+    from .lesson_ai import md_answer
+    md = md_answer(text)
+    if md is None:
+        raise ValueError("В ответе нет урока в Markdown — попросите нейросеть ответить блоком ~~~markdown, как в промпте.")
+    new = lesson_md.parse(md, None, t.title)
+    have = {b.slide: b for b in t.blocks if b.type == BLOCK_IMAGE and b.slide}
+    notes: list[str] = []
+    used: list[int] = []
+    missing: list[int] = []
+    keep: list[Block] = []
+    for b in new.blocks:
+        if b.type == BLOCK_IMAGE:
+            m = re.fullmatch(r"slide:(\d+)", (b.text or "").strip())
+            n = int(m.group(1)) if m else b.slide
+            if n:
+                src = have.get(n)
+                if src is None:
+                    missing.append(n)
+                    continue
+                b.text, b.slide, b.title = src.text, n, b.title if b.title and not b.title.startswith("Слайд") else src.title
+                used.append(n)
+        keep.append(b)
+    new.blocks = keep
+    if missing:
+        notes.append(", ".join(f"Слайда {n}" if i == 0 else f"слайда {n}" for i, n in enumerate(missing))
+                     + " нет в презентации — пропущено.")
+    skipped = [n for n in sorted(have) if n not in used]
+    if skipped:
+        notes.append("Нейросеть пропустила: " + ", ".join(map(str, skipped)) + ".")
+    bare = []
+    for i, b in enumerate(new.blocks):
+        if b.type == BLOCK_IMAGE and b.slide:
+            nxt = new.blocks[i + 1] if i + 1 < len(new.blocks) else None
+            if nxt is None or nxt.type in (BLOCK_IMAGE, BLOCK_STAGE):
+                bare.append(b.slide)
+    if bare:
+        notes.append("Слайды без заметок: " + ", ".join(map(str, bare)) + ".")
+    want = sum(b.minutes for b in t.blocks if b.type == BLOCK_STAGE)
+    got = sum(b.minutes for b in new.blocks if b.type == BLOCK_STAGE)
+    if want and got != want:
+        notes.append(f"Сумма минут {got} из {want}.")
+    new.look = getattr(t, "look", "")
+    return new, notes
 
 
 # ---------------------------------------------------------------- PowerPoint → PDF (без окна)

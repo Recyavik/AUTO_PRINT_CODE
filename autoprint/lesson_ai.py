@@ -507,6 +507,11 @@ def parse_lesson(text: str, title: str = "", material: str = "", style: str = ""
     """Ответ нейросети (или наш JSON) → занятие. LessonError — если разобрать нельзя.
     material и style нужны «разметке» большого кода: код берётся из материала.
     slide(N) — путь к картинке слайда N материала (PDF) для блоков {"type": "image", "slide": N}."""
+    # ответ своего чата — урок в Markdown (блок ~~~markdown или .md с шапкой «---»), а не JSON
+    looks_md = any(_MD_OPEN.match(x) for x in text.split("\n")) or text.lstrip().startswith("---")
+    md = md_answer(text) if looks_md else None
+    if md is not None:
+        return _parse_md_answer(md, title, slide)
     data = extract_json(text)
     if data is None:
         raise LessonError("В ответе не нашёлся JSON. Попросите нейросеть ответить строго в формате из промпта "
@@ -788,3 +793,158 @@ def _subsequence(small: list[str], big: list[str]) -> bool:
     """Все строки small встречаются в big в том же порядке (между ними могут быть лишние)."""
     it = iter(big)
     return all(any(x == y for y in it) for x in small)
+
+
+# ---------------------------------------------------------------- свой чат: ответ — урок в Markdown (.md)
+# Для «Скопировать промпт» в ChatGPT, GigaChat, Алису, DeepSeek: ответ — наш формат .md, а не JSON — его можно
+# прочитать и поправить прямо в чате, кавычки не ломаются. Обратно — «Ответ нейросети» или «Вставить».
+
+CHAT_FORMAT = """ФОРМАТ ОТВЕТА — урок в Markdown:
+
+---
+title: Название урока
+---
+
+> [!goal]
+> Цель урока: что ученики будут уметь после него (до первого этапа).
+
+# Раздел урока (необязательно: «Первая половина», «Практика»)
+
+## Название этапа · 10 мин
+
+Перерыв и зарядка — отдельными этапами: «## Перерыв · 10 мин · перерыв», «## Гимнастика для глаз · 3 мин · зарядка».
+Под этапом — плашки, по порядку урока. Плашка — цитата, первая строка [!роль]:
+
+> [!say]
+> Говоришь — обязательно и дословно: определения, тезисы.
+
+> [!tell]
+> - Расскажи — тезисы, которые учитель объясняет своими словами
+
+> [!term]
+> Термин
+> Определение — дословно.
+
+> [!ask]
+> Вопрос классу?
+> → ответ, который обычно дают ученики
+> → ещё один ответ
+
+Другие роли — так же: [!do] делаешь (вслух не читается), [!show] показываешь (что видят ученики),
+[!important] важно, [!task] задание ученикам, [!hint] если застрял (наводящий вопрос), [!extra] для быстрых,
+[!trap] типичные ошибки, [!homework] домашнее задание, [!text] заметка для себя.
+
+Код, который пишут вместе с учениками (его программа набирает в редакторе), — блоком ```язык, а сразу под ним, если
+известно, что он выведет:
+
+> [!output]
+> что напечатает код
+
+В конце урока:
+
+> [!homework]
+> Домашнее задание — что сделать дома.
+"""
+
+CHAT_EXAMPLE = """Пример ответа на два слайда (по смыслу, не копируй):
+~~~markdown
+---
+title: Функции в Python
+---
+
+> [!goal]
+> Ученики пишут функцию с параметром и вызывают её для разных данных.
+
+## Что такое функция · 8 мин
+
+![Слайд 1](slide:1)
+
+> [!say]
+> Функция — именованный блок кода, который выполняет одну задачу.
+
+![Слайд 2](slide:2)
+
+> [!ask]
+> Где вы уже вызывали функции?
+> → print()
+> → len()
+~~~
+"""
+
+
+def chat_prompt(material: str, opt: Options, slides: list[tuple[int, str]] | None = None) -> str:
+    """Промпт для своего чата. material пуст — материал (методичка, презентация) приложен к сообщению.
+    slides — [(номер, заголовок)] слайдов урока: ответ должен пройти по каждому слайду."""
+    head = ("Ты помогаешь учителю подготовить урок для программы AutoPrintCode — суфлёра урока: на экране учителя "
+            "по этапам видно, что сказать, что спросить, что показать. Твой ответ учитель скопирует и загрузит "
+            "в программу, поэтому формат строгий. Пиши по-русски, коротко и конкретно.\n\n")
+    brk = f", перерыв {opt.break_min} мин отдельным этапом в середине" if opt.break_min else ""
+    head += f"УРОК: {opt.minutes} мин{brk}. Сумма минут всех этапов — ровно {opt.minutes}.\n"
+    if material.strip():
+        head += "Опирайся только на материал ниже; не выдумывай фактов, которых в нём нет.\n\n"
+    else:
+        head += ("Материал урока (методичка, презентация, план) приложен к сообщению — опирайся только на него; "
+                 "не выдумывай фактов, которых в нём нет.\n\n")
+    if slides:
+        n = len(slides)
+        head += (f"СЛАЙДЫ: в презентации {n} слайдов. Для КАЖДОГО слайда с 1 по {n}, по порядку и без пропусков, — "
+                 "строка «![Слайд N](slide:N)», а под ней плашки: что учитель говорит, спрашивает и делает на этом "
+                 "слайде. Основа — заметки докладчика и текст слайда. Слайды объединяй в этапы по смыслу (не этап на "
+                 "каждый слайд).\nЗаголовки слайдов:\n" + "\n".join(f"{k}. {t or '—'}" for k, t in slides) + "\n\n")
+    else:
+        head += ("Если в материале есть слайды или страницы, ставь «![Слайд N](slide:N)» там, где этот слайд "
+                 "стоит держать перед глазами.\n\n")
+    tail = ("\nПРАВИЛА: весь ответ — ОДНИМ блоком ~~~markdown … ~~~ (у такого блока в чате есть кнопка «Копировать»), "
+            "без пояснений до и после. Пустые плашки не добавляй.\n\n" + CHAT_EXAMPLE)
+    body = head + CHAT_FORMAT + tail
+    if material.strip():
+        body += "\nМАТЕРИАЛ:\n<<<\n" + material.strip() + "\n>>>\n"
+    return body
+
+
+def slides_prompt(t: Template, minutes: int = 0) -> str:
+    """«⋯ → Промпт для слайдов»: урок из презентации → промпт, по которому чат подготовит заметки к каждому слайду."""
+    imgs = [b for b in t.blocks if b.type == BLOCK_IMAGE and b.slide]
+    total = minutes or sum(b.minutes for b in t.blocks if b.type == BLOCK_STAGE) or 45
+    return chat_prompt("", Options(style=STYLE_SCENARIO, minutes=total, break_min=0),
+                       slides=[(b.slide, b.title) for b in imgs])
+
+
+_MD_OPEN = re.compile(r"^\s*(~{3,}|`{3,})\s*(markdown|md)\s*$", re.I)
+
+
+def md_answer(text: str) -> str | None:
+    """Урок в Markdown из ответа чата: внутри блока ~~~markdown / ```markdown (до последней такой же черты —
+    внутри могут быть блоки кода) или весь текст, если это урок. None — это не урок в Markdown."""
+    from . import lesson_md
+    lines = text.replace("\r\n", "\n").split("\n")
+    for i, ln in enumerate(lines):
+        m = _MD_OPEN.match(ln)
+        if m:
+            fence = m.group(1)
+            close = max((j for j in range(i + 1, len(lines)) if lines[j].strip() == fence), default=len(lines))
+            return "\n".join(lines[i + 1:close])
+    src = text.strip()
+    return src if lesson_md.looks_like_lesson(src) or src.startswith("---\ntitle:") else None
+
+
+def _parse_md_answer(md: str, title: str, slide) -> Parsed:
+    """Ответ своего чата — урок в Markdown: слайды «slide:N» — картинками из PDF материала (slide(N))."""
+    from . import lesson_md
+    t = lesson_md.parse(md, None, title or "Урок от нейросети")
+    warnings: list[str] = []
+    keep = []
+    for b in t.blocks:
+        m = re.fullmatch(r"slide:(\d+)", (b.text or "").strip()) if b.type == BLOCK_IMAGE else None
+        if m:
+            n = int(m.group(1))
+            path = slide(n) if slide else None
+            if not path:
+                warnings.append(f"Слайд {n}: картинки нет — материал не PDF; блок пропущен.")
+                continue
+            b.text, b.slide = path, n
+        keep.append(b)
+    t.blocks = keep
+    if not t.blocks:
+        raise LessonError("В ответе нет ни этапов, ни плашек — попросите нейросеть ответить по формату из промпта.")
+    return Parsed(t, warnings)

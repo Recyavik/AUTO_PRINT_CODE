@@ -689,6 +689,26 @@ class PageSlidesTest(Page):
         self.assertTrue(self.edge.wait("document.querySelector('#tools .scrchip').textContent.includes('слайд 2')"))
         self.win.efir.show_background()
 
+    def test_paste_answer_box(self):
+        self.mode("prep")
+        more = "[...document.querySelectorAll('#tools .iconbtn.only')].find(b => b.getAttribute('aria-label') === 'Ещё')"
+        self.js(f"{more}.click()")
+        self.assertTrue(self.edge.wait("!!document.querySelector('.menu')"))
+        self.assertTrue(self.js("[...document.querySelectorAll('.menu .mi .ml')].some(x => x.textContent === 'Промпт для слайдов…')"))
+        self.js("[...document.querySelectorAll('.menu .mi')].find(b => b.textContent.includes('Вставить ответ нейросети')).click()")
+        self.assertTrue(self.edge.wait("!!document.querySelector('.modal .ansta')"))
+        answer = "~~~markdown\n---\ntitle: По ответу\n---\n\n## Всё · 30 мин\n\n![Слайд 2](slide:2)\n\n> [!say]\n> Текст\n~~~"
+        self.js(f"document.querySelector('.modal .ansta').value = {answer!r}")
+        self.js("[...document.querySelectorAll('.modal button')].find(b => b.textContent === 'Добавить урок').click()")
+        self.assertTrue(self.wait_py(lambda: any(x.title == "По ответу" for x in self.win.store.templates)))
+        self.assertTrue(self.edge.wait("!document.querySelector('.modal')"))
+        new = next(x for x in self.win.store.templates if x.title == "По ответу")
+        self.assertEqual([b.slide for b in new.blocks if b.type == BLOCK_IMAGE], [2])
+        self.win.open_lesson(self.t.id, ask=False)
+        self.win.store.templates[:] = [x for x in self.win.store.templates if x.id != new.id]
+        self.win.lesson.publish()
+        self.assertTrue(self.edge.wait(f"document.getElementById('titleText').textContent === '{self.t.title}'"))
+
     def test_clicker_keys(self):
         self.mode("lesson")
         self.js("document.activeElement && document.activeElement.blur && document.activeElement.blur()")

@@ -197,6 +197,40 @@ class LessonController(QObject):
             self.efir.open_tab()
         return ok
 
+    def _chat_prompt(self, t: Template) -> None:
+        """«⋯ → Промпт для своего чата»: урок со слайдами — по каждому слайду; иначе — общий, материал прикладывают."""
+        from PySide6.QtGui import QGuiApplication
+        from .. import lesson_ai as L
+        from ..storage import BLOCK_IMAGE, BLOCK_STAGE
+        if any(b.type == BLOCK_IMAGE and b.slide for b in t.blocks):
+            text = L.slides_prompt(t)
+        else:
+            total = sum(b.minutes for b in t.blocks if b.type == BLOCK_STAGE) or 45
+            text = L.chat_prompt("", L.Options(style=L.STYLE_SCENARIO, minutes=total))
+        QGuiApplication.clipboard().setText(text)
+        self.main._notify("Промпт скопирован: вставьте его в ChatGPT, GigaChat, Алису или DeepSeek и приложите файл "
+                          "презентации или методички. Ответ — «⋯ → Вставить ответ нейросети».")
+
+    def _apply_answer(self, t: Template, text: str) -> None:
+        """«⋯ → Вставить ответ нейросети»: копия урока по ответу (слайды — по номерам), рядом с исходным."""
+        from .. import slides
+        try:
+            new, notes = slides.apply_chat_answer(t, text)
+        except ValueError as e:
+            self.main._notify(str(e), warn=True)
+            return
+        st = self.main.store
+        st.templates.insert(st.templates.index(t) + 1 if t in st.templates else len(st.templates), new)
+        self.main.touch(new)
+        self.main._fill_library(new.id)
+        msg = f"Урок «{new.title}» по ответу нейросети. " + " ".join(notes)
+        if self.efir.live_lesson_id():
+            self.main._notify(msg + " Идёт урок — откройте копию после него.", tray=True)
+            self.schedule_publish()
+            return
+        self.main._notify(msg, tray=bool(notes))
+        self.main.open_lesson(new.id, ask=False)
+
     @staticmethod
     def _slides(t: Template) -> list:
         """Слайды урока по порядку: картинки с номером слайда; нет таких — все картинки урока."""
@@ -424,6 +458,10 @@ class LessonController(QObject):
                 self._show_slide(t, str(d.get("block") or ""))
             elif cmd == "slide_step" and t is not None:
                 self._slide_step(t, 1 if int(d.get("d") or 1) > 0 else -1)
+            elif cmd == "chat_prompt" and t is not None:
+                self._chat_prompt(t)
+            elif cmd == "apply_answer" and t is not None:
+                self._apply_answer(t, str(d.get("text") or ""))
             elif cmd == "open_tab":
                 self.efir.open_tab()
             elif cmd == "timer":

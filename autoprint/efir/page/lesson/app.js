@@ -270,6 +270,11 @@ function moreMenu(anchor) {
   items.push({ label: "Новое оформление…", on: () => cmd({ cmd: "look_new" }) });
   items.push({ sep: true });
   items.push({ label: "Разложить по этапам (⏱ этапы, 🗣 реплики)…", hint: "копия урока", on: () => cmd({ cmd: "recognize" }) });
+  const hasSlides = A.items.some((x) => x.type === "image" && x.slide);
+  items.push({ head: "Нейросеть в своём чате" });
+  items.push({ label: hasSlides ? "Промпт для слайдов…" : "Промпт для своего чата…", hint: "ChatGPT, GigaChat, Алиса, DeepSeek",
+    on: () => cmd({ cmd: "chat_prompt" }) });
+  items.push({ label: "Вставить ответ нейросети…", hint: "копия урока", on: answerBox });
   items.push({ label: "Удалить урок…", danger: true, on: () => {
     if (confirm("Удалить урок «" + L.title + "»? Копия прошлой базы — data/templates.json.bak")) cmd({ cmd: "delete_lesson" });
   } });
@@ -323,6 +328,33 @@ function screenMenu(anchor) {
   items.push({ sep: true });
   items.push({ label: "Мини-таймер «Эфира»", hint: "окно поверх всех", on: () => cmd({ cmd: "timer" }) });
   menu(anchor, items);
+}
+
+// ответ своего чата — вставить сюда, получится копия урока (слайды — по номерам)
+function answerBox() {
+  const ov = el("div", "modal");
+  const box = el("div", "mbox");
+  box.setAttribute("role", "dialog");
+  box.setAttribute("aria-label", "Ответ нейросети");
+  box.appendChild(el("h3", "", "Ответ нейросети"));
+  box.appendChild(el("p", "phelp", "Вставьте ответ чата целиком (Ctrl+V) — блок ~~~markdown. Получится копия урока: этапы "
+    + "и заметки по ответу, слайды — по номерам. Исходный урок не меняется."));
+  const ta = el("textarea", "ansta");
+  ta.rows = 12;
+  ta.setAttribute("aria-label", "Ответ нейросети");
+  box.appendChild(ta);
+  const row = el("div", "mrow");
+  const ok = el("button", "primary", "Добавить урок");
+  const no = el("button", "", "Отмена");
+  ok.onclick = () => { if (!ta.value.trim()) { ta.focus(); return; } cmd({ cmd: "apply_answer", text: ta.value }); ov.remove(); toast("Готовлю урок по ответу…"); };
+  no.onclick = () => ov.remove();
+  ov.addEventListener("keydown", (e) => { if (e.key === "Escape") ov.remove(); });
+  row.appendChild(no);
+  row.appendChild(ok);
+  box.appendChild(row);
+  ov.appendChild(box);
+  document.body.appendChild(ov);
+  ta.focus();
 }
 
 function toolsBusy() { const a = document.activeElement; return !!a && a !== document.body && $("tools").contains(a); }

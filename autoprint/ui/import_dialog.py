@@ -388,7 +388,8 @@ QScrollArea#importScroll, QScrollArea#importScroll > QWidget > QWidget {{ backgr
         has = bool(self.material.toPlainText().strip())
         busy = self._cancel is not None
         ok = ai.configured(self.settings)
-        self.copy_btn.setEnabled(has and not busy)
+        # сценарий урока — промпт для своего чата и без материала: методичку или презентацию прикладывают в чате
+        self.copy_btn.setEnabled((has or self._options().style == L.STYLE_SCENARIO) and not busy)
         self.ask_btn.setEnabled(has and ok and not busy)
         self.ask_btn.setVisible(not busy)
         self.cancel_btn.setVisible(busy)
@@ -525,7 +526,11 @@ QScrollArea#importScroll, QScrollArea#importScroll > QWidget > QWidget {{ backgr
 
     def _copy_prompt(self) -> None:
         self._remember_options()
-        QGuiApplication.clipboard().setText(L.build_prompt(self.material.toPlainText(), self._options()))
+        opt = self._options()
+        material = self.material.toPlainText()
+        # сценарий урока: ответ в своём чате — урок в Markdown (читается и правится в чате); код — как раньше
+        prompt = L.chat_prompt(material, opt) if opt.style == L.STYLE_SCENARIO else L.build_prompt(material, opt)
+        QGuiApplication.clipboard().setText(prompt)
         self.toast.show_message("Промпт скопирован: вставьте его в чат нейросети (Ctrl+V), а её ответ — в поле "
                                 "«Ответ нейросети».", ms=7000)
         self._show_answer()

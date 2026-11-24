@@ -527,5 +527,124 @@ class PresentationTest(unittest.TestCase):
         self.assertIn("=== Слайд 1 ===\nПервый", text)
 
 
+# ================================================================ Task 10: нейросеть в своём чате
+
+CHAT_ANSWER = """Вот урок:
+
+~~~markdown
+---
+title: Функции по слайдам
+---
+
+> [!goal]
+> Ученики пишут функцию.
+
+## Вступление · 10 мин
+
+![Слайд 1](slide:1)
+
+> [!say]
+> Добрый день!
+
+## Разбор · 15 мин
+
+![Слайд 2](slide:2)
+
+![Слайд 5](slide:5)
+
+> [!ask]
+> Что такое функция?
+> → блок кода с именем
+
+```python
+print(1)
+```
+~~~
+Если нужно — поправлю."""
+
+
+class ChatPromptTest(unittest.TestCase):
+    def test_copy_without_material(self):
+        from autoprint import lesson_ai as L
+        p = L.chat_prompt("", L.Options(style=L.STYLE_SCENARIO, minutes=45, break_min=0))
+        self.assertIn("приложен к сообщению", p)
+        self.assertIn("~~~markdown", p)
+        self.assertIn("![Слайд 1](slide:1)", p)
+        self.assertIn("ровно 45", p)
+        self.assertIn("> [!homework]", p)
+        p2 = L.chat_prompt("Тема: циклы", L.Options(style=L.STYLE_SCENARIO, minutes=90))
+        self.assertIn("Тема: циклы", p2)
+        self.assertNotIn("приложен к сообщению", p2)
+
+    def test_slides_prompt(self):
+        from autoprint import lesson_ai as L
+        p = L.slides_prompt(slides_lesson())
+        self.assertIn("с 1 по 3", p)
+        self.assertIn("1. Титул", p)
+        self.assertIn("3. Итоги", p)
+        self.assertIn("ровно 30", p)
+
+    def test_md_answer_in_dialog_parser(self):
+        from autoprint import lesson_ai as L
+        parsed = L.parse_lesson(CHAT_ANSWER, slide=lambda n: None)
+        t = parsed.template
+        self.assertEqual(t.title, "Функции по слайдам")
+        self.assertEqual([b.title for b in t.blocks if b.type == BLOCK_STAGE], ["Вступление", "Разбор"])
+        self.assertTrue(any(b.type == BLOCK_CODE and b.text == "print(1)" for b in t.blocks))
+
+    def test_apply_answer_to_slides(self):
+        from autoprint import slides
+        base = slides_lesson()
+        new, notes = slides.apply_chat_answer(base, CHAT_ANSWER)
+        imgs = [(b.slide, b.text) for b in new.blocks if b.type == BLOCK_IMAGE]
+        self.assertEqual(imgs, [(1, base.find_block("sl1").text), (2, base.find_block("sl2").text)])
+        self.assertEqual(new.title, "Функции по слайдам")
+        self.assertEqual({b.id for b in new.blocks} & {b.id for b in base.blocks}, set())     # копия, свои id
+        joined = " ".join(notes)
+        self.assertIn("Слайда 5 нет в презентации", joined)
+        self.assertIn("25 из 30", joined)
+        self.assertIn("пропустила: 3", joined)                                     # слайд 3 нейросеть пропустила
+        _new, notes2 = slides.apply_chat_answer(base, "~~~markdown\n## Э · 30 мин\n\n![Слайд 1](slide:1)\n\n"
+                                                      "![Слайд 2](slide:2)\n\n> [!say]\n> Текст\n\n![Слайд 3](slide:3)\n~~~")
+        self.assertIn("без заметок: 1, 3", " ".join(notes2))
+
+    def test_page_commands(self):
+        from PySide6.QtGui import QGuiApplication
+        base = slides_lesson("L")
+        win = make_window([base], port=18977)
+        win.lesson.open_page = lambda: None
+        win.printer.set_focus("L")
+        try:
+            win.lesson.command({"cmd": "chat_prompt"})
+            self.assertIn("с 1 по 3", QGuiApplication.clipboard().text())
+            win.lesson.command({"cmd": "apply_answer", "text": CHAT_ANSWER})
+            self.assertEqual(len(win.store.templates), 2)
+            new = win.store.templates[1]
+            self.assertEqual(new.title, "Функции по слайдам")
+            self.assertEqual(win.printer.focus_id, new.id)                     # урок не идёт — копия открыта
+            win.lesson.command({"cmd": "apply_answer", "text": "просто текст"})   # не урок — ничего не добавлено
+            self.assertEqual(len(win.store.templates), 2)
+        finally:
+            win._quitting = True
+            win.close()
+            pump()
+
+    def test_dialog_copy_enabled_without_material(self):
+        from PySide6.QtGui import QGuiApplication
+        from autoprint import lesson_ai as L
+        from autoprint.ui.import_dialog import TAB_AI, ImportDialog
+        s = storage.Settings()
+        s.lesson_style = L.STYLE_SCENARIO
+        d = ImportDialog(None, s, tab=TAB_AI)
+        try:
+            d._update_ai_buttons()
+            self.assertTrue(d.copy_btn.isEnabled())
+            d._copy_prompt()
+            self.assertIn("приложен к сообщению", QGuiApplication.clipboard().text())
+        finally:
+            d.close()
+            d.deleteLater()
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

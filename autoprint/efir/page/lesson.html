@@ -387,6 +387,16 @@ input.inl-h1 { font: 800 20px/1.25 var(--ui); width: min(32em, 60vw); }
   padding: 8px 8px 8px 16px; border-radius: 12px; background: var(--menu); border: 1px solid var(--stroke2); box-shadow: var(--shadow); font-size: 14px; }
 #toast button { min-height: 32px; }
 
+/* ---------------- окно «Ответ нейросети» */
+.modal { position: fixed; inset: 0; z-index: 120; display: flex; align-items: center; justify-content: center;
+  background: rgba(0,0,0,.45); padding: 16px; }
+.mbox { width: min(720px, 100%); background: var(--menu); border: 1px solid var(--stroke2); border-radius: 14px;
+  box-shadow: var(--shadow); padding: 18px; }
+.mbox h3 { margin: 0 0 6px; font-size: 18px; }
+.ansta { width: 100%; min-height: 240px; resize: vertical; margin: 10px 0; padding: 10px; border-radius: 10px;
+  border: 1px solid var(--stroke2); background: var(--card); color: var(--text); font: 13px/1.5 var(--mono); }
+.mrow { display: flex; justify-content: flex-end; gap: 8px; }
+
 /* ---------------- экран учеников */
 .scrchip { cursor: pointer; font-weight: 700; }
 .scrchip.dim { color: var(--dim); }
