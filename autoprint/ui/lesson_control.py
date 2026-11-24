@@ -169,7 +169,9 @@ class LessonController(QObject):
         other = self.efir.live_webinar()
         other_live = other.title if other is not None and (t is None or self.efir.live_lesson_id() != t.id) else ""
         state = scenario.lesson_state(
-            t, live_anchor_ms=anchor, live_shift=self._shift_min(t) if anchor else 0, armed=t.active_block if t is not None else "",
+            t, live_anchor_ms=anchor, live_shift=self._shift_min(t) if anchor else 0,
+            efir_extra={"break_ends": int(self.efir.brk_ends * 1000) if self.efir.mode == "break" else 0,
+                        "tab_open": bool(self.efir.server.running and self.efir.clients > 0)}, armed=t.active_block if t is not None else "",
             media_url=self.efir.server.media_url, presets=[(lk.id, lk.title) for lk in self.efir.store.looks],
             preset=preset.id if preset is not None else "", dark=theme.dark, efir_mode=self.efir.mode,
             tab=self.efir.tab_status()[0], hotkey=self.main.settings.hotkey_toggle,
@@ -183,6 +185,25 @@ class LessonController(QObject):
             return
         self._last = key
         self.efir.server.publish(state, channel="lesson")
+
+    def _launch(self, t: Template, **kw) -> bool:
+        """«Начать урок» со страницы: мини-таймер и экран учеников — только если так в «Моих настройках»."""
+        s = self.main.settings
+        ok = self.efir.launch_lesson(t, show=s.start_timer, **kw)
+        if ok and s.start_screen and self.efir.clients <= 0:
+            self.efir.open_tab()
+        return ok
+
+    def _look_new(self, t: Template) -> None:
+        """«Новое оформление…»: копия оформления урока под новым именем — урок сразу на нём, открыть редактор."""
+        import copy
+        from ..efir.model import Look, new_id
+        base = self.efir.lesson_look(t)
+        look = copy.deepcopy(base) if base is not None else Look()
+        look.id, look.title = new_id(), "Новое оформление"
+        self.efir.save_look(look)
+        self._set_preset(t, look.id)
+        self.efir.edit_look(look.id)
 
     def _remember_plan(self, t: Template) -> None:
         """Плановое начало идущего урока: от него — «конец 19:30» и сдвиг «+5 мин» после «Начать этот этап сейчас»."""
@@ -342,7 +363,7 @@ class LessonController(QObject):
                     if at:
                         t.start = norm_hhmm(at)          # запомнить — подставится в следующий раз
                         self.main._save_timer.start()
-                    if self.efir.launch_lesson(t, start=at, force=bool(d.get("force"))):
+                    if self._launch(t, start=at, force=bool(d.get("force"))):
                         self._remember_plan(t)
             elif cmd == "stop":
                 if self.efir.live_lesson_id():
@@ -363,6 +384,21 @@ class LessonController(QObject):
                 self.main.delete_lesson(t, ask=False)
             elif cmd == "export" and t is not None and d.get("fmt") in ("md", "ipynb", "students", "json"):
                 self.main.export_template(t, str(d["fmt"]))
+            elif cmd == "open_tab":
+                self.efir.open_tab()
+            elif cmd == "timer":
+                if self.efir.live_webinar() is None:
+                    self.main._notify("Мини-таймер показывает урок по времени — сначала «Начать урок».")
+                else:
+                    self.efir.show_timer()
+            elif cmd == "look_new" and t is not None:
+                self._look_new(t)
+            elif cmd == "look_edit" and t is not None:
+                look = self.efir.lesson_look(t)
+                if look is None:
+                    self._look_new(t)
+                else:
+                    self.efir.edit_look(look.id)
             elif cmd == "prefs":
                 self._set_pref(str(d.get("key") or ""), d.get("value"))
             elif cmd == "settings":
@@ -411,7 +447,7 @@ class LessonController(QObject):
         stages = scenario.stages(t)[1]
         if not 0 <= index < len(stages):
             return
-        if self.efir.live_lesson_id() != t.id and not self.efir.launch_lesson(t):
+        if self.efir.live_lesson_id() != t.id and not self._launch(t):
             return
         anchor = datetime.now().replace(microsecond=0) - timedelta(minutes=stages[index].start_min)
         self.efir.store.set_live(self.efir.store.live.webinar_id, anchor)

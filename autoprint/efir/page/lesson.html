@@ -367,6 +367,11 @@ input.inl-h1 { font: 800 20px/1.25 var(--ui); width: min(32em, 60vw); }
   padding: 8px 8px 8px 16px; border-radius: 12px; background: var(--menu); border: 1px solid var(--stroke2); box-shadow: var(--shadow); font-size: 14px; }
 #toast button { min-height: 32px; }
 
+/* ---------------- экран учеников */
+.scrchip { cursor: pointer; font-weight: 700; }
+.scrchip.dim { color: var(--dim); }
+.scrchip.warn { background: var(--accent-soft); border-color: var(--accent-line); color: var(--accent); }
+
 /* ---------------- план строкой (в «Уроке») */
 #strip { flex: 1 1 100%; display: none; align-items: center; gap: 6px 10px; flex-wrap: wrap; min-width: 0; }
 body.mode-lesson.plan-strip #strip { display: flex; }

@@ -100,5 +100,78 @@ class ShiftTest(Base):
         self.assertEqual(self.state()["live"]["shift"], 0)
 
 
+# ================================================================ Task 4: экран учеников с экрана урока
+
+class EfirPageTest(Base):
+    port = 18972
+
+    def test_start_no_timer(self):
+        ef = self.win.efir
+        opened = []
+        ef.open_tab = lambda: opened.append(1)
+        self.win.lesson.command({"cmd": "start"})
+        self.assertEqual(ef.live_lesson_id(), "L")
+        self.assertIsNone(ef.timer_window)                   # «Начать урок» не открывает окно таймера
+        self.assertEqual(opened, [])
+        ef.stop_live()
+        self.win.settings.start_timer = self.win.settings.start_screen = True
+        self.win.lesson.command({"cmd": "start"})
+        self.assertIsNotNone(ef.timer_window)
+        self.assertEqual(opened, [1])
+
+    def test_start_at_no_timer(self):
+        self.win.lesson.command({"cmd": "start_at", "index": 2})
+        self.assertEqual(self.win.efir.live_lesson_id(), "L")
+        self.assertIsNone(self.win.efir.timer_window)
+
+    def test_break_default_and_minutes(self):
+        ef = self.win.efir
+        self.win.lesson.command({"cmd": "break"})           # без этапа — перерыв урока (этап «Перерыв» 10 мин)
+        self.assertEqual(ef.mode, "break")
+        self.assertAlmostEqual(ef.brk_total, 600, delta=1)
+        st = self.state()["efir"]
+        self.assertEqual(st["mode"], "break")
+        self.assertGreater(st["break_ends"], time.time() * 1000)
+        self.assertIn("tab_open", st)
+        self.win.lesson.command({"cmd": "break", "minutes": 15})
+        self.assertAlmostEqual(ef.brk_total, 900, delta=1)
+        self.win.lesson.command({"cmd": "background"})
+        self.assertEqual(ef.mode, "idle")
+
+    def test_look_new_and_edit(self):
+        ef = self.win.efir
+        edited = []
+        ef.edit_look = lambda lid=None: edited.append(lid)
+        n0 = len(ef.store.looks)
+        self.win.lesson.command({"cmd": "look_new"})
+        self.assertEqual(len(ef.store.looks), n0 + 1)
+        new = ef.store.looks[-1]
+        self.assertEqual(self.L.look, new.id)                # урок сразу на новом оформлении
+        self.assertEqual(edited, [new.id])
+        self.win.lesson.command({"cmd": "look_edit"})
+        self.assertEqual(edited, [new.id, new.id])
+
+
+class TimerBreakTest(Base):
+    port = 18973
+
+    def test_popup_buttons(self):
+        from PySide6.QtWidgets import QAbstractSpinBox, QPushButton
+        ef = self.win.efir
+        self.win.settings.start_timer = True
+        self.win.lesson.command({"cmd": "start"})
+        tw = ef.timer_window
+        m = tw._break_menu()
+        self.assertEqual(m.findChildren(QAbstractSpinBox), [])        # поле минут больше не забирает фокус
+        texts = [b.text().strip() for b in m.findChildren(QPushButton)]
+        self.assertEqual(texts[0], "10 мин")                            # по плану — первым
+        self.assertIn("5 мин", texts)
+        self.assertIn("20 мин", texts)
+        started = []
+        ef.start_break = lambda minutes, ends_at=None: started.append(minutes)
+        [b for b in m.findChildren(QPushButton) if b.text().strip() == "15 мин"][0].click()
+        self.assertEqual(started, [15])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -490,6 +490,30 @@ class PageV11Test(Page):
             self.win.settings.page_past = "dim"
             self.stop_live()
 
+    # ---------------------------------------------------------------- Task 4: экран учеников с экрана урока
+    def test_screen_controls(self):
+        ef = self.win.efir
+        opened = []
+        ef.open_tab = lambda: opened.append(1)
+        self.mode("lesson")
+        chip = "document.querySelector('#tools .scrchip')"
+        btn = "[...document.querySelectorAll('#tools button')].find(b => b.textContent.trim() === '{}')"
+        try:
+            self.assertTrue(self.edge.wait(f"!!{chip} && {chip}.textContent.includes('Экран учеников не открыт')"))
+            self.js(btn.format("Перерыв") + ".click()")
+            self.assertTrue(self.wait_py(lambda: ef.mode == "break"))
+            self.assertTrue(self.edge.wait(f"{chip}.textContent.includes('перерыв')"))
+            self.js(btn.format("Вернуть фон") + ".click()")
+            self.assertTrue(self.wait_py(lambda: ef.mode == "idle"))
+            self.js(f"{chip}.click()")
+            self.assertTrue(self.edge.wait("!!document.querySelector('.menu')"))
+            self.js("[...document.querySelectorAll('.menu .mi')].find(b => b.textContent.includes('Открыть экран учеников')).click()")
+            self.assertTrue(self.wait_py(lambda: opened == [1]))
+            self.assertEqual(self.js("document.body.textContent.includes('Этап заново')"), False)
+        finally:
+            del ef.open_tab
+            ef.show_background()
+
     # ---------------------------------------------------------------- Task 3: план строкой
     def test_plan_strip(self):
         self.mode("lesson")

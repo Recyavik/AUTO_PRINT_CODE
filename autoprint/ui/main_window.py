@@ -512,7 +512,7 @@ class MainWindow(FramelessWindow):
         m.addAction(icons.icon("pencil"), "Переименовать", lambda: lib.editItem(it))
         m.addAction(icons.icon("copy"), "Дублировать", lambda: self._duplicate(t))
         self._export_menu(m.addMenu(icons.icon("export"), "Экспорт"), t)
-        m.addAction(icons.icon("layers"), "Распознать сценарий (⏱ этапы, 🗣 реплики)", lambda: self.recognize_lesson(t))
+        m.addAction(icons.icon("layers"), "Разложить по этапам (⏱ этапы, 🗣 реплики)", lambda: self.recognize_lesson(t))
         m.addSeparator()
         m.addAction(icons.icon("trash"), "Удалить…", lambda: self._delete_template(t))
         m.exec(lib.viewport().mapToGlobal(pos))

@@ -591,7 +591,7 @@ class StateTest(unittest.TestCase):
         cb = blocks[1][2]
         self.assertEqual((cb["id"], cb["label"], cb["icon"]), (code.id, "CSS", "css.svg"))
         self.assertIn("t-", cb["html"])
-        self.assertEqual((st["armed"], st["hotkey"], st["live"]), (code.id, "Ctrl+F9", {"anchor": 1_700_000_000_000}))
+        self.assertEqual((st["armed"], st["hotkey"], st["live"]), (code.id, "Ctrl+F9", {"anchor": 1_700_000_000_000, "shift": 0}))
         self.assertEqual((les["presets"], les["preset"]), ([{"id": "p1", "title": "1Т"}], "p1"))
 
     def test_state_no_stages(self):

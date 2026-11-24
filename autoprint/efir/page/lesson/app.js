@@ -263,12 +263,12 @@ function moreMenu(anchor) {
     { label: "Тетрадка учеников (только код)…", on: () => cmd({ cmd: "export", fmt: "students" }) },
     { label: "Урок в .json…", on: () => cmd({ cmd: "export", fmt: "json" }) },
   );
-  if (presets.length) {
-    items.push({ head: "Оформление экрана эфира" });
-    for (const p of presets) items.push({ label: p.title, checked: p.id === L.preset, on: () => cmd({ cmd: "preset", id: p.id }) });
-  }
+  items.push({ head: "Оформление экрана учеников" });
+  for (const p of presets) items.push({ label: p.title, checked: p.id === L.preset, on: () => cmd({ cmd: "preset", id: p.id }) });
+  if (presets.length) items.push({ label: "Изменить оформление…", hint: "фон, зарядки, перерыв", on: () => cmd({ cmd: "look_edit" }) });
+  items.push({ label: "Новое оформление…", on: () => cmd({ cmd: "look_new" }) });
   items.push({ sep: true });
-  items.push({ label: "Распознать сценарий (⏱ этапы, 🗣 реплики)…", hint: "копия урока", on: () => cmd({ cmd: "recognize" }) });
+  items.push({ label: "Разложить по этапам (⏱ этапы, 🗣 реплики)…", hint: "копия урока", on: () => cmd({ cmd: "recognize" }) });
   items.push({ label: "Удалить урок…", danger: true, on: () => {
     if (confirm("Удалить урок «" + L.title + "»? Копия прошлой базы — data/templates.json.bak")) cmd({ cmd: "delete_lesson" });
   } });
@@ -279,6 +279,49 @@ function moreMenu(anchor) {
 function mayReplace() {
   const other = A.S && A.S.other_live;
   return !other || confirm("Сейчас идёт эфир «" + other + "». Завершить его и начать урок?");
+}
+
+// ---------------------------------------------------------------- экран учеников
+function currentBreakStage() {
+  const { cur, stages } = computeCurrent();
+  const s = cur >= 0 ? stages[cur] : null;
+  return s && s.item.kind === "break" ? s.id : "";
+}
+
+function screenText() {
+  const ef = (A.S && A.S.efir) || {};
+  if (ef.mode === "break") {
+    const left = ef.break_ends ? Math.max(0, (ef.break_ends - now()) / 1000) : 0;
+    return ["У учеников: перерыв" + (left ? " · " + mmss(left) : ""), "warn"];
+  }
+  if (ef.mode === "exercise") return ["У учеников: зарядка", "warn"];
+  if (ef.mode === "slide") return ["У учеников: слайд " + (ef.slide_n || ""), "ok"];
+  if (!ef.tab_open) return ["Экран учеников не открыт ▾", "dim"];
+  return ["У учеников: фон ▾", ""];
+}
+
+function screenChip() {
+  const c = document.querySelector("#tools .scrchip");
+  if (!c) return;
+  const [text, cls] = screenText();
+  if (c.textContent !== text) c.textContent = text;
+  c.className = "chip scrchip" + (cls ? " " + cls : "");
+}
+
+function screenMenu(anchor) {
+  const ef = (A.S && A.S.efir) || {};
+  const stages = stagesOf(A.items);
+  const brk = stages.find((s) => s.item.kind === "break");
+  const planned = brk ? brk.minutes : 10;
+  const items = [{ head: "Экран учеников" }];
+  if (!ef.tab_open) items.push({ label: "Открыть экран учеников", hint: "вкладка для демонстрации", on: () => cmd({ cmd: "open_tab" }) });
+  items.push({ label: "Фон", checked: !ef.mode || ef.mode === "idle", on: () => cmd({ cmd: "background" }) });
+  items.push({ label: `Перерыв по плану · ${planned} мин`, checked: ef.mode === "break", on: () => cmd({ cmd: "break", stage: currentBreakStage(), minutes: planned }) });
+  for (const m of [5, 10, 15, 20].filter((x) => x !== planned)) items.push({ label: `Перерыв ${m} мин`, on: () => cmd({ cmd: "break", minutes: m }) });
+  if (A.S.exercises) items.push({ label: "Зарядка", checked: ef.mode === "exercise", on: () => cmd({ cmd: "exercise", index: 0 }) });
+  items.push({ sep: true });
+  items.push({ label: "Мини-таймер «Эфира»", hint: "окно поверх всех", on: () => cmd({ cmd: "timer" }) });
+  menu(anchor, items);
 }
 
 function toolsBusy() { const a = document.activeElement; return !!a && a !== document.body && $("tools").contains(a); }
@@ -312,16 +355,30 @@ export function renderTools() {
     seg.appendChild(b);
   }
   t.appendChild(seg);
-  if (A.mode === "lesson" && stages.length) {
-    if (A.S.efir && A.S.efir.mode && A.S.efir.mode !== "idle") {
-      t.appendChild(chip(A.S.efir.mode === "break" ? "У учеников: перерыв" : "У учеников: зарядка", "warn"));
+  if (A.mode === "lesson") {
+    // экран учеников — отсюда: что у них сейчас, перерыв, фон (окно таймера «Эфира» не нужно)
+    const ef = A.S.efir || {};
+    const sc = el("button", "chip scrchip");
+    sc.title = "Экран учеников: что у них сейчас и что показать";
+    sc.onclick = () => screenMenu(sc);
+    t.appendChild(sc);
+    if (ef.mode && ef.mode !== "idle") {
       const back = el("button", "", "Вернуть фон");
+      back.title = "Ученикам — снова фон (B)";
       back.onclick = () => cmd({ cmd: "background" });
       t.appendChild(back);
+    } else {
+      const br = el("button", "", "Перерыв");
+      br.title = "Перерыв ученикам — по плану урока (другие минуты — в «У учеников ▾»)";
+      br.onclick = () => cmd({ cmd: "break", stage: currentBreakStage() });
+      t.appendChild(br);
     }
+    screenChip();
+  }
+  if (A.mode === "lesson" && stages.length) {
     if (!A.S.live) {
       const go = el("button", "primary", "Начать урок");
-      go.title = "Урок начинается с этой минуты: этапы пойдут по часам, таймер — в окне «Эфира»";
+      go.title = "Урок начинается с этой минуты: этапы пойдут по часам";
       go.onclick = () => { if (mayReplace()) cmd({ cmd: "start", force: !!A.S.other_live }); };
       t.appendChild(go);
       const atBox = el("label", "chip");
@@ -352,7 +409,7 @@ export function renderTools() {
       tm.addEventListener("blur", commit);
       startBox.appendChild(tm);
       t.appendChild(startBox);
-      const shift = el("button", "", "Этап заново с этой минуты");
+      const shift = el("button", "", "Начать этот этап сейчас");
       shift.title = "Текущий этап начинается сейчас, следующие сдвигаются";
       shift.onclick = () => cmd({ cmd: "shift_now" });
       t.appendChild(shift);
@@ -551,6 +608,7 @@ function tick() {
   }
   updateNowbar(cur, stages);
   renderStrip(elapsed, cur, stages);
+  screenChip();
   for (const s of stages) {
     const st = $("st-" + s.id), pr = $("pr-" + s.id);
     if (!st) continue;

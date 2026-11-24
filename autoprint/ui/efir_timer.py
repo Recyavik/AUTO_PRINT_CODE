@@ -14,7 +14,7 @@ from datetime import datetime
 
 from PySide6.QtCore import QByteArray, QPoint, QPointF, QRectF, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QFont, QFontMetricsF, QGuiApplication, QPainter, QPainterPath, QPen
-from PySide6.QtWidgets import (QHBoxLayout, QLabel, QMenu, QMessageBox, QPushButton, QSpinBox, QToolButton,
+from PySide6.QtWidgets import (QHBoxLayout, QLabel, QMenu, QMessageBox, QPushButton, QToolButton,
                                QVBoxLayout, QWidget, QWidgetAction)
 
 from ..efir.model import DEMO_OFF, DEMO_ON, KIND_BREAK, KIND_EXERCISE, Agenda, Segment, agenda_at, fmt_left
@@ -22,7 +22,7 @@ from . import icons
 from .efir_control import MODE_BREAK, MODE_EXERCISE, MODE_IDLE
 from .frameless import HTCAPTION, HTCLIENT, FramelessWindow, StatusDot, user32
 from .theme import mix, theme
-from .widgets import IconButton, IconLabel, ThemedButton, accent_button
+from .widgets import IconButton, IconLabel, ThemedButton, accent_button, button
 
 HWND_TOPMOST, HWND_NOTOPMOST = -1, -2
 SWP_NOSIZE, SWP_NOMOVE, SWP_NOACTIVATE = 0x0001, 0x0002, 0x0010
@@ -674,49 +674,41 @@ QToolButton#pinBtn:checked {{ background: {t.css('accent_soft')}; }}
         m.addAction(icons.icon("stop"), "Убрать — снова фон", ctl.show_background)
 
     def _break_popup(self, pos: QPoint) -> None:
-        """«Перерыв»: показать минуты из шаблона, поправить и начать."""
+        m = self._break_menu()
+        if m is not None:
+            m.exec(pos)
+
+    def _break_menu(self) -> QMenu | None:
+        """«Перерыв»: кнопки минут — плановые первыми, без поля ввода (оно забирало фокус и колесо)."""
         w = self.ctl.live_webinar()
         if not w:
-            return
+            return None
         m = QMenu(self)
         box = QWidget()
         bl = QVBoxLayout(box)
         bl.setContentsMargins(12, 10, 12, 10)
         bl.setSpacing(8)
-        head = QLabel("Перерыв")
+        head = QLabel("Перерыв — на сколько минут")
         head.setStyleSheet(f"font-weight: 600; color: {theme.css('text')};")
         bl.addWidget(head)
         row = QHBoxLayout()
         row.setSpacing(6)
-        minus = IconButton("minus", "Минутой меньше", 14, box=30, framed=True)
-        sp = QSpinBox()
-        sp.setRange(1, 180)
-        sp.setValue(w.break_min)
-        sp.setSuffix(" мин")
-        sp.setFixedWidth(96)
-        sp.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        plus = IconButton("plus", "Минутой больше", 14, box=30, framed=True)
-        minus.clicked.connect(lambda: sp.setValue(sp.value() - 1))
-        plus.clicked.connect(lambda: sp.setValue(sp.value() + 1))
-        row.addWidget(minus)
-        row.addWidget(sp)
-        row.addWidget(plus)
+        planned = max(1, int(w.break_min or 10))
+        for n in [planned] + [x for x in (5, 10, 15, 20) if x != planned]:
+            b = accent_button(f" {n} мин", "play") if n == planned else button(f"{n} мин")
+            b.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+            b.setFixedHeight(32)
+            b.setToolTip("По плану урока" if n == planned else f"Перерыв {n} мин")
+            b.clicked.connect(lambda _=False, n=n: (self.ctl.start_break(n), m.close()))
+            row.addWidget(b)
         bl.addLayout(row)
-        go = accent_button(" Начать перерыв", "play")
-        go.setFixedHeight(32)
-
-        def start() -> None:
-            self.ctl.start_break(sp.value())
-            m.close()
-
-        go.clicked.connect(start)
-        sp.lineEdit().returnPressed.connect(start)
-        bl.addWidget(go)
+        tip = QLabel("Во время перерыва здесь же: ±1 минута, пауза, «Снова фон».")
+        tip.setStyleSheet(f"color: {theme.css('dim')}; font-size: 12px;")
+        bl.addWidget(tip)
         act = QWidgetAction(m)
         act.setDefaultWidget(box)
         m.addAction(act)
-        QTimer.singleShot(0, lambda: (sp.setFocus(), sp.selectAll()))
-        m.exec(pos)
+        return m
 
     def _fill_more(self) -> None:
         ctl, m = self.ctl, self.more_menu
@@ -742,7 +734,7 @@ QToolButton#pinBtn:checked {{ background: {t.css('accent_soft')}; }}
         if ag.phase == "before":
             m.addAction(icons.icon("play"), "Начать эфир сейчас (с первого блока)", lambda: ctl.start_now(0))
         elif ag.phase == "live":
-            m.addAction(icons.icon("clock"), f"Этап заново с этой минуты: «{ag.current.activity.name}»",
+            m.addAction(icons.icon("clock"), f"Начать этот этап сейчас: «{ag.current.activity.name}»",
                         lambda: ctl.start_now(None))
         else:
             m.addAction(icons.icon("play"), "Начать эфир заново сейчас", lambda: ctl.start_now(0))
