@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from PySide6.QtCore import QRect, QRectF, QSize, Qt, Signal
 from PySide6.QtGui import QFont, QFontMetrics, QPainter
-from PySide6.QtWidgets import (QAbstractItemView, QHBoxLayout, QLineEdit, QListWidget, QPushButton,
+from PySide6.QtWidgets import (QAbstractItemView, QHBoxLayout, QLineEdit, QListWidget, QMenu, QPushButton,
                                QStyle, QStyledItemDelegate, QVBoxLayout, QWidget)
 
 from . import icons
@@ -83,6 +83,7 @@ class LibraryPanel(QWidget):
     """Поиск, список уроков, кнопки. Объявление об обновлении — над кнопками."""
     open_requested = Signal()
     new_requested = Signal()
+    new_structure = Signal(str)      # «Новый урок ▾»: ключ STRUCTURES или "presentation"
     import_requested = Signal()
     ai_requested = Signal()
     update_clicked = Signal()
@@ -129,9 +130,9 @@ class LibraryPanel(QWidget):
         lay.addWidget(self.btn_open)
         row = QHBoxLayout()
         row.setSpacing(6)
-        self.btn_new = button("Новый урок", "plus")
-        self.btn_new.setToolTip("Новый урок (Ctrl+N)")
-        self.btn_new.clicked.connect(self.new_requested)
+        self.btn_new = button("Новый урок ▾", "plus")
+        self.btn_new.setToolTip("Новый урок: пустой, по шаблону структуры или из презентации (Ctrl+N — пустой)")
+        self.btn_new.clicked.connect(lambda: self.new_menu().exec(self.btn_new.mapToGlobal(self.btn_new.rect().bottomLeft())))
         self.btn_import = button("Импорт…", "import")
         self.btn_import.setToolTip("Урок из файла: .ipynb (Jupyter), .md, .py или .json (Ctrl+O)")
         self.btn_import.clicked.connect(self.import_requested)
@@ -142,6 +143,22 @@ class LibraryPanel(QWidget):
             row.addWidget(b, 1)
         lay.addLayout(row)
         theme.changed.connect(self._on_theme)
+
+    def new_menu(self) -> QMenu:
+        """«Новый урок ▾»: пустой, по шаблону структуры (этапы с минутами), из презентации."""
+        from ..storage import STRUCTURES
+        m = QMenu(self)
+        for key, (title, stages) in STRUCTURES.items():
+            hint = f" — {len(stages)} этапов" if stages else ""
+            a = m.addAction(title)
+            a.setToolTip(title + hint)
+            a.triggered.connect(lambda _=False, k=key: self.new_structure.emit(k))
+            if key == "empty":
+                m.addSeparator()
+        m.addSeparator()
+        a = m.addAction("Из презентации…")
+        a.triggered.connect(lambda: self.new_structure.emit("presentation"))
+        return m
 
     def _on_theme(self) -> None:
         self._search_action.setIcon(icons.icon("search"))

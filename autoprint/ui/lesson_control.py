@@ -20,7 +20,7 @@ from PySide6.QtGui import QDesktopServices
 
 from .. import scenario
 from ..efir.model import norm_hhmm, parse_hhmm
-from ..storage import Template
+from ..storage import STRUCTURES, Template
 from .theme import theme
 
 log = logging.getLogger(__name__)
@@ -180,7 +180,8 @@ class LessonController(QObject):
             tab=self.efir.tab_status()[0], hotkey=self.main.settings.hotkey_toggle,
             printer=self.main.printer.snapshot(), lessons=scenario.lessons_state(self.main.store.templates),
             exercises=bool(preset is not None and preset.exercises), edits=self.edits, other_live=other_live,
-            prefs={k: getattr(self.main.settings, k) for k in PREFS})
+            prefs={k: getattr(self.main.settings, k) for k in PREFS},
+            structures=[{"key": k, "title": v[0], "minutes": sum(s[1] for s in v[1])} for k, v in STRUCTURES.items()])
         # во время зарядки экран эфира шлёт ход видео раз в секунду: странице суфлёра от этого ничего не
         # меняется — не перерисовывать её (иначе пересоздаются кнопки и теряются щелчки)
         key = json.dumps(state, ensure_ascii=False, sort_keys=True)
@@ -449,7 +450,7 @@ class LessonController(QObject):
             elif cmd == "print_settings":
                 self.main.printer.set_option(str(d.get("key") or ""), d.get("value"))
             elif cmd == "new_lesson":
-                self._new_lesson(bool(d.get("force")))
+                self._new_lesson(bool(d.get("force")), str(d.get("structure") or "empty"))
             elif cmd == "delete_lesson" and t is not None:
                 self.main.delete_lesson(t, ask=False)
             elif cmd == "export" and t is not None and d.get("fmt") in ("md", "ipynb", "students", "json"):
@@ -498,13 +499,13 @@ class LessonController(QObject):
             log.warning("Команда экрана урока %r не выполнена: %s", d, e)
         self.schedule_publish()
 
-    def _new_lesson(self, force: bool) -> None:
-        """«Новый урок» со страницы: идёт урок — его завершают (страница уже спросила)."""
+    def _new_lesson(self, force: bool, structure: str = "empty") -> None:
+        """«Новый урок» со страницы (пустой или по шаблону структуры): идёт урок — его завершают (страница спросила)."""
         if self.efir.live_lesson_id():
             if not force:
                 return
             self.efir.stop_live()
-        nt = self.main.store.add("Новый урок")
+        nt = self.main.store.add_from_structure(structure)
         self.main.touch(nt)
         self.main._fill_library(nt.id)
         self.main.open_lesson(nt.id, ask=False)

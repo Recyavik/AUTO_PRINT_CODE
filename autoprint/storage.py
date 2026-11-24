@@ -353,6 +353,16 @@ ROLE_HINTS = {
     "homework": "что сделать дома — попадёт в тетрадку учеников", "goal": "чему научатся на уроке",
 }
 STAGE_KINDS = {"": "Обычный", "break": "Перерыв", "exercise": "Зарядка"}
+# «Новый урок» по шаблону структуры: ключ → (название, [(этап, минуты[, вид])])
+STRUCTURES = {
+    "empty": ("Пустой урок", []),
+    "school45": ("Школа, 45 мин", [("Оргмомент", 2), ("Актуализация знаний", 5), ("Новый материал", 15),
+                                    ("Закрепление", 15), ("Рефлексия", 5), ("Домашнее задание", 3)]),
+    "online90": ("Онлайн-занятие, 90 мин", [("Приветствие", 5), ("Разминка", 5), ("Теория", 15), ("Практика", 20),
+                                             ("Перерыв", 10, "break"), ("Практика", 20), ("Итоги и рефлексия", 10),
+                                             ("Домашнее задание", 5)]),
+    "pair90": ("Пара, 2×45", [("Первая половина", 45), ("Перерыв", 10, "break"), ("Вторая половина", 45)]),
+}
 
 
 @dataclass
@@ -552,6 +562,23 @@ class TemplateStore:
 
     def get(self, tid: str) -> Template | None:
         return next((t for t in self.templates if t.id == tid), None)
+
+    def add_from_structure(self, key: str, title: str = "Новый урок") -> Template:
+        """Новый урок по шаблону структуры (STRUCTURES): этапы с минутами, цель урока в начале; у рефлексии —
+        вопрос, у домашнего задания — плашка «Домашнее задание»."""
+        stages = STRUCTURES.get(key, STRUCTURES["empty"])[1]
+        if not stages:
+            return self.add(title)
+        blocks = [Block(BLOCK_MARKDOWN, "", role="goal")]
+        for name, minutes, *kind in stages:
+            blocks.append(Block(BLOCK_STAGE, "", title=name, minutes=minutes, stage_kind=kind[0] if kind else ""))
+            if kind and kind[0] == "break":
+                continue
+            role = "homework" if name == "Домашнее задание" else "ask" if name == "Рефлексия" else "say"
+            blocks.append(Block(BLOCK_MARKDOWN, "", role=role))
+        t = Template(title=title, blocks=blocks)
+        self.templates.append(t)
+        return t
 
     def add(self, title: str) -> Template:
         t = Template(title=title, blocks=[Block(BLOCK_STAGE, "", title="Начало", minutes=5),

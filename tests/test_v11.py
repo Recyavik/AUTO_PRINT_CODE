@@ -646,5 +646,38 @@ class ChatPromptTest(unittest.TestCase):
             d.deleteLater()
 
 
+# ================================================================ Task 12: новый урок по шаблону структуры
+
+class StructureTest(Base):
+    port = 18978
+
+    def test_structures(self):
+        st = storage.STRUCTURES
+        self.assertEqual(list(st), ["empty", "school45", "online90", "pair90"])
+        t = self.win.store.add_from_structure("school45")
+        stages = [(b.title, b.minutes) for b in t.blocks if b.type == BLOCK_STAGE]
+        self.assertEqual(stages, [("Оргмомент", 2), ("Актуализация знаний", 5), ("Новый материал", 15),
+                                  ("Закрепление", 15), ("Рефлексия", 5), ("Домашнее задание", 3)])
+        self.assertEqual(t.blocks[0].role, "goal")
+        self.assertTrue(any(b.role == "homework" for b in t.blocks if b.type == BLOCK_MARKDOWN))
+        t2 = self.win.store.add_from_structure("online90")
+        self.assertEqual(sum(b.minutes for b in t2.blocks if b.type == BLOCK_STAGE), 90)
+        self.assertIn("break", [b.stage_kind for b in t2.blocks if b.type == BLOCK_STAGE])
+        t3 = self.win.store.add_from_structure("pair90")
+        self.assertEqual([b.minutes for b in t3.blocks if b.type == BLOCK_STAGE], [45, 10, 45])
+
+    def test_page_command_and_menu(self):
+        n0 = len(self.win.store.templates)
+        self.win.lesson.command({"cmd": "new_lesson", "structure": "pair90"})
+        self.assertEqual(len(self.win.store.templates), n0 + 1)
+        t = self.win.printer.focus()
+        self.assertEqual([b.minutes for b in t.blocks if b.type == BLOCK_STAGE], [45, 10, 45])
+        self.assertIn("structures", self.state())
+        menu = self.win.library.new_menu()
+        texts = [a.text() for a in menu.actions() if a.text()]
+        for x in ("Пустой урок", "Школа, 45 мин", "Онлайн-занятие, 90 мин", "Пара, 2×45", "Из презентации…"):
+            self.assertIn(x, texts)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

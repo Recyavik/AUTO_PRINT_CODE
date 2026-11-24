@@ -234,6 +234,8 @@ class MainWindow(FramelessWindow):
         self.library.search.textChanged.connect(self._filter_library)
         self.library.open_requested.connect(self._open_selected)
         self.library.new_requested.connect(self.new_template)
+        self.library.new_structure.connect(lambda k: self.new_from_presentation() if k == "presentation"
+                                           else self.new_template(k))
         self.library.import_requested.connect(lambda: self.import_files())
         self.library.ai_requested.connect(lambda: self.import_files("ai"))
         self.library.update_clicked.connect(self.open_update_dialog)
@@ -548,9 +550,9 @@ class MainWindow(FramelessWindow):
         self.lesson.open_page()
         return True
 
-    def new_template(self) -> None:
-        """Новый урок: этап «Начало» и пустая заметка «Говоришь» — сразу на экран урока, править там."""
-        t = self.store.add("Новый урок")
+    def new_template(self, structure: str = "empty") -> None:
+        """Новый урок: пустой (этап «Начало» и заметка «Говоришь») или по шаблону структуры — сразу на экран урока."""
+        t = self.store.add_from_structure(structure if isinstance(structure, str) else "empty")
         self.touch(t)
         self._fill_library(t.id)
         self.open_lesson(t.id)

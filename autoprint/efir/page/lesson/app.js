@@ -185,16 +185,23 @@ function lessonsMenu(anchor) {
   };
   fill();
   inp.addEventListener("input", fill);
-  const nb = el("button", "mi newl");
-  nb.appendChild(icon("plus"));
-  nb.appendChild(el("span", "ml", "Новый урок"));
-  nb.onclick = () => {
-    closeMenu();
-    if (live && !confirm("Идёт урок «" + L.title + "». Завершить его и начать новый?")) return;
-    cmd({ cmd: "new_lesson", force: !!live });
-    setMode("prep", true);
-  };
-  menu(anchor, [{ node: box }, { sep: true }, { node: nb }], { cls: "lessons" });
+  // «Новый урок»: пустой или по шаблону структуры (этапы с минутами)
+  const news = [{ head: "Новый урок" }];
+  const structs = (A.S.structures && A.S.structures.length) ? A.S.structures : [{ key: "empty", title: "Пустой урок", minutes: 0 }];
+  for (const s of structs) {
+    const nb = el("button", "mi newl");
+    nb.appendChild(icon("plus"));
+    nb.appendChild(el("span", "ml", s.title));
+    if (s.minutes) nb.appendChild(el("span", "mh", durText(s.minutes)));
+    nb.onclick = () => {
+      closeMenu();
+      if (live && !confirm("Идёт урок «" + L.title + "». Завершить его и начать новый?")) return;
+      cmd({ cmd: "new_lesson", force: !!live, structure: s.key });
+      setMode("prep", true);
+    };
+    news.push({ node: nb });
+  }
+  menu(anchor, [{ node: box }, { sep: true }, ...news], { cls: "lessons" });
   inp.focus();
 }
 
