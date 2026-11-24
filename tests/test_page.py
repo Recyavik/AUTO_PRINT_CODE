@@ -752,10 +752,13 @@ class PageV11Test(Page):
             self.js("document.querySelector('#strip .more').click()")
             self.assertTrue(self.edge.wait("getComputedStyle(document.getElementById('plan')).display === 'none'"))
             self.mode("prep")
+            # 0.12.1: урок идёт — экран учеников под рукой и в «Подготовке»; план строкой — нет (он слева)
             self.assertTrue(self.edge.wait("getComputedStyle(document.getElementById('plan')).display !== 'none' && "
-                                           "getComputedStyle(document.getElementById('strip')).display === 'none'"))
+                                           "getComputedStyle(document.getElementById('strip')).display !== 'none' && "
+                                           "getComputedStyle(document.querySelector('#strip .cur')).display === 'none'"))
         finally:
             self.stop_live()
+        self.assertTrue(self.edge.wait("getComputedStyle(document.getElementById('strip')).display === 'none'"))
 
 
 def slide_ref(n: int) -> str:
@@ -1186,6 +1189,85 @@ class PageV12Test(Page):
         self.js("document.getElementById('endbtn').click()")
         self.assertTrue(self.wait_py(lambda: not self.win.efir.live_lesson_id()))
         self.republish()
+
+    # ---------------------------------------------------------------- 0.12.1: проверка мелочей на живом уроке
+    def test_plan_click_while_live_only_scrolls_and_shift_can_be_undone(self):
+        self.mode("lesson")
+        self.go_live(1)
+        try:
+            self.assertTrue(self.edge.wait("document.getElementById('status').textContent.startsWith('Урок идёт')"))
+            before = self.win.efir.store.live.anchor
+            self.js("window.__confirmText = ''; window.confirm = (t) => { window.__confirmText = t; return true; }")
+            self.js("document.body.classList.add('plan-open')")
+            self.js("document.querySelector('#pr-ts3 .n').click()")                 # к этапу — без сдвига времени
+            pump(300)
+            self.assertEqual(self.js("window.__confirmText"), "")
+            self.assertEqual(self.win.efir.store.live.anchor, before)
+            self.js("document.getElementById('status').click()")
+            self.assertTrue(self.edge.wait("!!document.querySelector('.menu')"))
+            self.js("[...document.querySelectorAll('.menu .mi')].find(b => b.textContent.startsWith('Следующий этап — сейчас')).click()")
+            self.assertTrue(self.wait_py(lambda: self.win.efir.store.live.anchor != before))
+            self.assertTrue(self.edge.wait("document.getElementById('toast').textContent.includes('Вернуть')"))
+            self.js("document.querySelector('#toast button').click()")
+            self.assertTrue(self.wait_py(lambda: abs((self.win.efir.store.live.anchor - before).total_seconds()) < 1))
+        finally:
+            self.js("document.body.classList.remove('plan-open')")
+            self.stop_live()
+
+    def test_window_titles_say_who_sees_them(self):
+        self.assertIn("только для вас", self.js("document.title"))
+        self.assertTrue(self.js("document.title.endsWith(' — AutoPrintCode')"))
+        screen = (Path(storage.__file__).resolve().parent / "efir" / "page" / "screen.html").read_text(encoding="utf-8")
+        self.assertIn("<title>Экран учеников — показывать ученикам</title>", screen)
+
+    def test_program_notice_shows_on_page(self):
+        self.win._notify("Поставьте курсор в Jupyter", warn=True)
+        self.republish()
+        self.assertTrue(self.edge.wait("document.getElementById('toast').textContent.includes('Поставьте курсор в Jupyter')"))
+
+    def test_break_controls_on_page_and_copy_url(self):
+        ef = self.win.efir
+        self.mode("lesson")
+        try:
+            self.win.lesson.command({"cmd": "break", "stage": "", "minutes": 5})
+            self.republish()
+            self.js("document.querySelector('#strip .scrchip').click()")
+            self.assertTrue(self.edge.wait("!!document.querySelector('.menu')"))
+            labels = self.js("[...document.querySelectorAll('.menu .mi')].map(b => b.textContent)")
+            for want in ("+5 мин", "+1 мин", "Пауза отсчёта", "Заново", "Убрать — снова фон", "Скопировать адрес вкладки"):
+                self.assertTrue(any(x.startswith(want) for x in labels), (want, labels))
+            ends = ef.brk_ends
+            self.js("[...document.querySelectorAll('.menu .mi')].find(b => b.textContent.startsWith('+5 мин')).click()")
+            self.assertTrue(self.wait_py(lambda: abs(ef.brk_ends - ends - 300) < 2))
+        finally:
+            ef.show_background()
+
+    def test_start_now_when_waiting_and_live_controls_in_prep(self):
+        self.mode("lesson")
+        self.go_live(-10)                                                              # «Начать в …» — через 10 минут
+        try:
+            self.assertTrue(self.edge.wait("document.getElementById('nowbtn') && !document.getElementById('nowbtn').hidden"))
+            self.assertEqual(self.js("document.getElementById('endbtn').textContent"), "Отменить начало")
+            self.mode("prep")
+            self.assertTrue(self.edge.wait("getComputedStyle(document.getElementById('strip')).display !== 'none'"))
+            self.assertTrue(self.js("!!document.querySelector('#strip .scrchip')"))
+            self.js("document.getElementById('nowbtn').click()")
+            self.assertTrue(self.wait_py(lambda: (self.win.efir.store.live.anchor - __import__('datetime').datetime.now()).total_seconds() < 5))
+        finally:
+            self.stop_live()
+
+    def test_hints_are_buttons(self):
+        self.open_lesson("F")
+        self.mode("prep")
+        self.store.get("F").find_block("fz").exercise = ""
+        self.win.efir.lesson_look(self.store.get("F")).exercises = []
+        self.republish()
+        self.assertTrue(self.edge.wait("!!document.querySelector('#st-fz .efirbtn.addvideo')"))
+        self.assertEqual(self.js("document.querySelector('#st-fz .efirbtn.addvideo').textContent"), "Добавить видео зарядки…")
+        self.open_lesson("T")
+        self.mode("prep")
+        self.js("document.querySelector('#st-ts1 .stitle').click()")
+        self.assertTrue(self.edge.wait("document.getElementById('toast').textContent.includes('из плана «Онлайн 90»')"))
 
     def test_start_at_button_label(self):
         self.mode("lesson")

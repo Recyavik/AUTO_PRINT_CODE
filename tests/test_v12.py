@@ -1106,5 +1106,125 @@ class TabAutoOpenTest(unittest.TestCase):
             close(win)
 
 
+class LiveSafetyTest(unittest.TestCase):
+    def test_timer_close_hides_for_lesson(self):
+        """× мини-таймера во время урока — только прячет таймер; урок идёт дальше, таймер открывается снова."""
+        from PySide6.QtWidgets import QMessageBox
+        t = Template("У", [stage("А", 5), stage("Б", 10)], id="U")
+        win = window([t], 18921)
+        orig = QMessageBox.exec
+        asked = []
+        QMessageBox.exec = lambda box: asked.append(box.text()) or 0
+        try:
+            t = win.store.get("U")
+            win.efir.launch_lesson(t, show=True)
+            tw = win.efir.timer_window
+            self.assertIsNotNone(tw)
+            tw.close()
+            pump(50)
+            self.assertEqual(asked, [])                                              # не спрашивает
+            self.assertFalse(tw.isVisible())
+            self.assertTrue(win.efir.live_lesson_id())                               # урок идёт
+            win.efir.show_timer()
+            self.assertTrue(win.efir.timer_window.isVisible())
+        finally:
+            QMessageBox.exec = orig
+            win.efir.stop_live()
+            close(win)
+
+    def slides_win(self, port):
+        from test_v11 import slide_png
+        t = Template("С", [stage("А", 10), Block(BLOCK_IMAGE, slide_png(1), slide=1, id="s1"),
+                           Block(BLOCK_IMAGE, slide_png(2), slide=2, id="s2"), Block(BLOCK_IMAGE, slide_png(3), slide=3, id="s3")],
+                     id="S")
+        win = window([t], port)
+        win.printer.set_focus("S")
+        win.efir.clients = 1                                                       # вкладка учеников «на связи»
+        return win
+
+    def test_clicker_resumes_last_slide(self):
+        """После «фон» / перерыва кликер продолжает с того же слайда (как B в PowerPoint), а не с первого."""
+        win = self.slides_win(18922)
+        try:
+            ef = win.efir
+            win.lesson.command({"cmd": "slide", "block": "s2"})
+            self.assertEqual((ef.mode, (ef.slide or {}).get("bid")), ("slide", "s2"))
+            win.lesson._screen_key("b")                                            # B — фон
+            self.assertEqual(ef.mode, "idle")
+            win.lesson._screen_key("b")                                            # B ещё раз — тот же слайд
+            self.assertEqual((ef.mode, ef.slide.get("bid")), ("slide", "s2"))
+            win.lesson.command({"cmd": "break", "stage": "", "minutes": 5})
+            win.lesson._screen_key("ArrowRight")                                    # после перерыва — с того же слайда
+            self.assertEqual(ef.slide.get("bid"), "s2")
+            win.lesson._screen_key("ArrowRight")
+            self.assertEqual(ef.slide.get("bid"), "s3")
+        finally:
+            win.efir.show_background()
+            close(win)
+
+    def test_break_controls_copy_url_and_restore_anchor(self):
+        from datetime import timedelta
+        from PySide6.QtGui import QGuiApplication
+        win = self.slides_win(18923)
+        try:
+            ef = win.efir
+            win.lesson.command({"cmd": "break", "stage": "", "minutes": 5})
+            ends = ef.brk_ends
+            win.lesson.command({"cmd": "break_adjust", "seconds": 300})
+            self.assertAlmostEqual(ef.brk_ends - ends, 300, delta=1)
+            win.lesson.command({"cmd": "break_pause"})
+            self.assertIsNotNone(ef.brk_left_paused)
+            win.lesson.command({"cmd": "break_restart"})
+            self.assertIsNone(ef.brk_left_paused)
+            ef.show_background()
+            win.lesson.command({"cmd": "copy_url"})
+            self.assertEqual(QGuiApplication.clipboard().text(), ef.server.url)
+            ef.launch_lesson(win.store.get("S"), start="")
+            live = ef.store.live
+            old = live.anchor - timedelta(minutes=3)
+            ef.store.set_live(live.webinar_id, old)
+            win.lesson.command({"cmd": "shift_now"})
+            self.assertNotEqual(ef.store.live.anchor, old)
+            win.lesson.command({"cmd": "restore_anchor", "ms": int(old.timestamp() * 1000)})
+            self.assertEqual(ef.store.live.anchor, old)                              # «Вернуть» после сдвига
+        finally:
+            win.efir.stop_live()
+            close(win)
+
+    def test_lesson_tab_says_why_builtin_ai_is_off(self):
+        """«Составить встроенной нейросетью» недоступна — рядом видно почему и ссылка «Подключить…»."""
+        from autoprint.ui.import_dialog import TAB_LESSON, ImportDialog
+        asked = []
+        d = ImportDialog(None, storage.Settings(), tab=TAB_LESSON, open_ai_settings=lambda: asked.append(1))
+        try:
+            pg = d.lesson_page
+            self.assertFalse(pg.ask_btn.isEnabled())
+            self.assertIn("Подключить", pg.ai_info.text())
+            pg.ai_info.linkActivated.emit("ai")
+            self.assertEqual(asked, [1])
+        finally:
+            d.close()
+            d.deleteLater()
+
+    def test_notice_reaches_lesson_page(self):
+        """Сообщения программы — и на экране урока (окно программы скрыто, трей пропадает за 3 с)."""
+        win = self.slides_win(18924)
+        try:
+            win._notify("Проверка: курсор в Jupyter", warn=True)
+            win.lesson._last = None
+            win.lesson.publish()
+            n = win.efir.server._states["lesson"]["notice"]
+            self.assertEqual((n["text"], n["warn"]), ("Проверка: курсор в Jupyter", True))
+            seq = n["seq"]
+            win._notify("Второе")
+            win.lesson.publish()
+            self.assertEqual(win.efir.server._states["lesson"]["notice"]["seq"], seq + 1)
+            win.efir.ensure_server()
+            win.efir.unlocked = True
+            self.assertEqual(win.efir.tab_status()[0], "Вкладка экрана учеников на связи")
+        finally:
+            close(win)
+
+
 if __name__ == "__main__":
     unittest.main()

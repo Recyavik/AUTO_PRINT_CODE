@@ -129,6 +129,8 @@ class LessonController(QObject):
         self.fetch = web_images.fetch_images     # картинки по ссылкам из ответа нейросети (тесты подменяют)
         self.edits = 0           # сколько правок со страницы применено — страница знает, какие уже в состоянии
         self._plan = None          # (урок, плановое начало) идущего урока — для «конец 19:30 · +5 мин»
+        self._last_slide = ""      # последний слайд ученикам: после фона / перерыва кликер продолжает с него
+        self._notice = {"seq": 0, "text": "", "warn": False}   # сообщение программы — тостом на экране урока
         self._timeline: dict[str, tuple[int, int]] = {}   # этапы идущего урока: id → (с минуты, по минуту)
         self._timer = QTimer(self, singleShot=True, interval=300, timeout=self.publish)
         self._last = ""          # что ушло на страницу в последний раз: то же самое второй раз не шлём
@@ -180,7 +182,8 @@ class LessonController(QObject):
                         "tab_open": bool(self.efir.server.running and self.efir.clients > 0),
                         "slide_n": (self.efir.slide or {}).get("n", 0) if self.efir.mode == "slide" else 0,
                         "slide_bid": (self.efir.slide or {}).get("bid", "") if self.efir.mode == "slide" else "",
-                        "ex_index": self.efir.ex_index if self.efir.mode == "exercise" else -1},
+                        "ex_index": self.efir.ex_index if self.efir.mode == "exercise" else -1,
+                        "break_paused": self.efir.mode == "break" and self.efir.brk_left_paused is not None},
             armed=t.active_block if t is not None else "",
             media_url=self.efir.server.media_url, presets=[(lk.id, lk.title) for lk in self.efir.store.looks],
             preset=preset.id if preset is not None else "", dark=theme.dark, efir_mode=self.efir.mode,
@@ -193,6 +196,7 @@ class LessonController(QObject):
             plan=self.main.store.get(t.plan_id) if t is not None and t.plan_id else None,
             topics=self.main.store.topics_of(t.id) if t is not None and t.kind == KIND_PLAN else (),
             plans=self.main.store.plans())
+        state["notice"] = dict(self._notice)
         # во время зарядки экран эфира шлёт ход видео раз в секунду: странице суфлёра от этого ничего не
         # меняется — не перерисовывать её (иначе пересоздаются кнопки и теряются щелчки)
         key = json.dumps(state, ensure_ascii=False, sort_keys=True)
@@ -200,6 +204,11 @@ class LessonController(QObject):
             return
         self._last = key
         self.efir.server.publish(state, channel="lesson")
+
+    def notice(self, text: str, warn: bool = False) -> None:
+        """Сообщение программы — тостом и на экране урока (страница показывает каждое новое по seq)."""
+        self._notice = {"seq": self._notice["seq"] + 1, "text": str(text)[:600], "warn": bool(warn)}
+        self.schedule_publish()
 
     def _launch(self, t: Template, **kw) -> bool:
         """«Начать урок» со страницы: мини-таймер и экран учеников — только если так в «Моих настройках»."""
@@ -325,7 +334,11 @@ class LessonController(QObject):
         elif key in ("ArrowLeft", "PageUp"):
             self._slide_step(t, -1)
         elif key in ("b", "B", "и", "И", ".", "ю"):
-            self.efir.show_background()
+            # как B в PowerPoint: слайд → фон, ещё раз — тот же слайд
+            if self.efir.mode != "slide" and self._last_slide and t.find_block(self._last_slide) is not None:
+                self._show_slide(t, self._last_slide)
+            else:
+                self.efir.show_background()
 
     @staticmethod
     def _slides(t: Template) -> list:
@@ -345,6 +358,7 @@ class LessonController(QObject):
         nxt = slides[i + 1].text.strip() if 0 <= i < len(slides) - 1 else ""
         self._ensure_screen(t)
         self.efir.show_slide(b.text.strip(), b.slide or (i + 1 if i >= 0 else 0), b.id, nxt)
+        self._last_slide = b.id
         self.efir.ensure_tab()            # вкладки экрана учеников нет — открыть самим, а не говорить «не открыта»
 
     def _slide_step(self, t: Template, d: int) -> None:
@@ -353,6 +367,9 @@ class LessonController(QObject):
         if not slides:
             return
         cur = (self.efir.slide or {}).get("bid") if self.efir.mode == "slide" else ""
+        if not cur and any(b.id == self._last_slide for b in slides):
+            self._show_slide(t, self._last_slide)     # после фона / перерыва / зарядки — тот же слайд, не первый
+            return
         i = next((k for k, b in enumerate(slides) if b.id == cur), None)
         j = 0 if i is None else max(0, min(len(slides) - 1, i + d))
         if i is not None and j == i:
@@ -579,6 +596,16 @@ class LessonController(QObject):
                 self._find_image(t, str(d.get("block") or ""))
             elif cmd == "open_tab":
                 self.efir.open_tab()
+            elif cmd == "copy_url":
+                self.efir.copy_url()
+            elif cmd == "break_adjust":
+                self.efir.break_adjust(max(-3600, min(3600, int(d.get("seconds") or 0))))
+            elif cmd == "break_pause":
+                self.efir.break_pause()
+            elif cmd == "break_restart":
+                self.efir.break_restart()
+            elif cmd == "restore_anchor" and t is not None:
+                self._restore_anchor(t, d.get("ms"))
             elif cmd == "timer":
                 if self.efir.live_webinar() is None:
                     self.main._notify("Мини-таймер показывает урок по времени — сначала «Начать урок».")
@@ -654,6 +681,18 @@ class LessonController(QObject):
             return
         anchor = datetime.now().replace(microsecond=0) - timedelta(minutes=stages[index].start_min)
         self.efir.store.set_live(self.efir.store.live.webinar_id, anchor)
+        self.efir.live_changed.emit()
+
+    def _restore_anchor(self, t: Template, ms) -> None:
+        """«Вернуть» после «Начать этот этап сейчас» / «Следующий этап — сейчас»: прежнее начало идущего урока."""
+        live = self.efir.store.live
+        if live is None or self.efir.live_lesson_id() != t.id:
+            return
+        try:
+            anchor = datetime.fromtimestamp(int(ms) / 1000)
+        except (TypeError, ValueError, OverflowError, OSError):
+            return
+        self.efir.store.set_live(live.webinar_id, anchor)
         self.efir.live_changed.emit()
 
     def _arm(self, t: Template, bid: str) -> None:

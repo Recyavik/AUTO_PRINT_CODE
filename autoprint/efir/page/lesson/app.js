@@ -42,7 +42,8 @@ export function refresh() {
     $("title").dataset.v = t;
     $("titleText").textContent = t;
   }
-  document.title = (A.S && A.S.lesson ? t + " · Экран урока" : "Экран урока") + " — AutoPrintCode";
+  // в списке окон для демонстрации экрана видно: это — не ученикам (их окно — «Экран учеников — показывать…»)
+  document.title = (A.S && A.S.lesson ? t + " · Суфлёр (только для вас)" : "Суфлёр (только для вас)") + " — AutoPrintCode";
   saveChip();
 }
 window.addEventListener("suflor:refresh", refresh);
@@ -348,8 +349,9 @@ function moreMenu(anchor) {
   }
   items.push({ label: isPlan ? "Удалить план…" : "Удалить урок…", danger: true, on: () => {
     const n = (L.topics || []).length;
-    const q = isPlan ? "Удалить план «" + L.title + "»?" + (n ? " Уроки по нему (" + n + ") останутся с этими этапами, но без связи." : "")
-      : "Удалить урок «" + L.title + "»?";
+    const q = (A.S.live ? "Идёт урок — он завершится. " : "") +
+      (isPlan ? "Удалить план «" + L.title + "»?" + (n ? " Уроки по нему (" + n + ") останутся с этими этапами, но без связи." : "")
+        : "Удалить урок «" + L.title + "»?");
     if (confirm(q + " Копия прошлой базы — data/templates.json.bak")) cmd({ cmd: "delete_lesson" });
   } });
   menu(anchor, items, { right: true });
@@ -382,12 +384,30 @@ function liveMenu(anchor) {
   tm.addEventListener("blur", commit);
   row.appendChild(tm);
   box.appendChild(row);
+  const { next, elapsed } = computeCurrent();
+  const waiting = elapsed !== null && elapsed < 0;
   menu(anchor, [{ node: box },
-    { label: "Начать этот этап сейчас", hint: "текущий этап — с этой минуты, следующие сдвигаются", on: () => cmd({ cmd: "shift_now" }) },
+    waiting ? { label: "Начать урок сейчас", hint: "не ждать назначенного времени", on: () => shiftWithUndo({ cmd: "shift_now" }) }
+      : { label: "Начать этот этап сейчас", hint: "текущий этап — с этой минуты, следующие сдвигаются", on: () => shiftWithUndo({ cmd: "shift_now" }) },
+    ...(!waiting && next >= 0 ? [{ label: "Следующий этап — сейчас", hint: "закончили раньше — дальше по плану",
+      on: () => shiftWithUndo({ cmd: "start_at", index: next }) }] : []),
     { label: "Мини-таймер «Эфира»", hint: "окно поверх всех", on: () => cmd({ cmd: "timer" }) },
     { sep: true },
-    { label: "Завершить урок…", danger: true, on: () => { if (confirm("Завершить урок? Таймер «Эфира» закроется.")) cmd({ cmd: "stop" }); } },
+    { label: waiting ? "Отменить начало…" : "Завершить урок…", danger: true, on: endLesson },
   ], { focus: false });
+}
+
+// сдвиг времени урока — с «Вернуть» (прежнее начало урока)
+function shiftWithUndo(c) {
+  const prev = A.S && A.S.live && A.S.live.anchor;
+  cmd(c);
+  if (prev) toast("Время этапов сдвинуто на сейчас", "Вернуть", () => cmd({ cmd: "restore_anchor", ms: prev }), 10000);
+}
+
+function endLesson() {
+  const { elapsed } = computeCurrent();
+  const waiting = elapsed !== null && elapsed < 0;
+  if (confirm(waiting ? "Отменить назначенное начало урока? Таймер «Эфира» закроется." : "Завершить урок? Таймер «Эфира» закроется.")) cmd({ cmd: "stop" });
 }
 
 function startAtMenu(anchor) {
@@ -444,7 +464,8 @@ function screenText() {
   const ef = (A.S && A.S.efir) || {};
   if (ef.mode === "break") {
     const left = ef.break_ends ? Math.max(0, (ef.break_ends - now()) / 1000) : 0;
-    return ["У учеников: перерыв" + (left ? " · " + mmss(left) : ""), "warn"];
+    if (ef.break_ends && !left && !ef.break_paused) return ["Перерыв окончен ▾", "warn"];
+    return ["У учеников: перерыв" + (left ? " · " + mmss(left) : "") + (ef.break_paused ? " · пауза" : "") + " ▾", "warn"];
   }
   if (ef.mode === "exercise") return ["У учеников: зарядка", "warn"];
   if (ef.mode === "slide") return ["У учеников: слайд " + (ef.slide_n || "") + " ▾", "ok"];
@@ -468,7 +489,16 @@ function screenMenu(anchor) {
   const brk = stages.find((s) => s.item.kind === "break");
   const planned = brk && brk.minutes > 0 ? brk.minutes : 10;
   const items = [{ head: "Экран учеников" }];
+  if (ef.mode === "break") {                // идёт перерыв — им можно управлять отсюда, не только из мини-таймера
+    items.push({ label: "+5 мин", hint: "к перерыву", on: () => cmd({ cmd: "break_adjust", seconds: 300 }) });
+    items.push({ label: "+1 мин", on: () => cmd({ cmd: "break_adjust", seconds: 60 }) });
+    items.push({ label: ef.break_paused ? "Продолжить отсчёт" : "Пауза отсчёта", on: () => cmd({ cmd: "break_pause" }) });
+    items.push({ label: "Заново", hint: "отсчёт сначала", on: () => cmd({ cmd: "break_restart" }) });
+    items.push({ label: "Убрать — снова фон", on: () => cmd({ cmd: "background" }) });
+    items.push({ sep: true });
+  }
   if (!ef.tab_open) items.push({ label: "Открыть экран учеников", hint: "вкладка для демонстрации", on: () => cmd({ cmd: "open_tab" }) });
+  items.push({ label: "Скопировать адрес вкладки", hint: "вставьте в браузер, из которого показываете", on: () => cmd({ cmd: "copy_url" }) });
   items.push({ label: "Фон", checked: !ef.mode || ef.mode === "idle", on: () => cmd({ cmd: "background" }) });
   items.push({ label: `Перерыв по плану · ${planned} мин`, checked: ef.mode === "break", on: () => cmd({ cmd: "break", stage: currentBreakStage(), minutes: planned }) });
   for (const m of [5, 10, 15, 20].filter((x) => x !== planned)) items.push({ label: `Перерыв ${m} мин`, on: () => cmd({ cmd: "break", minutes: m }) });
@@ -616,13 +646,19 @@ export function renderTools() {
   const stages = stagesOf(A.items);
   const status = el("button", "chip");
   status.id = "status";
-  status.onclick = () => { if (A.S && A.S.live && A.mode === "lesson") liveMenu(status); };
+  status.onclick = () => { if (A.S && A.S.live) liveMenu(status); };     // и в «Подготовке» — урок же идёт
   t.appendChild(status);
-  if (A.S.live) {                          // главное действие идущего урока — на виду, а не в меню
+  if (A.S.live) {                          // главные действия идущего урока — на виду, а не в меню
+    const now_ = el("button", "primary nowbtn", "Начать сейчас");
+    now_.id = "nowbtn";
+    now_.title = "Урок назначен на позже — начать его прямо сейчас";
+    now_.hidden = true;                    // видна, пока ждём назначенного начала (tick)
+    now_.onclick = () => shiftWithUndo({ cmd: "shift_now" });
+    t.appendChild(now_);
     const end = el("button", "endbtn", "Завершить урок");
     end.id = "endbtn";
     end.title = "Завершить урок: таймер «Эфира» закроется, экран учеников вернётся к фону";
-    end.onclick = () => { if (confirm("Завершить урок? Таймер «Эфира» закроется.")) cmd({ cmd: "stop" }); };
+    end.onclick = endLesson;
     t.appendChild(end);
   }
   if (BUSY.includes(P.state)) {
@@ -641,9 +677,17 @@ export function renderTools() {
     seg.appendChild(b);
   }
   t.appendChild(seg);
-  if (A.mode === "lesson") renderScreenCtl();       // экран учеников — во второй строке, рядом с планом
+  // экран учеников — во второй строке, рядом с планом; идёт урок — и в «Подготовке» (правка опечатки на уроке)
+  document.body.classList.toggle("is-live", !!A.S.live);
+  if (A.mode === "lesson" || A.S.live) renderScreenCtl();
   if (A.mode === "lesson" && stages.length && !A.S.live && !stages.some((s) => s.minutes > 0)) {
-    t.appendChild(chip("Поставьте этапам минуты — тогда урок можно начать", "warn"));
+    const pm = el("button", "warn", "Поставить минуты");     // подсказка — сразу кнопкой: в «Подготовку», к минутам
+    pm.title = "Поставьте этапам минуты — тогда урок можно начать";
+    pm.onclick = () => {
+      setMode("prep", true);
+      requestAnimationFrame(() => { const f = document.querySelector("#plan input.pmin"); if (f) { f.focus(); f.select(); } });
+    };
+    t.appendChild(pm);
   }
   if (A.mode === "lesson" && stages.length && !A.S.live && stages.some((s) => s.minutes > 0)) {
     const go = el("button", "primary", "Начать урок");
@@ -916,7 +960,14 @@ function tick() {
   }
   const total = stages.reduce((a, s) => a + s.minutes, 0);
   const endBtn = $("endbtn");               // время урока вышло — «Завершить урок» выделена
-  if (endBtn) endBtn.classList.toggle("primary", elapsed !== null && elapsed >= total && total > 0);
+  const waiting = elapsed !== null && elapsed < 0;
+  if (endBtn) {
+    endBtn.classList.toggle("primary", elapsed !== null && elapsed >= total && total > 0);
+    const want = waiting ? "Отменить начало" : "Завершить урок";
+    if (endBtn.textContent !== want) endBtn.textContent = want;
+  }
+  const nowBtn = $("nowbtn");               // ждём «Начать в 18:00» — «Начать сейчас» на виду
+  if (nowBtn) nowBtn.hidden = !waiting;
   const pt = document.querySelector("#plan .ptotal");
   if (pt) pt.textContent = durText(total);
   if (!status) return;
@@ -966,6 +1017,7 @@ $("main").addEventListener("click", (e) => {
     else if (a === "clear-sel") { const b = actBtn.closest(".blk"); E.setFields(b.dataset.id, { sel: [] }); }
     else if (a === "place-insert") E.pickImage(actBtn.closest(".blk").dataset.id, true);       // место → картинка
     else if (a === "open-tab") cmd({ cmd: "open_tab" });
+    else if (a === "add-video") cmd({ cmd: "look_edit" });
     else if (a === "find-image") cmd({ cmd: "find_image", block: actBtn.closest(".blk").dataset.id });
     else if (a === "fill-slides") cmd({ cmd: "fill_slides" });
     return;
@@ -991,7 +1043,11 @@ $("main").addEventListener("click", (e) => {
     const it = A.byId.get(st.id.slice(3));
     if (!it) return;
     const fixedPlan = A.S.lesson && A.S.lesson.fixed;          // урок по плану: название этапа — из плана
-    if (t.closest(".stitle")) { if (!fixedPlan) E.editStageTitle(t.closest(".stitle"), it); }
+    if (t.closest(".stitle")) {
+      if (!fixedPlan) E.editStageTitle(t.closest(".stitle"), it);
+      else toast("Название и вид этапа — из плана «" + A.S.lesson.plan.title + "»", "Изменить в плане",
+        () => window.dispatchEvent(new Event("suflor:open-plan")));
+    }
     else if (t.closest(".mins") && !t.closest(".mins.fixed")) E.editStageMinutes(t.closest(".mins"), it);
     else if (t.closest(".kindbtn")) E.kindMenu(t.closest(".kindbtn"), it);
     else if (t.closest(".smore")) E.stageMenu(t.closest(".smore"), it);
@@ -1023,11 +1079,7 @@ $("plan").addEventListener("click", (e) => {
   const stages = stagesOf(A.items);
   const s = stages.find((x) => x.id === row.dataset.id);
   if (!s) return;
-  if (A.mode === "lesson" && A.S.live) {
-    if (confirm("Урок пойдёт с этапа «" + (s.item.title || "Этап") + "» — время сдвинется на сейчас. Так?")) cmd({ cmd: "start_at", index: s.i });
-    return;
-  }
-  goStage(s.id);
+  goStage(s.id);              // щелчок по этапу — только перейти к нему; сдвинуть время — «Урок идёт ▾» (с «Вернуть»)
 });
 
 function commitPlanMinutes(inp) {
@@ -1220,6 +1272,11 @@ function apply(state) {
   const prev = A.S;
   const prevId = prev && prev.lesson ? prev.lesson.id : null;
   A.S = state;
+  const n = state.notice;                   // сообщение программы — тостом здесь (окно программы обычно скрыто)
+  if (n && typeof n.seq === "number") {
+    if (A.noticeSeq !== undefined && n.seq > A.noticeSeq && n.text) toast(n.text, null, null, n.warn ? 10000 : 6000);
+    A.noticeSeq = n.seq;
+  }
   const id = state.lesson ? state.lesson.id : null;
   if (id !== prevId) {
     E.finishEditing();

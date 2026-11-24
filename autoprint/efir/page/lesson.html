@@ -427,7 +427,8 @@ input.inl-h1 { font: 800 20px/1.25 var(--ui); width: min(32em, 60vw); }
 
 /* ---------------- план строкой (в «Уроке») */
 #strip { flex: 1 1 100%; display: none; align-items: center; gap: 6px 10px; flex-wrap: wrap; min-width: 0; }
-body.mode-lesson #strip { display: flex; }
+body.mode-lesson #strip, body.mode-prep.is-live #strip { display: flex; }
+body.mode-prep #strip :is(.prev, .cur, .next, .end, .more) { display: none !important; }   /* в «Подготовке» план — слева */
 body.mode-lesson:not(.plan-strip) #strip :is(.prev, .cur, .next, .end, .more), #strip.noplan :is(.prev, .cur, .next, .end, .more) { display: none !important; }
 #strip .screen { margin-left: auto; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 #status { cursor: default; }

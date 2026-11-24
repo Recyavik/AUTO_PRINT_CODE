@@ -119,12 +119,12 @@ class EfirController(QObject):
     def tab_status(self) -> tuple[str, str]:
         """(текст, цвет-токен) состояния вкладки эфира."""
         if not self.server.running:
-            return "Экран эфира выключен", "faint"
+            return "Экран учеников выключен", "faint"
         if self.clients <= 0:
-            return "Вкладка эфира не открыта", "faint"
+            return "Вкладка экрана учеников не открыта", "faint"
         if self.blocked or not self.unlocked:
-            return "Щёлкните по вкладке эфира один раз — для звука", "accent"
-        return "Вкладка эфира на связи", "ok"
+            return "Щёлкните по вкладке экрана учеников один раз — для звука", "accent"
+        return "Вкладка экрана учеников на связи", "ok"
 
     def _on_report(self, d: dict) -> None:
         kind = d.get("type")

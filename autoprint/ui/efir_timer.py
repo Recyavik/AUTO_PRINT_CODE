@@ -775,6 +775,14 @@ QToolButton#pinBtn:checked {{ background: {t.css('accent_soft')}; }}
         self.close()
 
     def closeEvent(self, e) -> None:
+        w0 = self.ctl.live_webinar()
+        if not self._silent and w0 is not None and w0.lesson_id:
+            # идёт урок: × только прячет мини-таймер (урок, перерыв и экран учеников — как были); снова — с экрана
+            # урока: «Урок идёт ▾ → Мини-таймер»
+            e.ignore()
+            self.save_geometry()
+            self.hide()
+            return
         if not self._silent:
             w = self.ctl.live_webinar()
             box = QMessageBox(self)

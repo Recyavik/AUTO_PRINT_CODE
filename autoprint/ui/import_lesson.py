@@ -139,8 +139,9 @@ class LessonAIPage(QWidget):
         hl = QVBoxLayout(hint)
         hl.setContentsMargins(48, 0, 16, 12)
         hl.setSpacing(4)
-        self.ai_info = label("Вставьте промпт в ChatGPT (или другой чат), приложите презентацию или методичку — ответ "
-                             "вставьте ниже.", "rowSub", wrap=True)
+        self.ai_info = label("", "rowSub", wrap=True)
+        self.ai_info.setTextFormat(Qt.TextFormat.RichText)
+        self.ai_info.linkActivated.connect(lambda _href: self.open_ai_settings() if self.open_ai_settings else None)
         self.progress_lbl = label("", "progressText")
         self.progress_tail = label("", "progressTail")
         self.progress_tail.setTextFormat(Qt.TextFormat.PlainText)
@@ -219,6 +220,14 @@ class LessonAIPage(QWidget):
         self.ask_btn.setToolTip("" if ok else "Встроенная нейросеть не подключена: ⚙ Настройки → Нейросеть")
         self.ask_btn.setVisible(not busy)
         self.cancel_btn.setVisible(busy)
+        # почему «Составить встроенной нейросетью» недоступна — видно сразу, со ссылкой, а не только в подсказке
+        chat = "Вставьте промпт в ChatGPT (или другой чат), приложите презентацию или методичку — ответ вставьте ниже."
+        if not ok:
+            self.ai_info.setText(chat + "<br>Встроенная нейросеть не подключена. <a href='ai'>Подключить…</a>")
+        elif not has:
+            self.ai_info.setText(chat + "<br>Для встроенной нейросети вставьте материал или «Из файла…».")
+        else:
+            self.ai_info.setText(chat)
 
     # ------------------------------------------------------------ материал и слайды
     def _material_from_file(self) -> None:

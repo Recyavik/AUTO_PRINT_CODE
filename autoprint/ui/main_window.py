@@ -994,6 +994,9 @@ class MainWindow(FramelessWindow):
 
     def _notify(self, text: str, tray: bool = False, warn: bool = False, quiet: bool = False) -> None:
         self.toast.show_message(text, warn=warn)
+        lesson = getattr(self, "lesson", None)
+        if lesson is not None:               # и на экране урока: окно программы обычно скрыто, трей пропадает за 3 с
+            lesson.notice(text, warn)
         if not quiet and (tray or not self.isActiveWindow()):
             self.tray.showMessage(APP_NAME, text, self.tray_icons[logo.PAUSED if warn else logo.IDLE], 3000)
 

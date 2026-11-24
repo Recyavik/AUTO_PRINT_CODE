@@ -395,7 +395,11 @@ function efirRow(it) {
     b.dataset.stage = it.id;
     c.appendChild(b);
   } else {
-    c.appendChild(el("span", "efirnote", "В оформлении эфира нет видео зарядки — добавьте их в «Эфир → Оформления»."));
+    c.appendChild(el("span", "efirnote", "В оформлении экрана учеников нет видео зарядки."));
+    const av = el("button", "efirbtn addvideo", "Добавить видео зарядки…");
+    av.dataset.act = "add-video";
+    av.title = "Открыть оформление экрана учеников — там «Зарядки»: видео и их названия";
+    c.appendChild(av);
   }
   if (A.S && A.S.efir && A.S.efir.tab) c.appendChild(el("span", "efirnote", A.S.efir.tab));
   if (A.S && A.S.efir && !A.S.efir.tab_open) {      // вкладки экрана учеников нет — открыть отсюда же
@@ -584,7 +588,7 @@ export function renderPlan() {
     return;
   }
   plan.appendChild(el("p", "phint", A.mode === "prep" ? "Минуты правятся прямо здесь." :
-    (A.S.live ? "Щёлкните по этапу — урок пойдёт с него." : "Щёлкните по этапу — перейти к нему.")));
+    (A.S.live ? "Щёлкните по этапу — перейти к нему. Сдвинуть время — «Урок идёт ▾»." : "Щёлкните по этапу — перейти к нему.")));
 }
 
 export function stageOfBlock(bid) {

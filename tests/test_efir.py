@@ -241,9 +241,9 @@ class ServerTest(unittest.TestCase):
 
     def test_page_and_state(self):
         html = self.get("/").read().decode("utf-8")
-        self.assertIn("Экран эфира", html)
+        self.assertIn("Экран учеников", html)                     # 0.12.1: заголовок вкладки — кому она
         self.assertIn("/gallery", html)
-        self.assertIn("Экран эфира", self.get("/gallery?select=anim:cube").read().decode("utf-8"))
+        self.assertIn("Экран учеников", self.get("/gallery?select=anim:cube").read().decode("utf-8"))
         self.srv.publish({"mode": "idle", "bg": {"kind": "anim", "value": "cube"}})
         st = json.loads(self.get("/state").read())
         self.assertEqual(st["bg"]["value"], "cube")

@@ -60,11 +60,17 @@ export function newId() {
   return Array.from(a, (x) => x.toString(16).padStart(2, "0")).join("");
 }
 
+// команды, которые открывают окно программы: оно может оказаться под экраном урока — сказать, где его искать
+const OPENS_WINDOW = new Set(["export", "look_edit", "look_new", "fill_slides", "settings"]);
+
 export async function cmd(data) {
+  if (OPENS_WINDOW.has(data && data.cmd)) toast("Открываю окно AutoPrintCode — если его не видно, оно на панели задач");
   try {
     await fetch("/lesson/cmd", { method: "POST", headers: { "Content-Type": "application/json", "X-Suflor": "1" },
       body: JSON.stringify(data) });
-  } catch (e) { /* связь вернётся — состояние придёт само */ }
+  } catch (e) {                                // действие не дошло — сказать, а не молчать
+    toast("Нет связи с AutoPrintCode — действие не выполнено. Повторите через пару секунд.");
+  }
 }
 
 export function isTyping(t) {
