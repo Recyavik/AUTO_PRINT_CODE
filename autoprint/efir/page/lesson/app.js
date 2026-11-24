@@ -618,6 +618,13 @@ export function renderTools() {
   status.id = "status";
   status.onclick = () => { if (A.S && A.S.live && A.mode === "lesson") liveMenu(status); };
   t.appendChild(status);
+  if (A.S.live) {                          // главное действие идущего урока — на виду, а не в меню
+    const end = el("button", "endbtn", "Завершить урок");
+    end.id = "endbtn";
+    end.title = "Завершить урок: таймер «Эфира» закроется, экран учеников вернётся к фону";
+    end.onclick = () => { if (confirm("Завершить урок? Таймер «Эфира» закроется.")) cmd({ cmd: "stop" }); };
+    t.appendChild(end);
+  }
   if (BUSY.includes(P.state)) {
     const it = A.byId.get(P.block);
     const name = it ? (it.title || "Код") : "Код";
@@ -736,8 +743,7 @@ export function collapseStages(which) {
 
 // план строкой: ‹ прошлый · ● текущий 3:12 из 8 · следующий (8) › · конец 19:30 · План ▾
 function goStage(id) {
-  const st = $("st-" + id);
-  document.body.classList.remove("plan-open");
+  const st = $("st-" + id);                // план, открытый «План ▾», остаётся сбоку — он текст не закрывает
   if (!st) return;
   A.userOpen[id] = true;
   applyCollapse();
@@ -756,7 +762,11 @@ function stripEl() {
     s.addEventListener("click", (e) => {
       const b = e.target.closest("button");
       if (!b) return;
-      if (b.classList.contains("more")) { document.body.classList.toggle("plan-open"); return; }
+      if (b.classList.contains("more")) {
+        const on = document.body.classList.toggle("plan-open");
+        b.setAttribute("aria-pressed", on ? "true" : "false");
+        return;
+      }
       if (b.dataset.id) goStage(b.dataset.id);
     });
   }
@@ -905,6 +915,8 @@ function tick() {
     }
   }
   const total = stages.reduce((a, s) => a + s.minutes, 0);
+  const endBtn = $("endbtn");               // время урока вышло — «Завершить урок» выделена
+  if (endBtn) endBtn.classList.toggle("primary", elapsed !== null && elapsed >= total && total > 0);
   const pt = document.querySelector("#plan .ptotal");
   if (pt) pt.textContent = durText(total);
   if (!status) return;
@@ -953,6 +965,7 @@ $("main").addEventListener("click", (e) => {
     else if (a === "slide") cmd({ cmd: "slide", block: actBtn.closest(".blk").dataset.id });
     else if (a === "clear-sel") { const b = actBtn.closest(".blk"); E.setFields(b.dataset.id, { sel: [] }); }
     else if (a === "place-insert") E.pickImage(actBtn.closest(".blk").dataset.id, true);       // место → картинка
+    else if (a === "open-tab") cmd({ cmd: "open_tab" });
     else if (a === "find-image") cmd({ cmd: "find_image", block: actBtn.closest(".blk").dataset.id });
     else if (a === "fill-slides") cmd({ cmd: "fill_slides" });
     return;

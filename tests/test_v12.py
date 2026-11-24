@@ -1070,5 +1070,41 @@ class FinalReviewTest(unittest.TestCase):
             close(win)
 
 
+# ================================================================ 0.12.1: мелочи по отзыву учителя
+
+class TabAutoOpenTest(unittest.TestCase):
+    def test_break_exercise_slide_open_the_tab_once(self):
+        """Вкладка экрана учеников не открыта, а учитель включает перерыв / зарядку / слайд — программа сама её
+        открывает (один раз, не на каждое нажатие) и говорит, что её надо показать ученикам."""
+        from autoprint.efir.model import Exercise, Look
+        video = TMP / "tab.mp4"
+        video.write_bytes(b"\x00" * 16)
+        t = Template("У", [stage("А", 5, id="a"), stage("Зарядка", 3, id="z", stage_kind="exercise")], id="U")
+        win = window([t], 18920)
+        opened, said = [], []
+        win.efir.open_tab = lambda: opened.append(1)
+        win.efir.message.connect(lambda text, warn: said.append(text))
+        try:
+            t = win.store.get("U")
+            look = Look(title="З", exercises=[Exercise("Глаза", str(video))])
+            win.efir.save_look(look)
+            t.look = look.id
+            win.printer.set_focus("U")
+            win.efir.clients = 0
+            win.lesson.command({"cmd": "break", "stage": "", "minutes": 5})
+            self.assertEqual(len(opened), 1)
+            self.assertTrue(any("открыл" in s.lower() and "покажите" in s.lower() for s in said), said)
+            win.lesson.command({"cmd": "exercise", "stage": "z"})
+            self.assertEqual(len(opened), 1)                                          # только что открыли — не снова
+            win.efir.clients = 1
+            win.efir._tab_opened_at = 0
+            win.lesson.command({"cmd": "break", "stage": "", "minutes": 5})
+            self.assertEqual(len(opened), 1)                                          # вкладка на связи — не открываем
+            self.assertFalse(any("никто не увидит" in s for s in said), said)
+        finally:
+            win.efir.show_background()
+            close(win)
+
+
 if __name__ == "__main__":
     unittest.main()

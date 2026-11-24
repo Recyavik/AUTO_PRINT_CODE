@@ -129,7 +129,6 @@ class LessonController(QObject):
         self.fetch = web_images.fetch_images     # картинки по ссылкам из ответа нейросети (тесты подменяют)
         self.edits = 0           # сколько правок со страницы применено — страница знает, какие уже в состоянии
         self._plan = None          # (урок, плановое начало) идущего урока — для «конец 19:30 · +5 мин»
-        self._tab_warned = False   # «вкладка экрана учеников не открыта» уже сказали
         self._timeline: dict[str, tuple[int, int]] = {}   # этапы идущего урока: id → (с минуты, по минуту)
         self._timer = QTimer(self, singleShot=True, interval=300, timeout=self.publish)
         self._last = ""          # что ушло на страницу в последний раз: то же самое второй раз не шлём
@@ -346,9 +345,7 @@ class LessonController(QObject):
         nxt = slides[i + 1].text.strip() if 0 <= i < len(slides) - 1 else ""
         self._ensure_screen(t)
         self.efir.show_slide(b.text.strip(), b.slide or (i + 1 if i >= 0 else 0), b.id, nxt)
-        if self.efir.clients <= 0 and not self._tab_warned:          # напомнить один раз, не на каждом слайде
-            self._tab_warned = True
-            self.main._notify("Слайд на экране учеников — но вкладка экрана учеников не открыта (У учеников ▾ → Открыть).")
+        self.efir.ensure_tab()            # вкладки экрана учеников нет — открыть самим, а не говорить «не открыта»
 
     def _slide_step(self, t: Template, d: int) -> None:
         """◀ ▶ кликера: следующий / предыдущий слайд; ничего не показано — первый."""

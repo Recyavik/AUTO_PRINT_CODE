@@ -669,6 +669,8 @@ class PageV11Test(Page):
             self.assertTrue(self.edge.wait("!!document.querySelector('.menu')"))
             self.js("[...document.querySelectorAll('.menu .mi')].find(b => b.textContent.includes('Перерыв по плану')).click()")
             self.assertTrue(self.wait_py(lambda: ef.mode == "break"))
+            self.assertEqual(opened, [1])          # 0.12.1: вкладки не было — перерыв сам её открыл
+            opened.clear()
             self.assertTrue(self.edge.wait(f"{chip}.textContent.includes('перерыв')"))
             self.js(btn.format("Вернуть фон") + ".click()")
             self.assertTrue(self.wait_py(lambda: ef.mode == "idle"))
@@ -1136,6 +1138,54 @@ class PageV12Test(Page):
             self.assertEqual(self.js("getComputedStyle(document.querySelector('[data-id=ph]')).display"), "none")
         finally:
             self.edge.call("Emulation.setEmulatedMedia", {"media": ""})
+
+    # ---------------------------------------------------------------- 0.12.1: мелочи по отзыву учителя
+    def test_efir_row_open_tab_button(self):
+        """«Вкладка не открыта» — рядом кнопка «Открыть вкладку», а не совет, куда идти."""
+        opened = []
+        orig = self.win.efir.open_tab
+        self.win.efir.open_tab = lambda: opened.append(1)
+        try:
+            self.open_lesson("F")
+            self.assertTrue(self.edge.wait("!!document.querySelector('#st-fz .efirbtn.opentab')"))
+            self.assertEqual(self.js("document.querySelector('#st-fz .efirbtn.opentab').textContent"), "Открыть вкладку")
+            self.js("document.querySelector('#st-fz .efirbtn.opentab').click()")
+            self.assertTrue(self.wait_py(lambda: len(opened) == 1))
+        finally:
+            self.win.efir.open_tab = orig
+
+    def test_plan_button_pushes_text(self):
+        """«План ▾» в «Уроке» — сбоку, текст сдвигается, а не закрывается планом."""
+        s = self.win.settings
+        s.page_plan = "strip"
+        self.republish()
+        self.mode("lesson")
+        self.js("document.querySelector('#strip .more').click()")
+        self.assertTrue(self.edge.wait("document.body.classList.contains('plan-open')"))
+        self.assertNotEqual(self.js("getComputedStyle(document.getElementById('plan')).position"), "fixed")
+        self.assertTrue(self.js("""(() => { const p = document.getElementById('plan').getBoundingClientRect();
+            const m = document.getElementById('main').getBoundingClientRect(); return p.width > 0 && p.right <= m.left + 1; })()"""))
+        self.js("document.querySelector('#plan .prow .n').click()")                     # к этапу — план остаётся
+        pump(200)
+        self.assertTrue(self.js("document.body.classList.contains('plan-open')"))
+        self.js("document.querySelector('#strip .more').click()")
+        self.assertTrue(self.edge.wait("!document.body.classList.contains('plan-open')"))
+
+    def test_end_lesson_button_visible(self):
+        """Идёт урок — «Завершить урок» видна сразу (не в меню), время вышло — выделена."""
+        self.mode("lesson")
+        self.go_live(1)
+        try:
+            self.assertTrue(self.edge.wait("document.getElementById('endbtn') && document.getElementById('endbtn').textContent === 'Завершить урок'"))
+            self.assertFalse(self.js("document.getElementById('endbtn').classList.contains('primary')"))
+        finally:
+            self.stop_live()
+        self.go_live(70)                                                               # урок на 65 минут — время вышло
+        self.assertTrue(self.edge.wait("document.getElementById('endbtn') && document.getElementById('endbtn').classList.contains('primary')"))
+        self.js("window.confirm = () => true")
+        self.js("document.getElementById('endbtn').click()")
+        self.assertTrue(self.wait_py(lambda: not self.win.efir.live_lesson_id()))
+        self.republish()
 
     def test_start_at_button_label(self):
         self.mode("lesson")

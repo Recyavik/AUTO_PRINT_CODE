@@ -27,6 +27,7 @@ log = logging.getLogger(__name__)
 MODE_IDLE, MODE_EXERCISE, MODE_BREAK, MODE_SLIDE = "idle", "exercise", "break", "slide"
 KEEP_LIVE_AFTER_END = timedelta(minutes=30)    # после конца повестки эфир ещё восстанавливается при запуске
 BREAK_HOLD_S = 60          # «когда время вышло» на экране — столько секунд, потом экран сам возвращается к фону
+TAB_REOPEN_S = 30          # сами открыли вкладку экрана учеников — столько секунд ждём, пока она подключится
 
 
 class EfirController(QObject):
@@ -67,6 +68,7 @@ class EfirController(QObject):
         self.brk_total = 600.0
         # вкладка
         self.clients = 0
+        self._tab_opened_at = -1e9       # когда сами открыли вкладку экрана учеников (ensure_tab)
         self.unlocked = False
         self.blocked = False
         self.timer_window = None
@@ -93,6 +95,17 @@ class EfirController(QObject):
     def open_tab(self) -> None:
         if self.ensure_server():
             QDesktopServices.openUrl(QUrl(self.server.url))
+
+    def ensure_tab(self) -> bool:
+        """Перерыв, зарядка или слайд ученикам, а вкладки экрана учеников нигде нет — открыть её самим (не говорить
+        «не открыта»). Только что открыли (вкладка ещё подключается) — второй раз не открываем. → открыли сейчас."""
+        if self.clients > 0 or time.monotonic() - self._tab_opened_at < TAB_REOPEN_S:
+            return False
+        self._tab_opened_at = time.monotonic()
+        self.open_tab()
+        self.message.emit("Вкладка экрана учеников не была открыта — открыл её в браузере. Покажите её ученикам "
+                          "(демонстрация этой вкладки).", False)
+        return True
 
     def copy_url(self) -> None:
         if self.ensure_server():
@@ -454,9 +467,7 @@ class EfirController(QObject):
         self.mode = MODE_EXERCISE
         self._forget_break()
         self.publish()
-        if self.clients <= 0:
-            self.message.emit("Вкладка эфира не открыта — зарядку никто не увидит. Откройте её (⋯ → Открыть вкладку)",
-                              True)
+        self.ensure_tab()
 
     def exercise_pause(self) -> None:
         if self.mode == MODE_EXERCISE:
@@ -496,8 +507,7 @@ class EfirController(QObject):
             self.slide = None
             self.store.set_break({"ends_at": self.brk_ends, "total": self.brk_total, "seq": self.brk_seq})
         self.publish()
-        if self.clients <= 0:
-            self.message.emit("Вкладка эфира не открыта — заставку перерыва никто не увидит", True)
+        self.ensure_tab()
 
     def break_left(self) -> float:
         if self.brk_left_paused is not None:

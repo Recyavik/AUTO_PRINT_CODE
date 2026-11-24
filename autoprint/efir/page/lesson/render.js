@@ -373,7 +373,7 @@ export function exerciseList() {
 function efirRow(it) {
   const ex = exerciseList();
   const video = ex.length ? (ex.find((t) => t && videoKey(t) === videoKey(it.exercise)) || ex[0]) : "";
-  const k = "efir:" + it.id + ":" + it.kind + ":" + ex.join("|") + ":" + (it.exercise || "") + ":" + it.minutes + ":" + ((A.S && A.S.efir && A.S.efir.tab) || "");
+  const k = "efir:" + it.id + ":" + it.kind + ":" + ex.join("|") + ":" + (it.exercise || "") + ":" + it.minutes + ":" + ((A.S && A.S.efir && A.S.efir.tab) || "") + ":" + (A.S && A.S.efir && A.S.efir.tab_open ? 1 : 0);
   let n = nodes.get("efir:" + it.id);
   if (n && n.dataset.k === k) return n;
   const fresh = el("div", "blk efir");
@@ -398,6 +398,12 @@ function efirRow(it) {
     c.appendChild(el("span", "efirnote", "В оформлении эфира нет видео зарядки — добавьте их в «Эфир → Оформления»."));
   }
   if (A.S && A.S.efir && A.S.efir.tab) c.appendChild(el("span", "efirnote", A.S.efir.tab));
+  if (A.S && A.S.efir && !A.S.efir.tab_open) {      // вкладки экрана учеников нет — открыть отсюда же
+    const ot = el("button", "efirbtn opentab", "Открыть вкладку");
+    ot.dataset.act = "open-tab";
+    ot.title = "Открыть вкладку экрана учеников в браузере — её показывают ученикам (демонстрация вкладки)";
+    c.appendChild(ot);
+  }
   row.appendChild(c);
   fresh.appendChild(row);
   if (n) n.replaceWith(fresh);
