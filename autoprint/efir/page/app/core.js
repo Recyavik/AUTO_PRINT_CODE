@@ -87,8 +87,7 @@ export async function call(cmd) {
 
 // ---------------------------------------------------------------- переходы
 export function go(hash) {
-  if (location.hash !== hash) location.hash = hash;
-  else emit("route", route());
+  if (location.hash !== hash) location.hash = hash;      // тот же адрес — экран уже открыт, повторять нечего
 }
 
 export function route() {

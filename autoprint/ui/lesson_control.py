@@ -24,7 +24,7 @@ from .theme import theme
 log = logging.getLogger(__name__)
 
 # «Мои настройки» экрана урока: поле Settings → допустимые значения
-PREFS = {"page_zoom": "zoom", "page_plan": ("strip", "side", "hidden"), "page_past": ("dim", "collapse"),
+PREFS = {"page_zoom": "zoom", "page_plan": ("side", "top", "hidden", "strip"), "page_past": ("dim", "collapse"),
          "page_stage_timer": "bool", "start_timer": "bool", "start_screen": "bool"}
 ANSWER_FETCH_LIMIT = 90     # «Вставить ответ нейросети»: фото качаются не дольше, потом урок добавляется со ссылками
 

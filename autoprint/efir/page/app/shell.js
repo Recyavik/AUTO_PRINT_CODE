@@ -24,8 +24,8 @@ export function mountShell(root) {
   const close = iconBtn("close", "Закрыть", () => send({ cmd: "window", op: "close" }), { kind: "ghost", cls: "wb close" });
   close.id = "closeBtn";
   const logo = h("a", { class: "tb-logo", href: "#/lessons", "aria-label": "Уроки" }, h("img", { src: "/favicon.svg", alt: "" }));
-  const bar = h("header", { id: "titlebar", "data-drag": "" }, logo, crumbsEl, h("div", { class: "tb-fill", "data-drag": "" }),
-    extraEl, h("div", { class: "tb-tools" }, zoomBtn, pin, compact), h("span", { class: "tb-sep" }), h("div", { class: "tb-win" }, min, max, close));
+  const bar = h("header", { id: "titlebar", "data-drag": "" }, logo, crumbsEl, extraEl, h("div", { class: "tb-fill", "data-drag": "" }),
+    h("div", { class: "tb-tools" }, zoomBtn, pin, compact), h("span", { class: "tb-sep" }), h("div", { class: "tb-win" }, min, max, close));
   bar.addEventListener("dblclick", (e) => { if (!e.target.closest("button, a, input")) send({ cmd: "window", op: "toggle_max" }); });
 
   const nav = (href, ic, label, extra) => h("a", { class: "nav", href }, icon(ic), h("span", { class: "nl" }, label), extra);

@@ -60,11 +60,7 @@ export function newId() {
   return Array.from(a, (x) => x.toString(16).padStart(2, "0")).join("");
 }
 
-// команды, которые открывают окно программы: оно может оказаться под экраном урока — сказать, где его искать
-const OPENS_WINDOW = new Set(["export", "look_edit", "look_new", "fill_slides", "settings"]);   // export — и .autoprint
-
 export async function cmd(data) {
-  if (OPENS_WINDOW.has(data && data.cmd)) toast("Открываю окно AutoPrintCode — если его не видно, оно на панели задач");
   try {
     await fetch("/lesson/cmd", { method: "POST", headers: { "Content-Type": "application/json", "X-Suflor": "1" },
       body: JSON.stringify(data) });
@@ -81,6 +77,10 @@ export function isTyping(t) {
 // всплывающее сообщение внизу (с кнопкой действия)
 let toastTimer = 0;
 export function toast(text, action, onAction, ms = 6000) {
+  if (window.appUI) {                          // окно программы: свои тосты
+    window.appUI.toast(text, { action, onAction, ms });
+    return;
+  }
   const t = $("toast");
   t.innerHTML = "";
   t.appendChild(el("span", "", text));

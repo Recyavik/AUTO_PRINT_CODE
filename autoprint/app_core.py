@@ -331,7 +331,7 @@ class App(QObject):
         self.printer.set_focus(tid)
         self.settings.page_lesson = tid
         self._settings_timer.start()
-        self.lesson.schedule_publish()
+        self.lesson.publish()              # экран урока получает новый урок сразу, а не через 300 мс
         self.show_view(f"#/lesson/{tid}")
         return True
 
