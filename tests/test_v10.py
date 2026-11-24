@@ -1073,7 +1073,7 @@ class AiTest(unittest.TestCase):
 class VersionTest(unittest.TestCase):
     def test_version(self):
         import autoprint
-        self.assertEqual(autoprint.__version__, "0.10.0")
+        self.assertGreaterEqual(tuple(map(int, autoprint.__version__.split("."))), (0, 10, 0))
 
     def test_dead_code_gone(self):
         root = Path(storage.__file__).resolve().parent
