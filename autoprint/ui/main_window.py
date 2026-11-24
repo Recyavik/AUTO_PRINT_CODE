@@ -21,7 +21,7 @@ from . import icons, logo
 from .efir_control import EfirController
 from .frameless import FramelessWindow
 from .lesson_control import LessonController
-from .library import ROLE_ID, ROLE_LIVE, ROLE_META, LibraryPanel, lesson_meta
+from .library import ROLE_HEADER, ROLE_ID, ROLE_LIVE, ROLE_META, ROLE_PLAN, LibraryPanel, lesson_meta
 from .print_control import BUSY, MODE_BLOCK, MODE_LINES, MODE_STEPS, PrintController, app_name  # noqa: F401
 from .settings_window import HOTKEYS, SettingsWindow
 from .theme import STATE_TOKENS, theme
@@ -234,8 +234,8 @@ class MainWindow(FramelessWindow):
         self.library.search.textChanged.connect(self._filter_library)
         self.library.open_requested.connect(self._open_selected)
         self.library.new_requested.connect(self.new_template)
-        self.library.new_structure.connect(lambda k: self.new_from_presentation() if k == "presentation"
-                                           else self.new_template(k))
+        self.library.new_structure.connect(self._new_from_menu)
+        self.library.plans_provider = lambda: [(p.id, p.title) for p in self.store.plans()]
         self.library.import_requested.connect(lambda: self.import_files())
         self.library.ai_requested.connect(lambda: self.import_files("ai"))
         self.library.update_clicked.connect(self.open_update_dialog)
@@ -435,23 +435,54 @@ class MainWindow(FramelessWindow):
         QTimer.singleShot(1100, lambda: setattr(player, "enabled", was))
 
     # ================================================================ список уроков
+    def _new_from_menu(self, key: str) -> None:
+        """«Новый урок ▾»: по плану, новый план, из презентации, по шаблону структуры."""
+        if key == "presentation":
+            self.new_from_presentation()
+        elif key.startswith("plan:"):
+            self.new_topic(key[5:])
+        elif key.startswith("newplan:"):
+            self.new_plan(key[8:])
+        else:
+            self.new_template(key)
+
+    def _meta(self, t: Template) -> str:
+        if t.kind == KIND_PLAN:
+            return lesson_meta(t, topics=len(self.store.topics_of(t.id)))
+        p = self.store.get(t.plan_id) if t.plan_id else None
+        return lesson_meta(t, plan_title=p.title if p is not None else "")
+
     def _fill_library(self, select_id: str = "") -> None:
+        """Список уроков. Есть планы — две группы: «Планы уроков» сверху, «Уроки» ниже (заголовки не выбираются)."""
         lib = self.library.list
         live = self.efir.live_lesson_id()
         lib.blockSignals(True)
         lib.clear()
-        for t in self.store.templates:
-            it = QListWidgetItem(t.title)
-            it.setToolTip(t.title)
-            it.setData(ROLE_ID, t.id)
-            it.setData(ROLE_META, lesson_meta(t))
-            it.setData(ROLE_LIVE, bool(live) and t.id == live)
-            it.setFlags(it.flags() | Qt.ItemFlag.ItemIsEditable)
-            lib.addItem(it)
-            if t.id == select_id:
-                lib.setCurrentItem(it)
-        if lib.currentRow() < 0 and lib.count():
-            lib.setCurrentRow(0)
+        plans_ = self.store.plans()
+        lessons = [t for t in self.store.templates if t.kind != KIND_PLAN]
+        groups = [("Планы уроков", plans_), ("Уроки", lessons)] if plans_ else [("", lessons)]
+        self.library.group_label.setHidden(bool(plans_))
+        for head, items in groups:
+            if head:
+                h = QListWidgetItem(head)
+                h.setData(ROLE_HEADER, True)
+                h.setFlags(Qt.ItemFlag.NoItemFlags)
+                lib.addItem(h)
+            for t in items:
+                it = QListWidgetItem(t.title)
+                it.setToolTip(t.title)
+                it.setData(ROLE_ID, t.id)
+                it.setData(ROLE_META, self._meta(t))
+                it.setData(ROLE_LIVE, bool(live) and t.id == live)
+                it.setData(ROLE_PLAN, t.kind == KIND_PLAN)
+                it.setFlags(it.flags() | Qt.ItemFlag.ItemIsEditable)
+                lib.addItem(it)
+                if t.id == select_id:
+                    lib.setCurrentItem(it)
+        if lib.currentRow() < 0 or lib.currentItem() is None or lib.currentItem().data(ROLE_HEADER):
+            first = next((i for i in range(lib.count()) if not lib.item(i).data(ROLE_HEADER)), -1)
+            if first >= 0:
+                lib.setCurrentRow(first)
         lib.blockSignals(False)
         self._filter_library(self.library.search.text())
 
@@ -471,7 +502,11 @@ class MainWindow(FramelessWindow):
             if it.data(ROLE_ID) == t.id:
                 it.setText(t.title)
                 it.setToolTip(t.title)
-                it.setData(ROLE_META, lesson_meta(t))
+                it.setData(ROLE_META, self._meta(t))
+            elif t.kind == KIND_PLAN and it.data(ROLE_ID):      # переименовали план — подпись «план «X»» у уроков
+                x = self.store.get(it.data(ROLE_ID))
+                if x is not None and x.plan_id == t.id:
+                    it.setData(ROLE_META, self._meta(x))
         lib.blockSignals(False)
 
     def _refresh_live_mark(self) -> None:
@@ -486,11 +521,21 @@ class MainWindow(FramelessWindow):
     def _filter_library(self, text: str) -> None:
         q = text.strip().lower()
         lib = self.library.list
+        header = None
+        shown = 0
         for i in range(lib.count()):
             it = lib.item(i)
+            if it.data(ROLE_HEADER):                 # заголовок группы — виден, если под ним что-то видно
+                if header is not None:
+                    header.setHidden(shown == 0)
+                header, shown = it, 0
+                continue
             t = self.store.get(it.data(ROLE_ID))
             hay = t.title.lower() if t else ""
             it.setHidden(bool(q) and q not in hay)
+            shown += 0 if it.isHidden() else 1
+        if header is not None:
+            header.setHidden(shown == 0)
 
     def _selected(self) -> Template | None:
         it = self.library.list.currentItem()
@@ -506,18 +551,43 @@ class MainWindow(FramelessWindow):
     def _library_menu(self, pos) -> None:
         lib = self.library.list
         it = lib.itemAt(pos)
-        if not it:
+        t = self.store.get(it.data(ROLE_ID)) if it is not None and it.data(ROLE_ID) else None
+        if t is None:
             return
-        t = self.store.get(it.data(ROLE_ID))
+        self._library_menu_for(t, it).exec(lib.viewport().mapToGlobal(pos))
+
+    def _library_menu_for(self, t: Template, it: QListWidgetItem | None = None) -> QMenu:
+        """Меню урока или плана в списке (правый щелчок)."""
+        from ..storage import BLOCK_STAGE
+        lib = self.library.list
+        if it is None:
+            it = next((lib.item(i) for i in range(lib.count()) if lib.item(i).data(ROLE_ID) == t.id), None)
         m = QMenu(self)
-        m.addAction(icons.icon("presentation"), "Открыть", lambda: self.open_lesson(t.id))
-        m.addAction(icons.icon("pencil"), "Переименовать", lambda: lib.editItem(it))
+        if t.kind == KIND_PLAN:
+            m.addAction(icons.icon("plus"), "Новый урок по этому плану", lambda: self.new_topic(t.id))
+            m.addAction(icons.icon("presentation"), "Открыть план", lambda: self.open_lesson(t.id))
+        else:
+            m.addAction(icons.icon("presentation"), "Открыть", lambda: self.open_lesson(t.id))
+        if it is not None:
+            m.addAction(icons.icon("pencil"), "Переименовать", lambda: lib.editItem(it))
         m.addAction(icons.icon("copy"), "Дублировать", lambda: self._duplicate(t))
         self._export_menu(m.addMenu(icons.icon("export"), "Экспорт"), t)
-        m.addAction(icons.icon("layers"), "Разложить по этапам (⏱ этапы, 🗣 реплики)", lambda: self.recognize_lesson(t))
+        if t.kind != KIND_PLAN:
+            m.addAction(icons.icon("layers"), "Разложить по этапам (⏱ этапы, 🗣 реплики)", lambda: self.recognize_lesson(t))
+            m.addSeparator()
+            if t.plan_id:
+                m.addAction("Отвязать от плана", lambda: self.unlink_plan(t))
+            else:
+                if any(b.type == BLOCK_STAGE for b in t.blocks):
+                    m.addAction(icons.icon("layers"), "Сделать из этапов план", lambda: self.make_plan(t))
+                plans_ = self.store.plans()
+                if plans_:
+                    sub = m.addMenu("Привязать к плану")
+                    for p in plans_:
+                        sub.addAction(p.title, lambda pid=p.id: self.link_plan(t, pid))
         m.addSeparator()
         m.addAction(icons.icon("trash"), "Удалить…", lambda: self._delete_template(t))
-        m.exec(lib.viewport().mapToGlobal(pos))
+        return m
 
     def _on_library_renamed(self, it: QListWidgetItem) -> None:
         t = self.store.get(it.data(ROLE_ID))

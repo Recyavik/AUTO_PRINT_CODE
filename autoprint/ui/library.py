@@ -14,28 +14,47 @@ from .widgets import accent_button, button, label
 ROLE_ID = Qt.ItemDataRole.UserRole
 ROLE_META = Qt.ItemDataRole.UserRole + 1      # подпись под названием: длительность, этапы, коды
 ROLE_LIVE = Qt.ItemDataRole.UserRole + 2      # урок идёт — красная точка
+ROLE_HEADER = Qt.ItemDataRole.UserRole + 3    # заголовок группы: «Планы уроков» / «Уроки»
+ROLE_PLAN = Qt.ItemDataRole.UserRole + 4      # строка плана — свой значок
 
 
-def lesson_meta(t) -> str:
-    """«1 ч 30 мин · 12 этапов · 5 кодов» — что в уроке, одной строкой."""
+def lesson_meta(t, plan_title: str = "", topics: int = 0) -> str:
+    """«1 ч 30 мин · 12 этапов · 5 кодов» — что в уроке, одной строкой. План: «План · 1 ч 30 мин · 9 этапов ·
+    уроков: 3»; урок по плану — в конце «план «X»»."""
     from ..efir.model import fmt_minutes
-    from ..storage import BLOCK_STAGE, is_printable
+    from ..storage import BLOCK_STAGE, KIND_PLAN, is_printable
     from .print_control import _plural
     stages = [b for b in t.blocks if b.type == BLOCK_STAGE]
     codes = sum(1 for b in t.blocks if is_printable(b))
-    parts = []
+    parts = ["План"] if t.kind == KIND_PLAN else []
     if stages:
         total = sum(max(0, int(b.minutes or 0)) for b in stages)
         parts.append(fmt_minutes(total))
         parts.append(f"{len(stages)} {_plural(len(stages), 'этап', 'этапа', 'этапов')}")
+    if t.kind == KIND_PLAN:
+        parts.append(f"уроков: {topics}")
+        return " · ".join(parts)
     parts.append(f"{codes} {_plural(codes, 'код', 'кода', 'кодов')}" if codes else "без кода")
+    if plan_title:
+        parts.append(f"план «{plan_title}»")
     return " · ".join(parts)
 
 
 class LibraryDelegate(QStyledItemDelegate):
     ROW_H = 50
+    HEADER_H = 28
 
     def paint(self, p: QPainter, opt, index) -> None:
+        if index.data(ROLE_HEADER):          # заголовок группы — мелким приглушённым текстом
+            p.save()
+            f = theme.font(11)
+            f.setWeight(QFont.Weight.DemiBold)
+            p.setFont(f)
+            p.setPen(theme.c("dim"))
+            p.drawText(QRect(opt.rect).adjusted(12, 0, -12, -2), Qt.AlignmentFlag.AlignBottom | Qt.AlignmentFlag.AlignLeft,
+                       index.data(Qt.ItemDataRole.DisplayRole) or "")
+            p.restore()
+            return
         r = QRectF(opt.rect).adjusted(0, 2, 0, -2)
         selected = bool(opt.state & QStyle.StateFlag.State_Selected)
         hover = bool(opt.state & QStyle.StateFlag.State_MouseOver)
@@ -48,7 +67,8 @@ class LibraryDelegate(QStyledItemDelegate):
         if selected:
             p.setBrush(theme.c("accent"))
             p.drawRoundedRect(QRectF(r.left(), r.center().y() - 10, 3, 20), 1.5, 1.5)
-        ic = icons.pixmap("presentation", theme.c("accent" if selected else "dim"), 16, 1.8)
+        ic = icons.pixmap("layers" if index.data(ROLE_PLAN) else "presentation",
+                          theme.c("accent" if selected else "dim"), 16, 1.8)
         p.drawPixmap(int(r.left() + 12), int(r.center().y() - 8), ic)
         right = int(r.right() - 12)
         if index.data(ROLE_LIVE):
@@ -73,7 +93,7 @@ class LibraryDelegate(QStyledItemDelegate):
         p.restore()
 
     def sizeHint(self, opt, index) -> QSize:
-        return QSize(opt.rect.width(), self.ROW_H)
+        return QSize(opt.rect.width(), self.HEADER_H if index.data(ROLE_HEADER) else self.ROW_H)
 
     def updateEditorGeometry(self, editor, opt, index) -> None:
         editor.setGeometry(opt.rect.adjusted(36, 6, -8, -22))
@@ -83,7 +103,7 @@ class LibraryPanel(QWidget):
     """Поиск, список уроков, кнопки. Объявление об обновлении — над кнопками."""
     open_requested = Signal()
     new_requested = Signal()
-    new_structure = Signal(str)      # «Новый урок ▾»: ключ STRUCTURES или "presentation"
+    new_structure = Signal(str)      # «Новый урок ▾»: ключ STRUCTURES, "plan:<id>", "newplan:<ключ>" или "presentation"
     import_requested = Signal()
     ai_requested = Signal()
     update_clicked = Signal()
@@ -102,7 +122,9 @@ class LibraryPanel(QWidget):
         self.search.setClearButtonEnabled(True)
         self._search_action = self.search.addAction(icons.icon("search"), QLineEdit.ActionPosition.LeadingPosition)
         lay.addWidget(self.search)
-        lay.addWidget(label("Уроки", "navGroup"))
+        self.group_label = label("Уроки", "navGroup")       # есть планы — группы подписаны в самом списке
+        lay.addWidget(self.group_label)
+        self.plans_provider = lambda: []                    # [(id, название)] планов — задаёт окно программы
 
         self.list = QListWidget()
         self.list.setObjectName("library")
@@ -144,10 +166,16 @@ class LibraryPanel(QWidget):
         lay.addLayout(row)
         theme.changed.connect(self._on_theme)
 
-    def new_menu(self) -> QMenu:
-        """«Новый урок ▾»: пустой, по шаблону структуры (этапы с минутами), из презентации."""
+    def new_menu(self, plans=None) -> QMenu:
+        """«Новый урок ▾»: по плану, пустой, по шаблону структуры (этапы с минутами), новый план, из презентации."""
         from ..storage import STRUCTURES
         m = QMenu(self)
+        plans = list(self.plans_provider() if plans is None else plans)
+        for pid, title in plans:
+            a = m.addAction(f"По плану «{title}»")
+            a.triggered.connect(lambda _=False, k=pid: self.new_structure.emit("plan:" + k))
+        if plans:
+            m.addSeparator()
         for key, (title, stages) in STRUCTURES.items():
             hint = f" — {len(stages)} этапов" if stages else ""
             a = m.addAction(title)
@@ -156,6 +184,11 @@ class LibraryPanel(QWidget):
             if key == "empty":
                 m.addSeparator()
         m.addSeparator()
+        sub = m.addMenu("Новый план урока")
+        sub.setToolTip("План урока: этапы и минуты для многих уроков — поменяли план, поменялись все уроки по нему")
+        for key, (title, stages) in STRUCTURES.items():
+            a = sub.addAction("Пустой план" if key == "empty" else title)
+            a.triggered.connect(lambda _=False, k=key: self.new_structure.emit("newplan:" + k))
         a = m.addAction("Из презентации…")
         a.triggered.connect(lambda: self.new_structure.emit("presentation"))
         return m

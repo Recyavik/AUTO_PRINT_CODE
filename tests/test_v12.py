@@ -382,5 +382,77 @@ class PlanEditTest(unittest.TestCase):
             close(win)
 
 
+# ================================================================ Task 4: список — планы и уроки
+
+class LibraryTest(unittest.TestCase):
+    def test_groups_and_meta(self):
+        from PySide6.QtCore import Qt
+        from autoprint.ui.library import ROLE_HEADER, ROLE_META
+        p = plan90()
+        t = plans.new_topic(p, "Функции")
+        f = Template("Свободный", [stage("А", 5)])
+        win = window([t, f, p], 18905)
+        try:
+            lib = win.library.list
+            rows = [(lib.item(i).text(), bool(lib.item(i).data(ROLE_HEADER))) for i in range(lib.count())]
+            self.assertEqual(rows, [("Планы уроков", True), ("Онлайн 90", False), ("Уроки", True), ("Функции", False),
+                                    ("Свободный", False)])
+            self.assertEqual(lib.item(1).data(ROLE_META), "План · 1 ч 5 мин · 4 этапа · уроков: 1")
+            self.assertEqual(lib.item(3).data(ROLE_META), "1 ч 5 мин · 4 этапа · без кода · план «Онлайн 90»")
+            self.assertFalse(lib.item(0).flags() & Qt.ItemFlag.ItemIsSelectable)
+            self.assertTrue(win.library.group_label.isHidden())                    # подпись «Уроки» над списком — в списке
+            self.assertNotEqual(lib.currentRow(), 0)                                # заголовок не выбирается
+            win.library.search.setText("функ")
+            self.assertEqual([lib.item(i).text() for i in range(lib.count()) if not lib.item(i).isHidden()],
+                             ["Уроки", "Функции"])                                 # пустая группа прячет заголовок
+        finally:
+            close(win)
+
+    def test_no_plans_looks_like_before(self):
+        from autoprint.ui.library import ROLE_HEADER
+        win = window([Template("Свободный", [stage("А", 5)])], 18906)
+        try:
+            lib = win.library.list
+            self.assertEqual([bool(lib.item(i).data(ROLE_HEADER)) for i in range(lib.count())], [False])
+            self.assertFalse(win.library.group_label.isHidden())
+        finally:
+            close(win)
+
+    def test_new_menu_lists_plans(self):
+        win = window([plan90()], 18907)
+        try:
+            m = win.library.new_menu([("P", "Онлайн 90")])
+            texts = [a.text() for a in m.actions() if a.text()]
+            self.assertEqual(texts[0], "По плану «Онлайн 90»")
+            self.assertIn("Новый план урока", texts)
+            self.assertIn("Из презентации…", texts)
+            sub = next(a.menu() for a in m.actions() if a.text() == "Новый план урока")
+            self.assertEqual([a.text() for a in sub.actions() if a.text()][0], "Пустой план")
+            self.assertEqual([a.text() for a in win.library.new_menu().actions() if a.text()][0], "По плану «Онлайн 90»")
+            win.library.new_structure.emit("plan:P")
+            self.assertTrue(any(x.plan_id == "P" for x in win.store.templates))
+            win.library.new_structure.emit("newplan:pair90")
+            self.assertEqual(len(win.store.plans()), 2)
+        finally:
+            close(win)
+
+    def test_context_menu_actions(self):
+        p = plan90()
+        t = plans.new_topic(p, "Функции")
+        f = Template("Свободный", [stage("А", 5)], id="F")
+        win = window([t, f, p], 18908)
+        try:
+            texts = {x: [a.text() for a in win._library_menu_for(win.store.get(x)).actions() if a.text()]
+                     for x in ("P", t.id, "F")}
+            self.assertEqual(texts["P"][0], "Новый урок по этому плану")
+            self.assertIn("Отвязать от плана", texts[t.id])
+            self.assertNotIn("Сделать из этапов план", texts[t.id])
+            self.assertIn("Сделать из этапов план", texts["F"])
+            self.assertIn("Привязать к плану", texts["F"])
+            self.assertNotIn("Отвязать от плана", texts["F"])
+        finally:
+            close(win)
+
+
 if __name__ == "__main__":
     unittest.main()
