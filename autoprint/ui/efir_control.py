@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import logging
+import re
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -23,7 +24,7 @@ from ..efir.store import WebinarStore
 
 log = logging.getLogger(__name__)
 
-MODE_IDLE, MODE_EXERCISE, MODE_BREAK = "idle", "exercise", "break"
+MODE_IDLE, MODE_EXERCISE, MODE_BREAK, MODE_SLIDE = "idle", "exercise", "break", "slide"
 KEEP_LIVE_AFTER_END = timedelta(minutes=30)    # после конца повестки эфир ещё восстанавливается при запуске
 BREAK_HOLD_S = 60          # «когда время вышло» на экране — столько секунд, потом экран сам возвращается к фону
 
@@ -60,6 +61,7 @@ class EfirController(QObject):
         # перерыв (время — time.time(), секунды)
         self.brk_seq = 0
         self.brk_ends = 0.0
+        self.slide: dict | None = None     # слайд у учеников: {"ref", "next", "n", "bid"}
         self.brk_left_paused: float | None = None
         self.brk_total = 600.0
         # вкладка
@@ -175,6 +177,9 @@ class EfirController(QObject):
             ex = w.exercises[self.ex_index]
             st["exercise"] = {"seq": self.ex_seq, "restart": self.ex_restart, "paused": self.ex_paused,
                               "title": ex.title, "url": self.server.media_url(ex.path), "volume": 1.0}
+        if self.mode == MODE_SLIDE and self.slide:
+            st["slide"] = {"src": self._media(self.slide["ref"]), "next": self._media(self.slide.get("next", "")),
+                           "n": self.slide.get("n", 0)}
         if self.mode == MODE_BREAK:
             st["brk"] = {"seq": self.brk_seq, "ends_at": int(self.brk_ends * 1000),
                          "paused_left": None if self.brk_left_paused is None else int(self.brk_left_paused * 1000),
@@ -182,6 +187,15 @@ class EfirController(QObject):
                          "title": w.break_title if w.break_show_title else "", "done": w.break_done,
                          "bg": self._bg(w.break_background), "hold": BREAK_HOLD_S}
         return st
+
+    def _media(self, ref: str) -> str:
+        from ..storage import media_path
+        if not ref:
+            return ""
+        if re.match(r"https?://", ref, re.I):
+            return ref
+        p = media_path(ref)
+        return self.server.media_url(str(p)) if p is not None else ""
 
     def preview_break(self, w: Webinar) -> str:
         """Предпросмотр перерыва с настройками из редактора (ещё не сохранёнными) — отдельной вкладкой, на канале
@@ -379,6 +393,8 @@ class EfirController(QObject):
             self.mode = MODE_BREAK
             self.brk_ends, self.brk_total, self.brk_seq = brk["ends_at"], brk["total"], brk["seq"] + 1
             self.brk_left_paused = None
+        elif self.store.slide:                                      # слайд был у учеников — снова он
+            self.mode, self.slide = MODE_SLIDE, dict(self.store.slide)
         self.publish()
         self.show_timer()
 
@@ -390,6 +406,24 @@ class EfirController(QObject):
     def _forget_break(self) -> None:
         if self.store.brk is not None:
             self.store.set_break(None)
+        if self.store.slide is not None:          # что угодно другое у учеников — слайда больше нет
+            self.store.set_slide(None)
+        self.slide = None
+
+    def show_slide(self, ref: str, n: int, bid: str, next_ref: str = "") -> None:
+        """Слайд презентации ученикам (по действию учителя: «На экран», ◀ ▶ кликера)."""
+        if not (self.webinar or self.live_webinar()):
+            return
+        self.webinar = self.webinar or self.live_webinar()
+        self.ensure_server()
+        if self.mode == MODE_BREAK and self.store.brk is not None:
+            self.store.set_break(None)
+        self.slide = {"ref": ref, "next": next_ref, "n": n, "bid": bid}
+        self.mode = MODE_SLIDE
+        self.ex_paused = False
+        if self.store.live is not None:
+            self.store.set_slide(dict(self.slide))
+        self.publish()
 
     # ================================================================ команды экрана
     def show_background(self) -> None:

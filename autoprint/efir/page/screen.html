@@ -43,6 +43,9 @@
   #vid.on { opacity: 1; }
   #vid video { width: 100%; height: 100%; object-fit: contain; display: block; background: #000; }
   #vid img { width: 100%; height: 100%; object-fit: contain; display: none; }
+  #slide { position: fixed; inset: 0; background: #000; opacity: 0; transition: opacity .25s ease; pointer-events: none; }
+  #slide.on { opacity: 1; }
+  #slide img { width: 100%; height: 100%; object-fit: contain; display: block; }
   #dot { position: fixed; right: 12px; bottom: 12px; width: 9px; height: 9px; border-radius: 50%;
     background: #888; opacity: 0; transition: opacity .6s; }
   #dot.on { opacity: .35; }
@@ -73,6 +76,7 @@
   <div class="bar"><i></i></div>
 </div>
 <div id="vid"><video playsinline preload="auto"></video><img alt=""></div>
+<div id="slide"><img alt=""></div>
 <div id="dot"></div>
 <div id="gallery">
   <h1>Фон экрана эфира</h1>
@@ -500,6 +504,20 @@ function startScreen() {
       setTimeout(() => { if (!brkEl.classList.contains('on')) brkBg.clear(); }, 700);
     }
     if (st.mode === 'exercise' && st.exercise && st.exercise.url) showVideo(st.exercise); else hideVideo();
+    showSlide(st.mode === 'slide' ? st.slide : null);
+  }
+
+  // слайд презентации: картинка во весь экран; следующий грузится заранее — без чёрного кадра при листании
+  const slideEl = document.getElementById('slide'), slideImg = slideEl.querySelector('img');
+  let preload = null;
+  function showSlide(sl) {
+    if (!sl || !sl.src) { slideEl.classList.remove('on'); return; }
+    if (slideImg.getAttribute('src') !== sl.src) {
+      const im = new Image();
+      im.onload = im.onerror = () => { slideImg.src = sl.src; slideEl.classList.add('on'); };
+      im.src = sl.src;
+    } else slideEl.classList.add('on');
+    if (sl.next) { preload = new Image(); preload.src = sl.next; }
   }
 
   // звук: первый щелчок по странице разрешает воспроизведение со звуком до перезагрузки вкладки

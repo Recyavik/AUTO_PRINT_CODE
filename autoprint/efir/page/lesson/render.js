@@ -36,7 +36,8 @@ export function totalMinutes(items) { return stagesOf(items).reduce((a, s) => a 
 function label(it, kind) {
   const lbl = el("div", "lbl");
   lbl.appendChild(icon(kind));
-  const name = el("span", "rname", kind === "code" ? "Код" : kind === "image" ? "Картинка" : roleName(kind));
+  const name = el("span", "rname", kind === "code" ? "Код" : kind === "image" ? (it.slide ? "Слайд " + it.slide : "Картинка")
+    : roleName(kind));
   if (it.type === "markdown") name.title = "Роль заметки — щёлкните, чтобы сменить";
   lbl.appendChild(name);
   const how = it.type === "markdown" && ((A.S && A.S.roles) || []).find((r) => r.key === kind);
@@ -158,7 +159,14 @@ function buildBlock(it) {
     if (!(it.text || "").trim()) n.classList.add("is-empty");
   } else if (it.type === "image") {
     const row = el("div", "row r-image");
-    row.appendChild(label(it, "image"));
+    const lbl = label(it, "image");
+    if (it.url && !it.missing) {
+      const ts = el("button", "toscreen", "На экран");
+      ts.dataset.act = "slide";
+      ts.title = "Показать ученикам на их экране (листать — ◀ ▶ или PageUp / PageDown, B — фон)";
+      lbl.appendChild(ts);
+    }
+    row.appendChild(lbl);
     const c = el("div", "c");
     if (it.missing || !it.url) {
       c.appendChild(el("div", "missing", it.text ? "Нет файла картинки" + (it.name ? ": " + it.name : "")
@@ -390,6 +398,14 @@ function groupBox(key, isStage) {
     groupsDom.set(key, g);
   }
   return g;
+}
+
+// какой слайд сейчас у учеников — отметка на ленте (без перерисовки блоков)
+export function markOnScreen() {
+  const ef = (A.S && A.S.efir) || {};
+  const bid = ef.mode === "slide" ? ef.slide_bid : "";
+  for (const n of document.querySelectorAll(".blk.onscreen")) if (n.dataset.id !== bid) n.classList.remove("onscreen");
+  if (bid) nodeOf(bid)?.classList.add("onscreen");
 }
 
 export function renderMain() {

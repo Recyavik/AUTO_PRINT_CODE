@@ -46,6 +46,7 @@ _STAGE_TAIL = re.compile(r"\s*·\s*(\d+)\s*мин(?:\s*·\s*(\S+))?\s*$", re.I)
 _PART = re.compile(r"^#\s+(.+?)\s*$")
 _CALLOUT = re.compile(r"^\[!([^\]]+)\]\s*(.*)$")
 _FENCE = re.compile(r"^(`{3,}|~{3,})\s*([^\s`]*)\s*(.*)$")
+_SLIDE_CAP = re.compile(r"^Слайд\s+(\d{1,4})(?:\s*[·—:-]\s*(.*))?$", re.I)
 _IMAGE = re.compile(r"^!\[((?:[^\]\\]|\\.)*)\]\((<[^>]+>|[^)\s]+)\)\s*$")
 _NOTE = re.compile(r"^(\*|_)([^*_].*?)\1\s*$")
 _ATTR = re.compile(r'(\w+)="([^"]*)"')
@@ -99,6 +100,8 @@ def to_md(t: Template, media_prefix: str, copy_image=None) -> str:
                 continue
             rel = copy_image(b) if copy_image else None
             cap = (b.title or "").replace("]", "\\]")
+            if b.slide:                     # слайд презентации: номер — в подписи («Слайд 3 · План»)
+                cap = f"Слайд {b.slide}" + (f" · {cap}" if cap else "")
             out += [f"![{cap}]({_image_path(rel or src)})", ""]
         else:
             role = b.role if b.role in ROLES else "text"
@@ -269,7 +272,11 @@ def parse(text: str, base: Path | None, title: str) -> Template:
         if im:
             flush()
             cap = im.group(1).replace("\\]", "]")
-            blocks.append(Block(BLOCK_IMAGE, _resolve_image(im.group(2), base), title=cap))
+            sm = _SLIDE_CAP.match(cap)
+            slide_no = int(sm.group(1)) if sm else 0
+            if sm:
+                cap = sm.group(2) or ""
+            blocks.append(Block(BLOCK_IMAGE, _resolve_image(im.group(2), base), title=cap, slide=slide_no))
             i += 1
             continue
         para.append(ln)

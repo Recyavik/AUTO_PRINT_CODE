@@ -196,6 +196,11 @@ body.mode-prep .lbl .sub { cursor: text; }
 .r-explain { --rc: var(--say); }
 .r-hint { --rc: var(--show); }
 .r-homework { --rc: var(--accent); }
+.toscreen { margin-left: 10px; min-height: 26px; padding: 0 10px; font-size: 12px; border-radius: 999px; text-transform: none;
+  letter-spacing: 0; background: transparent; color: var(--dim); }
+.toscreen:hover { color: var(--text); border-color: var(--accent-line); }
+.blk.onscreen .r-image figure { box-shadow: 0 0 0 3px var(--accent); border-radius: 10px; }
+.blk.onscreen .toscreen { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
 .r-goal { --rc: var(--say); }
 .lbl .how { text-transform: none; letter-spacing: 0; font-size: 12px; font-weight: 600; color: var(--dim); }
 .r-text { background: transparent; border-left-color: var(--stroke2); }
@@ -420,7 +425,7 @@ body.mode-lesson.plan-strip.plan-open nav#plan { display: block; position: fixed
     --show:#6B2FB0; --extra:#6B2FB0; --term:#0E7C6E; --output:#237A32;
     --t-c:#777; --t-k:#9A5500; --t-b:#0F6A85; --t-f:#1F5FBF; --t-cl:#7A4E00; --t-d:#7A4E00; --t-t:#B00020; --t-a:#8A4513;
     --t-s:#1E6B2B; --t-n:#6B2FB0; --t-o:#555; font-size: 12px; }
-  header { position: static; border: none; padding: 0 0 8px; } .tools, #legend, #offline, #toast, #nowbar, #strip, .rtb, .armbtn, .efirbtn, .phint, .ins,
+  header { position: static; border: none; padding: 0 0 8px; } .tools, #legend, #offline, #toast, #nowbar, #strip, .rtb, .toscreen, .armbtn, .efirbtn, .phint, .ins,
   .blk > .tools, .sedit, #lessonsBtn, .pmin { display: none !important; }
   #wrap { display: block; padding: 0; } nav#plan { position: static; max-height: none; overflow: visible; margin-bottom: 14px; }
   .stage { break-inside: auto; margin-bottom: 10px; } .stage .body, .stage.collapsed .body { display: block !important; }

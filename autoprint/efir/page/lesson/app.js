@@ -3,7 +3,7 @@
 import { A, $, el, icon, menu, closeMenu, toast, cmd, now, mmss, hm, hhmm, clockAt, nextHalfHour, durText, plural,
   isTyping } from "./state.js";
 import * as Q from "./queue.js";
-import { renderMain, renderPlan, legend, stagesOf, nodeOf, stageOfBlock } from "./render.js";
+import { renderMain, renderPlan, legend, stagesOf, nodeOf, stageOfBlock, markOnScreen } from "./render.js";
 import * as E from "./edit.js";
 import { beginCode, released, endCode } from "./code.js";
 
@@ -33,6 +33,7 @@ let headerStale = false;
 export function refresh() {
   rebuildItems();
   renderMain();
+  markOnScreen();
   renderPlan();
   applyCollapse();
   tick();
@@ -295,7 +296,7 @@ function screenText() {
     return ["У учеников: перерыв" + (left ? " · " + mmss(left) : ""), "warn"];
   }
   if (ef.mode === "exercise") return ["У учеников: зарядка", "warn"];
-  if (ef.mode === "slide") return ["У учеников: слайд " + (ef.slide_n || ""), "ok"];
+  if (ef.mode === "slide") return ["У учеников: слайд " + (ef.slide_n || "") + " ▾", "ok"];
   if (!ef.tab_open) return ["Экран учеников не открыт ▾", "dim"];
   return ["У учеников: фон ▾", ""];
 }
@@ -696,6 +697,7 @@ $("main").addEventListener("click", (e) => {
       const it = A.byId.get(actBtn.dataset.stage);
       cmd({ cmd: "break", stage: actBtn.dataset.stage, minutes: it ? it.minutes : 10 });
     } else if (a === "exercise") cmd({ cmd: "exercise", index: 0 });
+    else if (a === "slide") cmd({ cmd: "slide", block: actBtn.closest(".blk").dataset.id });
     else if (a === "clear-sel") { const b = actBtn.closest(".blk"); E.setFields(b.dataset.id, { sel: [] }); }
     return;
   }
@@ -873,6 +875,20 @@ document.addEventListener("paste", (e) => {
   E.uploadImage(f.getAsFile(), E.pastePlace());
 });
 
+// кликер презентации в «Уроке»: ◀ ▶ / PageUp / PageDown — слайды ученикам, B или «.» — фон
+const NEXT_KEYS = new Set(["ArrowRight", "PageDown"]), PREV_KEYS = new Set(["ArrowLeft", "PageUp"]);
+document.addEventListener("keydown", (e) => {
+  if (A.mode !== "lesson" || isTyping(e.target) || e.ctrlKey || e.altKey || e.metaKey) return;
+  if (!A.items.some((x) => x.type === "image" && x.url)) return;           // без картинок — обычная прокрутка
+  if (NEXT_KEYS.has(e.key) || PREV_KEYS.has(e.key)) {
+    e.preventDefault();
+    cmd({ cmd: "slide_step", d: NEXT_KEYS.has(e.key) ? 1 : -1 });
+  } else if (["b", "B", "и", "И", ".", "ю"].includes(e.key)) {
+    e.preventDefault();
+    cmd({ cmd: "background" });
+  }
+});
+
 document.addEventListener("keydown", (e) => {
   if (A.mode !== "prep" || isTyping(e.target)) return;
   if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === "z") { e.preventDefault(); E.undo(); return; }
@@ -925,6 +941,10 @@ function apply(state) {
     window.scrollTo(0, 0);
   }
   if (state.live && !(prev && prev.live) && A.mode !== "lesson") setMode("lesson");
+  // слайд у учеников сменился (учитель листает) — «я здесь»: лента показывает этот слайд
+  const sb = state.efir && state.efir.mode === "slide" ? state.efir.slide_bid : "";
+  if (sb && sb !== A.slideBid && A.mode === "lesson") requestAnimationFrame(() => nodeOf(sb)?.scrollIntoView({ behavior: "smooth", block: "center" }));
+  A.slideBid = sb;
   applyPrefs();
   rebuildItems();
   const key = JSON.stringify([A.title, state.live, state.efir, state.print && [state.print.state, state.print.block, Math.round((state.print.progress || 0) * 50)],

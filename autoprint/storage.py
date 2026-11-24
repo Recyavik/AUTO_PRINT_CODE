@@ -372,6 +372,7 @@ class Block:
     minutes: int = 0
     stage_kind: str = ""         # "" — обычный, break — перерыв, exercise — зарядка (см. STAGE_KINDS)
     part: str = ""               # раздел — группа этапов в плане урока («Тёмная тема»)
+    slide: int = 0               # картинка — слайд презентации с этим номером («На экран», ◀ ▶); 0 — обычная
 
     def display_title(self, code_number: int = 0) -> str:
         if self.title.strip():

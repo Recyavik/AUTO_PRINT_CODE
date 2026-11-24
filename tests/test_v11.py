@@ -223,5 +223,102 @@ class RolesV11Test(unittest.TestCase):
         self.assertEqual(L._TYPE_ROLE.get("цель"), "goal")
 
 
+# ================================================================ Task 8: слайды и экран учеников
+
+def slide_png(n: int) -> str:
+    """Картинка-слайд в data/media → ссылка блока."""
+    from PySide6.QtGui import QColor, QImage
+    folder = storage.DATA_DIR / storage.MEDIA_FOLDER
+    folder.mkdir(parents=True, exist_ok=True)
+    p = folder / f"test-slide-{n}.png"
+    im = QImage(32, 18, QImage.Format.Format_RGB32)
+    im.fill(QColor(20 * n, 40, 80))
+    im.save(str(p), "PNG")
+    return storage.media_ref(p)
+
+
+def slides_lesson(tid: str = "S") -> Template:
+    return Template("Презентация", [stage("Презентация", 30, id="ps"),
+                                     Block(BLOCK_IMAGE, slide_png(1), title="Титул", slide=1, id="sl1"),
+                                     note("Скажи про тему", id="sn1"),
+                                     Block(BLOCK_IMAGE, slide_png(2), title="План", slide=2, id="sl2"),
+                                     Block(BLOCK_IMAGE, slide_png(3), title="Итоги", slide=3, id="sl3")], id=tid)
+
+
+class SlideTest(Base):
+    port = 18974
+
+    def setUp(self):
+        self.L = slides_lesson("L")
+        self.win = make_window([self.L], port=self.port)
+        self.win.lesson.open_page = lambda: None
+        self.win.printer.set_focus("L")
+
+    def test_show_slide_and_background(self):
+        ef = self.win.efir
+        self.win.lesson.command({"cmd": "slide", "block": "sl2"})
+        self.assertEqual(ef.mode, "slide")
+        st = ef.state()
+        self.assertTrue(st["slide"]["src"].endswith("test-slide-2.png"), st["slide"])
+        self.assertTrue(st["slide"]["next"].endswith("test-slide-3.png"), st["slide"])
+        e = self.state()["efir"]
+        self.assertEqual((e["mode"], e["slide_n"], e["slide_bid"]), ("slide", 2, "sl2"))
+        self.win.lesson.command({"cmd": "background"})
+        self.assertEqual(ef.mode, "idle")
+        self.assertIsNone(ef.store.slide)
+
+    def test_slide_step(self):
+        ef = self.win.efir
+        step = lambda d: self.win.lesson.command({"cmd": "slide_step", "d": d})
+        step(1)
+        self.assertEqual(ef.slide["bid"], "sl1")                       # ничего не показано — первый слайд
+        step(1)
+        step(1)
+        self.assertEqual(ef.slide["bid"], "sl3")
+        step(1)
+        self.assertEqual(ef.slide["bid"], "sl3")                       # последний — остаётся
+        step(-1)
+        self.assertEqual(ef.slide["bid"], "sl2")
+        self.win.lesson.command({"cmd": "slide", "block": "sn1"})      # заметку на экран не выводят
+        self.assertEqual(ef.slide["bid"], "sl2")
+
+    def test_slide_survives_restart(self):
+        from autoprint.efir import store as store_mod
+        from autoprint.ui.efir_control import EfirController
+        ef = self.win.efir
+        self.win.lesson.command({"cmd": "start"})
+        self.win.lesson.command({"cmd": "slide", "block": "sl3"})
+        folder = ef.store.path.parent
+        old = store_mod.efir_dir
+        store_mod.efir_dir = lambda: folder
+        try:
+            ctl2 = EfirController(None)
+        finally:
+            store_mod.efir_dir = old
+        ctl2.settings = ef.settings
+        ctl2.show_timer = lambda: None
+        ctl2.server.want_port = 18975
+        ctl2.ensure_server()
+        try:
+            ctl2.restore()
+            self.assertEqual(ctl2.mode, "slide")
+            self.assertTrue(ctl2.state()["slide"]["src"].endswith("test-slide-3.png"))
+        finally:
+            ctl2.server.stop()
+
+    def test_md_slide_roundtrip(self):
+        from autoprint import lesson_md
+        text = lesson_md.to_md(self.L, "")
+        self.assertIn("![Слайд 2 · План]", text)
+        back = lesson_md.parse(text, storage.DATA_DIR, "П")
+        self.assertEqual([(b.slide, b.title) for b in back.blocks if b.type == BLOCK_IMAGE],
+                         [(1, "Титул"), (2, "План"), (3, "Итоги")])
+
+    def test_item_state_slide(self):
+        from autoprint import scenario
+        it = scenario.item_state(self.L.find_block("sl2"), lambda p: "/m/" + Path(p).name)
+        self.assertEqual(it["slide"], 2)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

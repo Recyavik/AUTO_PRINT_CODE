@@ -123,6 +123,7 @@ class LessonController(QObject):
         self._call.connect(self._do_call)
         self.edits = 0           # сколько правок со страницы применено — страница знает, какие уже в состоянии
         self._plan = None          # (урок, плановое начало) идущего урока — для «конец 19:30 · +5 мин»
+        self._tab_warned = False   # «вкладка экрана учеников не открыта» уже сказали
         self._timeline: dict[str, tuple[int, int]] = {}   # этапы идущего урока: id → (с минуты, по минуту)
         self._timer = QTimer(self, singleShot=True, interval=300, timeout=self.publish)
         self._last = ""          # что ушло на страницу в последний раз: то же самое второй раз не шлём
@@ -171,7 +172,9 @@ class LessonController(QObject):
         state = scenario.lesson_state(
             t, live_anchor_ms=anchor, live_shift=self._shift_min(t) if anchor else 0,
             efir_extra={"break_ends": int(self.efir.brk_ends * 1000) if self.efir.mode == "break" else 0,
-                        "tab_open": bool(self.efir.server.running and self.efir.clients > 0)}, armed=t.active_block if t is not None else "",
+                        "tab_open": bool(self.efir.server.running and self.efir.clients > 0),
+                        "slide_n": (self.efir.slide or {}).get("n", 0) if self.efir.mode == "slide" else 0,
+                        "slide_bid": (self.efir.slide or {}).get("bid", "") if self.efir.mode == "slide" else ""}, armed=t.active_block if t is not None else "",
             media_url=self.efir.server.media_url, presets=[(lk.id, lk.title) for lk in self.efir.store.looks],
             preset=preset.id if preset is not None else "", dark=theme.dark, efir_mode=self.efir.mode,
             tab=self.efir.tab_status()[0], hotkey=self.main.settings.hotkey_toggle,
@@ -193,6 +196,39 @@ class LessonController(QObject):
         if ok and s.start_screen and self.efir.clients <= 0:
             self.efir.open_tab()
         return ok
+
+    @staticmethod
+    def _slides(t: Template) -> list:
+        """Слайды урока по порядку: картинки с номером слайда; нет таких — все картинки урока."""
+        from ..storage import BLOCK_IMAGE
+        imgs = [b for b in t.blocks if b.type == BLOCK_IMAGE and (b.text or "").strip()]
+        marked = [b for b in imgs if b.slide]
+        return marked or imgs
+
+    def _show_slide(self, t: Template, bid: str) -> None:
+        slides = self._slides(t)
+        i = next((k for k, b in enumerate(slides) if b.id == bid), -1)
+        if i < 0:
+            return
+        b = slides[i]
+        nxt = slides[i + 1].text.strip() if i + 1 < len(slides) else ""
+        self._ensure_screen(t)
+        self.efir.show_slide(b.text.strip(), b.slide or i + 1, b.id, nxt)
+        if self.efir.clients <= 0 and not self._tab_warned:          # напомнить один раз, не на каждом слайде
+            self._tab_warned = True
+            self.main._notify("Слайд на экране учеников — но вкладка экрана учеников не открыта (У учеников ▾ → Открыть).")
+
+    def _slide_step(self, t: Template, d: int) -> None:
+        """◀ ▶ кликера: следующий / предыдущий слайд; ничего не показано — первый."""
+        slides = self._slides(t)
+        if not slides:
+            return
+        cur = (self.efir.slide or {}).get("bid") if self.efir.mode == "slide" else ""
+        i = next((k for k, b in enumerate(slides) if b.id == cur), None)
+        j = 0 if i is None else max(0, min(len(slides) - 1, i + d))
+        if i is not None and j == i:
+            return
+        self._show_slide(t, slides[j].id)
 
     def _look_new(self, t: Template) -> None:
         """«Новое оформление…»: копия оформления урока под новым именем — урок сразу на нём, открыть редактор."""
@@ -384,6 +420,10 @@ class LessonController(QObject):
                 self.main.delete_lesson(t, ask=False)
             elif cmd == "export" and t is not None and d.get("fmt") in ("md", "ipynb", "students", "json"):
                 self.main.export_template(t, str(d["fmt"]))
+            elif cmd == "slide" and t is not None:
+                self._show_slide(t, str(d.get("block") or ""))
+            elif cmd == "slide_step" and t is not None:
+                self._slide_step(t, 1 if int(d.get("d") or 1) > 0 else -1)
             elif cmd == "open_tab":
                 self.efir.open_tab()
             elif cmd == "timer":

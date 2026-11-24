@@ -278,7 +278,8 @@ def item_state(b: Block, media_url) -> dict:
             url, missing = src, False
         elif local is not None:
             url, missing = media_url(str(local)), False
-        d.update(url=url, missing=missing, name=Path(src).name if src and not url.startswith("http") else "")
+        d.update(url=url, missing=missing, name=Path(src).name if src and not url.startswith("http") else "",
+                 slide=int(b.slide or 0))
     elif b.type == BLOCK_STAGE:
         d.update(minutes=max(0, int(b.minutes or 0)), kind=b.stage_kind, part=b.part, note=b.text.strip())
     else:

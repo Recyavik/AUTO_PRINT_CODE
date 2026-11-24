@@ -30,7 +30,7 @@ _FIELDS = {
     BLOCK_MARKDOWN: {"text", "title", "role"},
     BLOCK_CODE: {"text", "title", "lang", "profile", "steps", "sel"},
     BLOCK_STAGE: {"text", "title", "minutes", "stage_kind", "part"},
-    BLOCK_IMAGE: {"text", "title"},
+    BLOCK_IMAGE: {"text", "title", "slide"},
 }
 
 
@@ -61,6 +61,10 @@ def _field(b: Block, key: str, v):
     if key == "profile":
         if v not in PROFILES and v != "":
             raise ValueError("Неверное окно")
+        return v
+    if key == "slide":
+        if not isinstance(v, int) or isinstance(v, bool) or not 0 <= v <= 9999:
+            raise ValueError("Неверный номер слайда")
         return v
     if key == "steps":
         if not isinstance(v, list) or len(v) > 10_000 or not all(isinstance(x, int) and 1 <= x <= 99 for x in v):

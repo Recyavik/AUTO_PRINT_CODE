@@ -653,6 +653,62 @@ class PageV11Test(Page):
             self.stop_live()
 
 
+def slide_ref(n: int) -> str:
+    from PySide6.QtGui import QColor, QImage
+    folder = storage.DATA_DIR / storage.MEDIA_FOLDER
+    folder.mkdir(parents=True, exist_ok=True)
+    p = folder / f"page-slide-{n}.png"
+    im = QImage(64, 36, QImage.Format.Format_RGB32)
+    im.fill(QColor(30 * n, 60, 90))
+    im.save(str(p), "PNG")
+    return storage.media_ref(p)
+
+
+def slides_lesson() -> list[Template]:
+    return [Template("Слайды", [stage("Презентация", 30, id="ps"),
+                                Block(BLOCK_IMAGE, slide_ref(1), title="Титул", slide=1, id="sl1"),
+                                note("Скажи про тему", id="sn1"),
+                                Block(BLOCK_IMAGE, slide_ref(2), title="План", slide=2, id="sl2"),
+                                Block(BLOCK_IMAGE, slide_ref(3), title="Итоги", slide=3, id="sl3")], id="SL")]
+
+
+class PageSlidesTest(Page):
+    """0.11 Task 8: слайды — «На экран», кликер ◀ ▶ / PageUp / PageDown, B — фон."""
+    templates = staticmethod(slides_lesson)
+
+    def shown(self):
+        ef = self.win.efir
+        return (ef.slide or {}).get("bid") if ef.mode == "slide" else ""
+
+    def test_slide_button(self):
+        self.mode("lesson")
+        self.assertEqual(self.js("document.querySelector('[data-id=sl2] .lbl .rname').textContent"), "Слайд 2")
+        self.js("document.querySelector('[data-id=sl2] .toscreen').click()")
+        self.assertTrue(self.wait_py(lambda: self.shown() == "sl2"))
+        self.assertTrue(self.edge.wait("!!document.querySelector('.blk.onscreen[data-id=sl2]')"))
+        self.assertTrue(self.edge.wait("document.querySelector('#tools .scrchip').textContent.includes('слайд 2')"))
+        self.win.efir.show_background()
+
+    def test_clicker_keys(self):
+        self.mode("lesson")
+        self.js("document.activeElement && document.activeElement.blur && document.activeElement.blur()")
+        self.edge.key("ArrowRight", "ArrowRight", 39)
+        self.assertTrue(self.wait_py(lambda: self.shown() == "sl1"), self.shown())
+        self.edge.key("PageDown", "PageDown", 34)
+        self.assertTrue(self.wait_py(lambda: self.shown() == "sl2"), self.shown())
+        self.edge.key("PageUp", "PageUp", 33)
+        self.assertTrue(self.wait_py(lambda: self.shown() == "sl1"), self.shown())
+        self.edge.key("b", "KeyB", 66)
+        self.assertTrue(self.wait_py(lambda: self.win.efir.mode == "idle"))
+        self.mode("prep")                                           # правка заметки — стрелки двигают курсор
+        self.js("document.querySelector('[data-id=sn1] .row > .c').click()")
+        self.assertTrue(self.edge.wait("document.activeElement && document.activeElement.isContentEditable"))
+        self.edge.key("ArrowRight", "ArrowRight", 39)
+        pump(600)
+        self.assertEqual(self.win.efir.mode, "idle")
+        self.js("document.activeElement.blur()")
+
+
 def big_lesson() -> list[Template]:
     blocks = []
     for k in range(10):
