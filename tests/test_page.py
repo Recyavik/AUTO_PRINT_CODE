@@ -888,6 +888,30 @@ class PagePerfTest(Page):
         self.js("document.activeElement.blur()")
 
 
+class ScreenImageTest(Page):
+    """Экран учеников: картинка-заставка (фон, перерыв) видна целиком в окне любой формы, поля — размытой копией."""
+
+    def test_break_image_fits_whole(self):
+        import base64
+        from autoprint.efir.model import Look
+        png = Path(storage.DATA_DIR) / "brk-test.png"
+        png.write_bytes(base64.b64decode(PNG_1x1))
+        look = Look(title="С заставкой", break_background="image:" + str(png), background="image:" + str(png))
+        self.win.efir.save_look(look)
+        self.t.look = look.id
+        screen = Edge.start(f"http://127.0.0.1:{self.port}/", pump=lambda: app.processEvents(), width=1000, height=900)
+        try:
+            self.win.lesson.command({"cmd": "break", "stage": "", "minutes": 5})
+            self.assertTrue(screen.wait("!!document.querySelector('#brk.on .bgwrap .bg-image')", 10))
+            for host in ("#brk .bgwrap", "#bgs"):
+                fit = screen.eval(f"getComputedStyle(document.querySelector('{host} .bg-image .fit')).backgroundSize")
+                fill = screen.eval(f"getComputedStyle(document.querySelector('{host} .bg-image .fill')).backgroundSize")
+                self.assertEqual((fit, fill), ("contain", "cover"), host)             # целиком; поля — размытой копией
+        finally:
+            screen.close()
+            self.win.efir.show_background()
+
+
 def plan_lessons() -> list[Template]:
     """Урок «Функции» по плану «Онлайн 90» (этапы ts1…ts4), сам план и обычный урок."""
     from autoprint import plans

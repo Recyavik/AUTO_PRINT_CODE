@@ -18,7 +18,12 @@
   #bgs { position: fixed; inset: 0; z-index: 0; }
   #caption { z-index: 2; } #brk { z-index: 3; } #vid { z-index: 4; } #dot { z-index: 9; }
   .layer canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
-  .bg-image { position: absolute; inset: 0; background: center / cover no-repeat; }
+  /* картинка-заставка: целиком в окне любой формы (вкладка браузера редко ровно 16:9) — ничего не обрезано;
+     поля по краям — та же картинка, растянутая и размытая (без чёрных полос) */
+  .bg-image { position: absolute; inset: 0; overflow: hidden; background: #000; }
+  .bg-image .fill { position: absolute; inset: -8%; background: center / cover no-repeat;
+    filter: blur(32px) brightness(.55) saturate(1.1); }
+  .bg-image .fit { position: absolute; inset: 0; background: center / contain no-repeat; }
   #caption, #brk { display: flex; flex-direction: column; align-items: center; justify-content: center;
     color: var(--fg); font-family: var(--font); text-align: center; padding: 4vh 6vw; pointer-events: none; }
   #caption { font-weight: 800; font-size: clamp(24px, 6vw, 120px); letter-spacing: .04em; line-height: 1.1;
@@ -327,7 +332,11 @@ class Scene {
     else if (kind === 'image') {
       this.host.style.background = '#000';
       const d = document.createElement('div'); d.className = 'bg-image';
-      d.style.backgroundImage = `url("${value}")`; this.host.appendChild(d);
+      for (const cls of ['fill', 'fit']) {          // fit — вся картинка, fill — поля той же картинкой, размыто
+        const x = document.createElement('div'); x.className = cls;
+        x.style.backgroundImage = `url("${value}")`; d.appendChild(x);
+      }
+      this.host.appendChild(d);
     } else if (kind === 'anim' && ANIM[value]) {
       this.host.style.background = '#000';
       this.canvas = document.createElement('canvas'); this.host.appendChild(this.canvas);
