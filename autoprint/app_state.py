@@ -41,6 +41,67 @@ def plan_state(p, topics: int) -> dict:
             "topics": topics}
 
 
+_LEGACY: bool | None = None
+
+
+def _legacy_found(ef) -> bool:
+    """Найден ли «Таймер вебинара» (ищется один раз за запуск)."""
+    global _LEGACY
+    if _LEGACY is None:
+        try:
+            _LEGACY = ef.legacy_folder() is not None
+        except OSError:
+            _LEGACY = False
+    return _LEGACY
+
+
+def _look_state(lk, ef, lessons) -> dict:
+    from .media_copy import file_status, outside_size
+
+    def bg(v: str) -> dict:
+        kind, _, val = (v or "").partition(":")
+        d = {"value": v or "", "kind": kind if v else ""}
+        if kind == "image":
+            d.update(status=file_status(val), name=val.replace("\\", "/").rsplit("/", 1)[-1],
+                     url=ef.server.media_url(val) if file_status(val) != "missing" else "")
+        return d
+    ex = []
+    for e in lk.exercises:
+        st = file_status(e.path)
+        size = 0
+        if st != "missing":
+            from pathlib import Path
+            size = Path(e.path).stat().st_size
+        ex.append({"title": e.title, "path": e.path, "name": e.path.replace("\\", "/").rsplit("/", 1)[-1], "status": st,
+                   "size": size})
+    font_status = file_status(lk.font[5:]) if (lk.font or "").startswith("file:") else "ok"
+    return {"id": lk.id, "title": lk.title, "background": bg(lk.background), "caption": lk.caption, "exercises": ex,
+            "break_countdown": lk.break_countdown, "break_background": bg(lk.break_background),
+            "break_title": lk.break_title, "break_show_title": lk.break_show_title, "break_done": lk.break_done,
+            "font": lk.font, "font_status": font_status, "text_color": lk.text_color,
+            "users": ef.look_users(lk.id, lessons), "outside": outside_size(lk)}
+
+
+def efir_state(app) -> dict:
+    """Раздел «Эфир»: расписания (без служебных эфиров уроков), оформления с файлами, идёт ли вебинар, экран."""
+    from .efir.model import ANIMATIONS, FONTS
+    ef = app.efir
+    live = ef.store.live
+    looks = {lk.id: lk for lk in ef.store.looks}
+    webinars = [{"id": w.id, "title": w.title, "start": w.start, "break_min": w.break_min, "look_id": w.look_id,
+                 "look": looks[w.look_id].title if w.look_id in looks else "",
+                 "schedule": [{"name": a.name, "min": a.min, "kind": a.kind or "", "demo": a.demo} for a in w.schedule],
+                 "total": w.total_min, "live": bool(live and live.webinar_id == w.id)} for w in ef.store.visible()]
+    return {"webinars": webinars, "looks": [_look_state(lk, ef, app.store.templates) for lk in ef.store.looks],
+            "live_id": live.webinar_id if live else "", "mode": ef.mode, "tab": ef.tab_status()[0],
+            "tab_open": bool(ef.server.running and ef.clients > 0), "legacy_found": _legacy_found(ef),
+            "imported_legacy": bool(ef.store.imported_legacy), "animations": [list(a) for a in ANIMATIONS],
+            "fonts": [list(f) for f in FONTS], "picked": dict(getattr(app, "efir_picked", {"seq": 0, "value": ""})),
+            "brk_ends": int(ef.brk_ends * 1000) if ef.mode == "break" else 0,
+            "break_paused": ef.mode == "break" and ef.brk_left_paused is not None,
+            "exercises": [e.title for e in (ef.webinar.exercises if ef.webinar else [])], "copy_media": app.settings.copy_media}
+
+
 def app_state(app) -> dict:
     from .app_core import lesson_meta
     from .ui.theme import theme
@@ -70,7 +131,7 @@ def app_state(app) -> dict:
                 "start_ms": int(ag.start.timestamp() * 1000) if ag.start else 0,
                 "end_ms": int(ag.end.timestamp() * 1000) if ag.end else 0,
                 # повестка — для маленького режима (урок и вебинар одинаково): этапы с часами
-                "segments": [{"name": sg.activity.name, "kind": sg.activity.kind or "",
+                "segments": [{"name": sg.activity.name, "kind": sg.activity.kind or "", "demo": sg.activity.demo,
                               "start_ms": int(sg.start.timestamp() * 1000), "end_ms": int(sg.end.timestamp() * 1000)}
                              for sg in segs]}
     win = app.window
@@ -94,7 +155,7 @@ def app_state(app) -> dict:
         "window": {"compact": bool(win.compact), "pinned": bool(win.pinned), "maximized": bool(win.isMaximized())},
         "drop": dict(app.drop_info),
         "nav": dict(app.nav),
-        "efir": {},
+        "efir": efir_state(app),
         "settings": {},
         # «Новый урок»: что выбрано в прошлый раз, шаблоны «Начать с» для своего плана, видео зарядок
         "wizard": {"plan": s.lesson_plan, "cls": s.lesson_class, "minutes": s.lesson_minutes, "brk": s.lesson_break,

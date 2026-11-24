@@ -39,8 +39,6 @@ class Base(unittest.TestCase):
         ef = self.win.efir
         if ef.live_webinar() is not None:
             ef.stop_live()
-        if ef.timer_window is not None:
-            ef.timer_window.close_silently()
         self.win._quitting = True
         self.win.close()
         pump()
@@ -111,18 +109,16 @@ class EfirPageTest(Base):
         ef.open_tab = lambda: opened.append(1)
         self.win.lesson.command({"cmd": "start"})
         self.assertEqual(ef.live_lesson_id(), "L")
-        self.assertIsNone(ef.timer_window)                   # «Начать урок» не открывает окно таймера
+        self.assertFalse(self.win.window.compact)            # «Начать урок» окно не уменьшает
         self.assertEqual(opened, [])
         ef.stop_live()
-        self.win.settings.start_timer = self.win.settings.start_screen = True
+        self.win.settings.start_screen = True
         self.win.lesson.command({"cmd": "start"})
-        self.assertIsNotNone(ef.timer_window)
-        self.assertEqual(opened, [1])
+        self.assertEqual(opened, [1])                        # «открывать экран учеников при начале»
 
     def test_start_at_no_timer(self):
         self.win.lesson.command({"cmd": "start_at", "index": 2})
         self.assertEqual(self.win.efir.live_lesson_id(), "L")
-        self.assertIsNone(self.win.efir.timer_window)
 
     def test_break_default_and_minutes(self):
         ef = self.win.efir
@@ -141,7 +137,7 @@ class EfirPageTest(Base):
     def test_look_new_and_edit(self):
         ef = self.win.efir
         edited = []
-        ef.edit_look = lambda lid=None: edited.append(lid)
+        self.win.navigate.connect(lambda h: edited.append(h.rsplit("/", 1)[-1]) if h.startswith("#/efir/looks/") else None)
         n0 = len(ef.store.looks)
         self.win.lesson.command({"cmd": "look_new"})
         self.assertEqual(len(ef.store.looks), n0 + 1)
@@ -152,25 +148,6 @@ class EfirPageTest(Base):
         self.assertEqual(edited, [new.id, new.id])
 
 
-class TimerBreakTest(Base):
-    port = 18973
-
-    def test_popup_buttons(self):
-        from PySide6.QtWidgets import QAbstractSpinBox, QPushButton
-        ef = self.win.efir
-        self.win.settings.start_timer = True
-        self.win.lesson.command({"cmd": "start"})
-        tw = ef.timer_window
-        m = tw._break_menu()
-        self.assertEqual(m.findChildren(QAbstractSpinBox), [])        # поле минут больше не забирает фокус
-        texts = [b.text().strip() for b in m.findChildren(QPushButton)]
-        self.assertEqual(texts[0], "10 мин")                            # по плану — первым
-        self.assertIn("5 мин", texts)
-        self.assertIn("20 мин", texts)
-        started = []
-        ef.start_break = lambda minutes, ends_at=None: started.append(minutes)
-        [b for b in m.findChildren(QPushButton) if b.text().strip() == "15 мин"][0].click()
-        self.assertEqual(started, [15])
 
 
 # ================================================================ Task 7: роли и палитра

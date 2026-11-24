@@ -311,7 +311,7 @@ class LessonController(QObject):
         look.id, look.title = new_id(), "Новое оформление"
         self.efir.save_look(look)
         self._set_preset(t, look.id)
-        self.efir.edit_look(look.id)
+        self.main.show_view(f"#/efir/looks/{look.id}")          # правка оформления — в разделе «Эфир» окна
 
     def _remember_plan(self, t: Template) -> None:
         """Плановое начало идущего урока: от него — «конец 19:30» и сдвиг «+5 мин» после «Начать этот этап сейчас»."""
@@ -537,11 +537,8 @@ class LessonController(QObject):
                 self.efir.break_restart()
             elif cmd == "restore_anchor" and t is not None:
                 self._restore_anchor(t, d.get("ms"))
-            elif cmd == "timer":
-                if self.efir.live_webinar() is None:
-                    self.main._notify("Мини-таймер показывает урок по времени — сначала «Начать урок».")
-                else:
-                    self.efir.show_timer()
+            elif cmd == "timer":                         # 1.0: вместо мини-таймера — маленький режим окна
+                self.main.set_compact(True)
             elif cmd == "look_new" and t is not None:
                 self._look_new(t)
             elif cmd == "look_edit" and t is not None:
@@ -549,7 +546,7 @@ class LessonController(QObject):
                 if look is None:
                     self._look_new(t)
                 else:
-                    self.efir.edit_look(look.id)
+                    self.main.show_view(f"#/efir/looks/{look.id}")
             elif cmd == "prefs":
                 self._set_pref(str(d.get("key") or ""), d.get("value"))
             elif cmd == "settings":

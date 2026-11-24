@@ -455,10 +455,6 @@ class EfirLessonTest(unittest.TestCase):
 
     def tearDown(self):
         from autoprint.efir import store as store_mod
-        if self.ctl.timer_window is not None:
-            self.ctl.timer_window.close_silently()
-        if self.ctl.window is not None:
-            self.ctl.window.close()
         self.ctl.server.stop()
         store_mod.efir_dir = self._efir_dir
 
@@ -509,10 +505,9 @@ class EfirLessonTest(unittest.TestCase):
         self.assertEqual(self.ctl.store.live.anchor, first)
         self.assertEqual(self.ctl.live_webinar().schedule[-1].name, "Итоги")
         other = Template(title="Другой", blocks=[stage("А", 5)])
-        asked = []
-        self.ctl.confirm_replace = lambda cur, new: asked.append((cur, new)) or True   # E9: спросить перед заменой
-        self.ctl.launch_lesson(other, start="09:30", show=False)
-        self.assertEqual(asked, [(t.title, "Другой")])
+        self.assertFalse(self.ctl.launch_lesson(other, start="09:30", show=False))   # E9: идёт урок — без согласия нет
+        self.assertEqual(self.ctl.live_lesson_id(), t.id)
+        self.assertTrue(self.ctl.launch_lesson(other, start="09:30", show=False, force=True))   # страница спросила
         self.assertEqual(self.ctl.store.live.anchor, anchor_at("09:30", datetime.now()))
         self.assertEqual([w.lesson_id for w in self.ctl.store.webinars if w.lesson_id], [other.id])   # старый убран
         self.ctl.stop_live()
@@ -536,15 +531,12 @@ class EfirLessonTest(unittest.TestCase):
         self.assertFalse(self.ctl.launch_lesson(t, show=False))
         self.assertIsNone(self.ctl.store.live)
 
-    def test_efir_window_hides_lessons(self):
-        from autoprint.efir.model import Webinar
-        self.ctl.store.add([Webinar(title="1Т")])
+    def test_efir_list_hides_lessons(self):
+        """«Эфир» в окне (1.0) показывает расписания, а не служебные эфиры уроков."""
+        from autoprint.efir.model import Activity, Webinar
+        self.ctl.store.add([Webinar(title="1Т", schedule=[Activity("А", 5)])])
         self.ctl.launch_lesson(self.lesson(), show=False)
-        self.ctl.show_window()
-        pump(50)
-        from autoprint.ui.efir_window import WebinarCard
-        cards = self.ctl.window.findChildren(WebinarCard)
-        self.assertEqual([c.w.title for c in cards], ["1Т"])
+        self.assertEqual([w.title for w in self.ctl.store.visible()], ["1Т"])
 
 
 def media(path) -> str:
@@ -733,8 +725,8 @@ class ControllerTest(unittest.TestCase):
         finally:
             self.t.active_block = keep
 
-    def test_edit_from_timer_keeps_lesson(self):
-        """Ревью №2: «Изменить…» в таймере идущего урока правит его оформление, а не служебный эфир."""
+    def test_edit_look_of_live_lesson(self):
+        """Ревью №2 (1.0): «Изменить оформление…» идущего урока ведёт к его оформлению в «Эфире», правка — сразу."""
         from autoprint.efir.model import Look
         look = Look(title="Оформление урока", background="anim:cube")
         self.win.efir.store.put_look(look)
@@ -742,20 +734,16 @@ class ControllerTest(unittest.TestCase):
         self.win.lesson.command({"cmd": "start", "now": True})
         try:
             ctl = self.win.efir
-            ctl.edit_live()
-            ed = ctl.editors[-1]
-            self.assertEqual((ed.mode, ed.look.id), ("look", look.id))
-            lk = ed.result()
-            lk.background = "anim:stars"
-            ctl.save_look(lk)
+            nav = []
+            self.win.navigate.connect(nav.append)
+            self.win.lesson.command({"cmd": "look_edit"})
+            self.assertEqual(nav[-1], f"#/efir/looks/{look.id}")
+            lk = ctl.put_look({**ctl.store.look(look.id).__dict__, "exercises": [], "background": "anim:stars"})
             pump(450)
             self.assertEqual(ctl.live_lesson_id(), self.t.id)                       # урок по-прежнему идёт
             self.assertEqual(ctl.live_webinar().background, "anim:stars")           # оформление — сразу
             self.assertEqual([x.title for x in ctl.store.looks].count("Оформление урока"), 1)
         finally:
-            for e in list(self.win.efir.editors):
-                e._dirty = False
-                e.close()
             self.win.lesson.command({"cmd": "stop"})
 
     def test_set_start_cmd(self):

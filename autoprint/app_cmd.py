@@ -320,6 +320,213 @@ class AppCommands(QObject):
             self.app.add_new_lesson(t, notes + list(res.get("notes") or []), res.get("style") or "")
         return {"job": self.app.jobs.start("ai", fn, done, title)}
 
+    # ------------------------------------------------------------ «Эфир» (Task 13)
+    @property
+    def _ef(self):
+        return self.app.efir
+
+    def cmd_efir_opened(self, _d: dict) -> None:
+        """Первое открытие «Эфира»: шаблонов нет, а «Таймер вебинара» есть — перенести его шаблоны сами."""
+        self._ef.auto_import_legacy()
+
+    def call_efir_launch(self, d: dict) -> dict:
+        """«Запустить»: start "" — сейчас, «ЧЧ:ММ» — в это время. Идёт другой эфир — заменить только с force
+        (страница спросила). → {ok, other}."""
+        ef = self._ef
+        cur = ef.live_webinar()
+        wid = str(d.get("id") or "")
+        if cur is not None and cur.id != wid and not d.get("force"):
+            return {"ok": False, "other": cur.title}
+        ok = ef.launch(wid, str(d.get("start") or ""), force=True)
+        self.app.publish_now()
+        return {"ok": bool(ok), "other": ""}
+
+    def cmd_efir_stop(self, _d: dict) -> None:
+        self._ef.stop_live()
+
+    def cmd_efir_start_block(self, d: dict) -> None:
+        """«Начать этот блок сейчас» (без index — текущий), «Начать с блока…»."""
+        idx = d.get("index")
+        self._ef.start_now(None if idx is None else int(idx))
+        self.app.publish_now()
+
+    def cmd_efir_set_start(self, d: dict) -> None:
+        """«Изменить начало…» ("" — с первого блока с этой минуты)."""
+        self._ef.set_start(str(d.get("start") or "").strip())
+        self.app.publish_now()
+
+    def cmd_efir_screen(self, d: dict) -> None:
+        """Экран учеников из табло вебинара (урок не нужен): background | break | exercise | break_adjust |
+        break_pause | exercise_pause."""
+        ef = self._ef
+        op = str(d.get("op") or "")
+        if op == "background":
+            ef.show_background()
+        elif op == "break":
+            w = ef.webinar or ef.live_webinar()
+            ef.start_break(int(d.get("minutes") or 0) or (w.break_min if w else 10))
+        elif op == "exercise":
+            ef.start_exercise(int(d.get("index") or 0))
+        elif op == "break_adjust":
+            ef.break_adjust(max(-3600, min(3600, int(d.get("seconds") or 0))))
+        elif op == "break_pause":
+            ef.break_pause()
+        elif op == "exercise_pause":
+            ef.exercise_pause()
+
+    def call_efir_put_webinar(self, d: dict) -> dict:
+        w = self._ef.put_webinar(dict(d.get("webinar") or {}))
+        self.app.publish_now()
+        return {"id": w.id}
+
+    def call_efir_put_look(self, d: dict) -> dict:
+        lk = self._ef.put_look(dict(d.get("look") or {}))
+        self.app.lesson.schedule_publish()
+        self.app.publish_now()
+        return {"id": lk.id}
+
+    def call_efir_delete_webinar(self, d: dict) -> bool:
+        self._ef.delete_webinar(str(d.get("id") or ""))
+        self.app.publish_now()
+        return True
+
+    def call_efir_delete_look(self, d: dict) -> bool:
+        lid = str(d.get("id") or "")
+        users = self._ef.look_users(lid, self.app.store.templates)
+        if users:
+            raise ValueError("Оформление используется: " + ", ".join(users[:5]) + " — сначала смените его там")
+        if not self._ef.delete_look(lid, self.app.store.templates):
+            raise ValueError("Оформление не удалено")
+        self.app.publish_now()
+        return True
+
+    def call_efir_copy_webinar(self, d: dict) -> dict:
+        c = self._ef.copy_webinar(str(d.get("id") or ""))
+        self.app.publish_now()
+        return {"id": c.id if c else ""}
+
+    def cmd_efir_move(self, d: dict) -> None:
+        self._ef.move_webinar(str(d.get("id") or ""), int(d.get("d") or 1))
+
+    def call_efir_new(self, d: dict) -> dict:
+        """«Новый эфир»: empty — пустой (по образцу), paste — текст (JSON или ответ нейросети), json — файл, legacy —
+        из «Таймера вебинара». → {ids}."""
+        from .efir.model import parse_webinars, sample_webinar
+        how = str(d.get("how") or "empty")
+        ef = self._ef
+        if how == "legacy":
+            n = ef.import_legacy()
+            self.app.publish_now()
+            return {"ids": [w.id for w in ef.store.visible()[-n:]] if n else []}
+        if how == "empty":
+            w = sample_webinar()
+            w.title = "Новый эфир"
+            items = [w]
+        elif how == "json":
+            path = Path(str(d.get("path") or ""))
+            items = parse_webinars(path.read_text(encoding="utf-8-sig"))
+        else:
+            items = parse_webinars(str(d.get("text") or ""))
+        added = ef.add_webinars(items)
+        self.app.publish_now()
+        return {"ids": [w.id for w in added]}
+
+    def call_efir_ai(self, d: dict) -> dict:
+        """«По описанию — нейросеть»: в фоне; нет нейросети — задание в буфер (страница скажет)."""
+        from . import ai
+        from .efir.model import ai_prompt, parse_webinars
+        text = str(d.get("text") or "").strip()
+        if not text:
+            raise ValueError("Опишите эфир: что, сколько минут, где перерыв и зарядки")
+        if not ai.configured(self.app.settings):
+            from PySide6.QtGui import QGuiApplication
+            QGuiApplication.clipboard().setText(ai_prompt() + text)
+            return {"copied": True}
+
+        def work(job):
+            answer, _who = ai.ask(self.app.settings, ai_prompt(), text, job.cancel_event, on_status=job.status,
+                                  on_progress=job.progress)
+            return parse_webinars(answer)
+
+        def done(items):
+            added = self._ef.add_webinars(items)
+            if added:
+                self.app.show_view(f"#/efir/{added[0].id}/edit")
+        return {"job": self.app.jobs.start("ai", work, done, "Расписание эфира")}
+
+    def call_efir_ai_prompt(self, d: dict) -> bool:
+        """«Скопировать для нейросети» / «Скопировать задание с примером»."""
+        from PySide6.QtGui import QGuiApplication
+        from .efir.model import ai_prompt
+        w = self._ef.store.get(str(d.get("id") or "")) if d.get("id") else None
+        QGuiApplication.clipboard().setText(ai_prompt(w))
+        self.app._notify("Задание для нейросети скопировано: допишите в конце своё расписание.", quiet=True)
+        return True
+
+    def call_efir_export(self, d: dict) -> dict:
+        from .efir.model import export_json
+        ws = [self._ef.store.get(str(d.get("id")))] if d.get("id") else self._ef.store.visible()
+        ws = [w for w in ws if w is not None]
+        path = str(d.get("path") or "")
+        if not ws or not path:
+            raise ValueError("нечего сохранять")
+        Path(path).write_text(export_json(ws), encoding="utf-8")
+        self.app._notify(f"Сохранено: {path}", quiet=True)
+        return {"path": path}
+
+    def call_efir_take_file(self, d: dict) -> dict:
+        """Выбранный для оформления файл: копия в программу (настройка «Копировать картинки и видео в программу»)."""
+        from .media_copy import file_status, take_file
+        path = str(d.get("path") or "")
+        if not Path(path).is_file():
+            raise ValueError(f"Файла нет: {path}")
+        if self.app.settings.copy_media:
+            path = take_file(path)
+        return {"path": path, "name": Path(path).name, "size": Path(path).stat().st_size, "status": file_status(path),
+                "url": self._ef.server.media_url(path)}
+
+    def call_efir_copy_files(self, d: dict) -> dict:
+        """«Скопировать в программу»: файлы оформления (или всех оформлений — all) — в фоне, с ходом и отменой; ссылки
+        меняются только после удачной копии."""
+        from . import media_copy, storage
+        ef = self._ef
+        looks = list(ef.store.looks) if d.get("all") else [ef.store.look(str(d.get("id") or ""))]
+        looks = [lk for lk in looks if lk is not None and media_copy.outside_size(lk) > 0]
+        if not looks:
+            return {"job": ""}
+        dest = storage.DATA_DIR / storage.MEDIA_FOLDER
+
+        def work(job):
+            out = []
+            for k, lk in enumerate(looks):
+                out.append(media_copy.copy_look_files(
+                    lk, dest, progress=lambda i, n, name, k=k: job.progress("photos", i, f"{name} ({i} из {n})"),
+                    cancel=job.cancel_event))
+            return out
+
+        def done(new_looks):
+            for lk in new_looks:
+                ef.save_look(lk)
+            self.app._notify("Файлы оформлений скопированы в программу.", quiet=True)
+        title = "Копирую файлы оформлений" if d.get("all") else f"Копирую файлы «{looks[0].title}»"
+        return {"job": self.app.jobs.start("copy", work, done, title)}
+
+    def cmd_efir_preview_break(self, d: dict) -> None:
+        """«Предпросмотр перерыва»: вкладка браузера с перерывом по несохранённым настройкам (ученикам не видно)."""
+        from .efir.model import Webinar, compose, look_from_dict
+        lk = look_from_dict(dict(d.get("look") or {}))
+        w = compose(Webinar(title="Предпросмотр", break_min=int(d.get("minutes") or 10)), lk)
+        self._ef.preview_break(w)
+
+    def cmd_efir_gallery(self, d: dict) -> None:
+        self._ef.open_gallery(str(d.get("current") or ""))
+
+    def cmd_efir_open_tab(self, _d: dict) -> None:
+        self._ef.open_tab()
+
+    def cmd_efir_copy_url(self, _d: dict) -> None:
+        self._ef.copy_url()
+
     def cmd_live_next(self, _d: dict) -> None:
         """Маленький режим, «Следующий этап»: следующий этап урока или блок вебинара — с этой минуты (до начала —
         первый)."""

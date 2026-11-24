@@ -51,8 +51,14 @@ class BridgeTest(AppPage):
         self.assertTrue(self.wait_js("location.hash === '#/settings'"))
 
     def test_cmd_reaches_window(self):
-        self.js("window.appCore.send({cmd: 'window', op: 'regions', drag: [[0, 0, 100, 40]], holes: [], zoom: 1})")
-        self.assertTrue(self.wait_py(lambda: self.app.window.regions.drag == [(0.0, 0.0, 100.0, 40.0)]))
+        # страница сама шлёт свои области (после отрисовки) — наша команда может прийти раньше неё; шлём, пока не дойдёт
+        want = [(0.0, 0.0, 100.0, 40.0)]
+
+        def sent():
+            self.js("window.appCore.send({cmd: 'window', op: 'regions', drag: [[0, 0, 100, 40]], holes: [], zoom: 1})")
+            pump(150)
+            return self.app.window.regions.drag == want
+        self.assertTrue(self.wait_py(sent))
 
 
 CONTRAST_JS = """(() => {

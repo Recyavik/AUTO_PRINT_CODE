@@ -1187,28 +1187,19 @@ class PackageTest(unittest.TestCase):
 
 
 class LiveSafetyTest(unittest.TestCase):
-    def test_timer_close_hides_for_lesson(self):
-        """× мини-таймера во время урока — только прячет таймер; урок идёт дальше, таймер открывается снова."""
-        from PySide6.QtWidgets import QMessageBox
+    def test_compact_during_lesson_keeps_it(self):
+        """1.0: вместо мини-таймера — маленький режим окна; выход из него урок не трогает и ничего не спрашивает."""
         t = Template("У", [stage("А", 5), stage("Б", 10)], id="U")
         win = window([t], 18921)
-        orig = QMessageBox.exec
-        asked = []
-        QMessageBox.exec = lambda box: asked.append(box.text()) or 0
         try:
             t = win.store.get("U")
             win.efir.launch_lesson(t, show=True)
-            tw = win.efir.timer_window
-            self.assertIsNotNone(tw)
-            tw.close()
-            pump(50)
-            self.assertEqual(asked, [])                                              # не спрашивает
-            self.assertFalse(tw.isVisible())
+            win.set_compact(True)
+            self.assertTrue(win.window.compact)
+            win.set_compact(False)
+            self.assertFalse(win.window.compact)
             self.assertTrue(win.efir.live_lesson_id())                               # урок идёт
-            win.efir.show_timer()
-            self.assertTrue(win.efir.timer_window.isVisible())
         finally:
-            QMessageBox.exec = orig
             win.efir.stop_live()
             close(win)
 

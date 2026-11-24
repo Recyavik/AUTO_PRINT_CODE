@@ -54,6 +54,8 @@ const VIEW_NAMES = { new: "wizard" };
 
 function render() {
   const r = route();
+  // экран с несохранённой правкой сам спрашивает и вернёт адрес («Эфир»: правка расписания и оформления)
+  if (current && current.canLeave && current.canLeave(r) === false) return;
   const key = views[r.view] ? r.view : (views.lessons ? "lessons" : Object.keys(views)[0]);
   const name = VIEW_NAMES[key] || key;
   const root = document.getElementById("view") || document.getElementById("app");

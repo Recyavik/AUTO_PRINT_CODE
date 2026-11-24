@@ -166,6 +166,7 @@ export function menu(anchor, items, o = {}) {
     if (!it) continue;
     if (it.sep) { box.append(h("div", { class: "psep" })); continue; }
     if (it.head) { box.append(h("div", { class: "phead" }, it.head)); continue; }
+    if (it.node) { box.append(it.node); continue; }                  // своё содержимое (поле времени и т. п.)
     const b = h("button", { class: "mi" + (it.danger ? " danger" : ""), type: "button", role: "menuitem",
       "aria-checked": it.checked === undefined ? null : String(!!it.checked), disabled: it.disabled || null },
     it.icon ? icon(it.icon, "sm") : null, h("span", { class: "ml" }, it.label), it.hint ? h("span", { class: "mh" }, it.hint) : null);

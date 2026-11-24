@@ -305,7 +305,7 @@ class ServerTest(unittest.TestCase):
             other.stop()
 
 
-# ====================================================================== контроллер и окна
+# ====================================================================== контроллер (окна «Эфира» — с 1.0 в окне программы)
 class FakeMain(QObject):
     def __init__(self):
         super().__init__()
@@ -324,7 +324,7 @@ class ControllerTest(unittest.TestCase):
         self.ctl = efir_control.EfirController(self.main)
         self.video = self.data / "v.mp4"
         self.video.parent.mkdir(parents=True, exist_ok=True)
-        self.video.write_bytes(b"\x00" * 64)
+        self.video.write_bytes(bytes(64))
         w = sample_webinar()
         w.title = "Тест"
         w.exercises = [Exercise("Глаза", str(self.video)), Exercise("Шея", str(self.video))]
@@ -334,26 +334,17 @@ class ControllerTest(unittest.TestCase):
 
     def tearDown(self):
         from autoprint.efir import store as store_mod
-        if self.ctl.timer_window is not None:
-            self.ctl.timer_window.close_silently()
-        for e in list(self.ctl.editors):
-            e._dirty = False
-            e.close()
-        if self.ctl.window is not None:
-            self.ctl.window.close()
         self.ctl.server.stop()
         store_mod.efir_dir = self._efir_dir
         pump(20)
 
     def test_launch_break_exercise_flow(self):
         ctl = self.ctl
-        ctl.launch(self.w.id)
-        self.assertIsNotNone(ctl.timer_window)
+        self.assertTrue(ctl.launch(self.w.id))
         self.assertTrue(ctl.server.running)
         self.assertEqual(ctl.store.live.webinar_id, self.w.id)
         st = ctl.server.snapshot()
         self.assertEqual((st["mode"], st["bg"]), ("idle", {"kind": "color", "value": "#000000"}))
-        # перерыв: 7 мин, ±, пауза
         ctl.start_break(7)
         st = ctl.server.snapshot()
         self.assertEqual(st["mode"], "break")
@@ -369,11 +360,9 @@ class ControllerTest(unittest.TestCase):
         self.assertIsNotNone(ctl.server.snapshot()["brk"]["paused_left"])
         ctl.break_pause()
         self.assertIsNone(ctl.server.snapshot()["brk"]["paused_left"])
-        # время вышло, «+1 мин» — снова отсчёт
         ctl.brk_ends = time.time() - 5
         ctl.break_adjust(60)
         self.assertAlmostEqual(ctl.break_left(), 60, delta=2)
-        # зарядка поверх перерыва, затем конец ролика → фон
         ctl.start_exercise(1)
         st = ctl.server.snapshot()
         self.assertEqual((st["mode"], st["exercise"]["title"]), ("exercise", "Шея"))
@@ -381,11 +370,10 @@ class ControllerTest(unittest.TestCase):
         seq = ctl.ex_seq
         ctl._on_report({"type": "video", "seq": seq, "pos": 10, "dur": 70, "muted": False})
         self.assertAlmostEqual(ctl.exercise_left(), 60)
-        ctl._on_report({"type": "ended", "seq": seq - 1})            # чужой (старый) ролик — не трогаем
+        ctl._on_report({"type": "ended", "seq": seq - 1})
         self.assertEqual(ctl.mode, "exercise")
         ctl._on_report({"type": "ended", "seq": seq})
         self.assertEqual(ctl.server.snapshot()["mode"], "idle")
-        # вкладка: подключилась, звук не разрешён → разрешён
         ctl._on_report({"type": "clients", "count": 1})
         ctl._on_report({"type": "hello", "unlocked": False})
         self.assertEqual(ctl.tab_status()[1], "accent")
@@ -409,103 +397,36 @@ class ControllerTest(unittest.TestCase):
         ag = ctl.agenda()
         self.assertEqual((ag.phase, ag.index), ("live", 3))
         anchor = ctl.store.live.anchor
-        ctl.timer_window.close_silently()
-        ctl.timer_window = None
         ctl.restore()                                                # перезапуск программы — эфир продолжается
-        self.assertIsNotNone(ctl.timer_window)
         self.assertEqual(ctl.store.live.anchor, anchor)
         ctl.stop_live()
         self.assertIsNone(ctl.store.live)
-        self.assertIsNone(ctl.timer_window)
 
-    def test_close_timer_asks_and_ends_live(self):
+    def test_other_live_needs_force(self):
+        """E9 (1.0): заменить идущий эфир — только после вопроса на странице (force)."""
         ctl = self.ctl
-        ctl.launch(self.w.id)
-        tw = ctl.timer_window
-        orig, orig_clicked = QMessageBox.exec, QMessageBox.clickedButton
-        try:
-            QMessageBox.exec = lambda box: box.button(QMessageBox.StandardButton.NoButton) or 0
-            # «Отмена»: окно и эфир остаются
-            QMessageBox.clickedButton = lambda box: None
-            tw.close()
-            self.assertTrue(tw.isVisible())
-            self.assertIsNotNone(ctl.store.live)
-            # «Завершить эфир»
-            QMessageBox.clickedButton = lambda box: next(b for b in box.buttons()
-                                                         if b.text() == "Завершить эфир")
-            tw.close()
-            self.assertFalse(tw.isVisible())
-            self.assertIsNone(ctl.store.live)
-            self.assertIsNone(ctl.timer_window)
-        finally:
-            QMessageBox.exec = orig
-            QMessageBox.clickedButton = orig_clicked
+        other = ctl.add_webinars([Webinar(title="Другой", schedule=[Activity("А", 5)])])[0]
+        self.assertTrue(ctl.launch(self.w.id))
+        self.assertFalse(ctl.launch(other.id))
+        self.assertEqual(ctl.live_webinar().id, self.w.id)
+        self.assertTrue(ctl.launch(other.id, force=True))
+        self.assertEqual(ctl.live_webinar().id, other.id)
 
-    def test_timer_window_all_sizes_render(self):
-        from PySide6.QtGui import QImage
+    def test_put_webinar_and_look(self):
+        """Правка расписания и оформления со страницы сохраняет всё (бывший редактор)."""
         ctl = self.ctl
-        ctl.launch(self.w.id)
-        tw = ctl.timer_window
-        shots = os.environ.get("EFIR_SHOTS")
-        cases = [("before", None), ("live", 2), ("break", 6)]
-        sizes = [(150, 70), (230, 110), (300, 170), (440, 270), (900, 500), (420, 720)]
-        for phase, idx in cases:
-            if idx is None:
-                ctl.store.set_live(self.w.id, datetime.now() + timedelta(minutes=12))
-            else:
-                ctl.start_now(idx)
-            for wd, ht in sizes:
-                tw.resize(wd, ht)
-                pump(10)
-                img = tw.grab().toImage()
-                self.assertFalse(img.isNull())
-                self.assertEqual(tw.strip.isVisible(), wd >= 300 and ht >= 170)
-                if shots:
-                    Path(shots).mkdir(parents=True, exist_ok=True)
-                    img.save(str(Path(shots) / f"timer_{phase}_{wd}x{ht}.png"))
-        # кнопка «Зарядка» видна, когда есть зарядки; без зарядок — нет
-        tw.resize(440, 270)
-        pump(10)
-        self.assertTrue(tw.btn_ex.isVisible())
-        self.w.exercises = []
-        ctl.save_webinar(self.w)
-        tw._refresh()
-        self.assertFalse(tw.btn_ex.isVisible())
-        self.assertIsInstance(QImage(), QImage)
-
-    def test_pin_toggles_setting(self):
-        ctl = self.ctl
-        ctl.launch(self.w.id)
-        tw = ctl.timer_window
-        self.assertTrue(tw.btn_pin.isChecked())
-        tw.btn_pin.setChecked(False)
-        self.assertFalse(self.main.settings.efir_pinned)
-        tw.btn_pin.setChecked(True)
-        self.assertTrue(self.main.settings.efir_pinned)
-
-    def test_editor_saves_everything(self):
-        ctl = self.ctl
-        ctl.edit(self.w.id)
-        ed = ctl.editors[-1]
-        ed.title.setText("Финансовый университет")
-        ed.rows[0].minutes.setValue(3)
-        ed.add_row()
-        ed.rows[-1].name.setText("Перерыв")
-        ed.rows[-1]._name_edited("Перерыв")
-        ed.break_min.setValue(15)
-        ed.save()
-        # 0.10: фон, зарядки, экран перерыва — в оформлении (своё окно редактора)
-        ctl.edit_look(ctl.store.get(self.w.id).look_id)
-        led = ctl.editors[-1]
-        self.assertEqual(led.mode, "look")
-        led.bg.set_value("anim:pipes")
-        led.break_bg.set_value("")
-        led.countdown.setChecked(False)
-        led._on_picked("anim:aurora")                                 # без запроса галереи — не трогаем
-        self.assertEqual(led.bg.value(), "anim:pipes")
-        led._pick_target = led.break_bg
-        led._on_picked("anim:aurora")
-        led.save()
+        w = ctl.store.get(self.w.id)
+        rows = [{"name": a.name, "min": a.min, "kind": a.kind, "demo": a.demo} for a in w.schedule]
+        rows[0]["min"] = 3
+        rows.append({"name": "Перерыв", "min": 10})                   # вид — по названию
+        ctl.put_webinar({"id": w.id, "title": "Финансовый университет", "start": w.start, "break_min": 15,
+                         "look_id": w.look_id, "schedule": rows})
+        with self.assertRaises(ValueError):
+            ctl.put_webinar({"id": w.id, "title": "x", "schedule": []})   # минимум один блок
+        lk = ctl.store.look(w.look_id)
+        d = {"id": lk.id, "title": lk.title, "background": "anim:pipes", "break_background": "anim:aurora",
+             "break_countdown": False, "exercises": [{"title": e.title, "path": e.path} for e in lk.exercises]}
+        ctl.put_look(d)
         w = ctl.store.get(self.w.id)
         self.assertEqual(w.title, "Финансовый университет")
         self.assertEqual(w.schedule[0].min, 3)
@@ -514,87 +435,40 @@ class ControllerTest(unittest.TestCase):
                          ("anim:pipes", "anim:aurora", 15, False))
         self.assertEqual(len(w.exercises), 2)
 
-    def test_new_template_editor(self):
-        self.ctl.edit(None)
-        ed = self.ctl.editors[-1]
-        self.assertTrue(ed.is_new)
-        ed.title.setText("Новый")
-        ed.save()
-        self.assertIn("Новый", [w.title for w in self.ctl.store.webinars])
+    def test_new_look_and_delete_blocked_when_used(self):
+        ctl = self.ctl
+        lk = ctl.put_look({"title": "Новое"})
+        self.assertIsNotNone(ctl.store.look(lk.id))
+        used = ctl.store.get(self.w.id).look_id
+        self.assertFalse(ctl.delete_look(used))                     # расписание на нём — нельзя
+        self.assertTrue(ctl.delete_look(lk.id))
 
-    def test_window_lists_imports_and_auto_imports_legacy(self):
-        from PySide6.QtGui import QGuiApplication
-        from autoprint.ui.efir_window import WebinarCard
+    def test_copy_move_delete_webinar(self):
+        ctl = self.ctl
+        c = ctl.copy_webinar(self.w.id)
+        self.assertEqual(c.title, "Тест — копия")
+        ctl.move_webinar(c.id, -1)
+        self.assertEqual(ctl.store.visible()[0].id, c.id)
+        ctl.launch(c.id)
+        ctl.delete_webinar(c.id)                                     # идёт — эфир завершается
+        self.assertIsNone(ctl.store.get(c.id))
+        self.assertIsNone(ctl.store.live)
+
+    def test_auto_imports_legacy_once(self):
         root = fake_timer_folder()
         orig = legacy.candidates
         legacy.candidates = lambda: [root]
         try:
             self.ctl.store.webinars.clear()                             # пусто → перенос из «Таймера вебинара»
             self.ctl.store.save()
-            self.ctl.show_window()
-            win = self.ctl.window
-            pump(20)
-            cards = win.list_host.findChildren(WebinarCard)
-            self.assertEqual(sorted(c.w.title for c in cards), ["Вебинар 1Т (Первая пара)", "Вторая пара"])
-            QGuiApplication.clipboard().setText('Ответ:\n{"title": "ИИ", "schedule": [{"name": "А", "min": 3}]}')
-            win.import_clipboard()
-            pump(20)
-            self.assertIn("ИИ", [w.title for w in self.ctl.store.webinars])
+            self.ctl.auto_import_legacy()
+            self.assertEqual(sorted(w.title for w in self.ctl.store.visible()),
+                             ["Вебинар 1Т (Первая пара)", "Вторая пара"])
             self.ctl.store.webinars.clear()                             # второй раз сам не переносит
             self.ctl.auto_import_legacy()
             self.assertEqual(self.ctl.store.webinars, [])
         finally:
             legacy.candidates = orig
-
-
-class AiComposeTest(ControllerTest.__base__):
-    """«Нейросеть → Составить по описанию»: ответ разбирается в шаблон и открывается в редакторе."""
-
-    def setUp(self):
-        from autoprint.ui import efir_control
-        from autoprint.efir import store as store_mod
-        self.data = TMP / f"ai-{time.time_ns()}"
-        self._efir_dir = store_mod.efir_dir
-        store_mod.efir_dir = lambda: self.data
-        self.ctl = efir_control.EfirController(FakeMain())
-        self.ctl.store.imported_legacy = True
-
-    def tearDown(self):
-        from autoprint.efir import store as store_mod
-        for e in list(self.ctl.editors):
-            e._dirty = False
-            e.close()
-        if self.ctl.window is not None:
-            self.ctl.window.close()
-        self.ctl.server.stop()
-        store_mod.efir_dir = self._efir_dir
-
-    def test_answer_becomes_template(self):
-        from autoprint import ai
-        self.ctl.show_window()
-        win = self.ctl.window
-        orig_cfg, orig_ask = ai.configured, ai.ask
-        try:
-            ai.configured = lambda s: True
-            answer = ('```json\n{"title": "Пара ИИ", "start": "12:00", "schedule": '
-                      '[{"name": "Теория", "min": 20}, {"name": "Перерыв", "min": 10}]}\n```')
-            ai.ask = lambda s, system, user, **k: (answer, "Тест")
-            from PySide6.QtWidgets import QInputDialog
-            QInputDialog_orig = QInputDialog.getMultiLineText
-            QInputDialog.getMultiLineText = staticmethod(lambda *a, **k: ("теория 20, перерыв 10", True))
-            win.compose_ai()
-            for _ in range(100):
-                pump(20)
-                if not win._ai_busy:
-                    break
-            w = next(x for x in self.ctl.store.webinars if x.title == "Пара ИИ")
-            self.assertEqual([a.kind for a in w.schedule], [KIND_NORMAL, KIND_BREAK])
-            self.assertTrue(any(e.w.id == w.id for e in self.ctl.editors))
-            win._on_ai_done("", "нет сети")
-            self.assertFalse(win._ai_busy)
-        finally:
-            ai.configured, ai.ask = orig_cfg, orig_ask
-            QInputDialog.getMultiLineText = QInputDialog_orig
 
 
 if __name__ == "__main__":

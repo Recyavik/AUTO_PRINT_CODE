@@ -247,6 +247,7 @@ class Settings:
     hotkey_start_delay_ms: int = 150   # пауза перед стартом по хоткею
     button_countdown_s: int = 3        # отсчёт при старте кнопкой в окне
     minimize_on_type: bool = False     # окно сворачивается на время набора и разворачивается после
+    copy_media: bool = True            # файлы, выбранные в оформлении эфира (фон, видео, шрифт), — копией в data/media
     autopause_on_focus_change: bool = True
     guard_enabled: bool = True         # пауза при нажатии клавиши / клике во время печати
     always_on_top: bool = False

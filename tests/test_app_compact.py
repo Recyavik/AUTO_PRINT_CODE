@@ -141,7 +141,6 @@ class WebinarBoardTest(AppPage):
         from autoprint.efir.model import Activity, Webinar
         ef = self.app.efir
         w = ef.store.add([Webinar(title="Пара 1Т", schedule=[Activity("Лекция", 30), Activity("Перерыв", 10, kind="break")])])[0]
-        ef.show_timer = lambda: None
         ef.launch(w.id, "")
         self.app.set_compact(True)
         self.app.publish_now()

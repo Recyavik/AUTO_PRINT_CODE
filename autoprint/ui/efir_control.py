@@ -2,7 +2,8 @@
 
 Экран — три состояния: фон (он же занавес), зарядка (видео), перерыв (заставка с отсчётом). Контроллер держит
 состояние, отдаёт его странице через BroadcastServer и получает от страницы отчёты (подключилась, звук
-разрешён, ход видео, видео кончилось). Окна — EfirWindow (шаблоны), TimerWindow (таймер эфира), редактор.
+разрешён, ход видео, видео кончилось). Расписания и оформления правятся в окне программы (раздел «Эфир», 1.0);
+вопрос «заменить идущий эфир?» задаёт страница (force).
 """
 from __future__ import annotations
 
@@ -15,10 +16,10 @@ from urllib.parse import quote
 
 from PySide6.QtCore import QObject, QTimer, QUrl, Signal
 from PySide6.QtGui import QDesktopServices, QGuiApplication
-from PySide6.QtWidgets import QMessageBox, QWidget
 
 from ..efir import legacy
-from ..efir.model import Webinar, agenda_at, anchor_at, anchor_to_start_at, norm_hhmm, parse_hhmm, segments
+from ..efir.model import (Look, Webinar, agenda_at, anchor_at, anchor_to_start_at, look_from_dict, norm_hhmm,
+                          parse_hhmm, segments, webinar_from_dict)
 from ..efir.server import DEFAULT_PORT, BroadcastServer
 from ..efir.store import WebinarStore
 
@@ -73,9 +74,6 @@ class EfirController(QObject):
         self._tab_opened_at = -1e9       # когда сами открыли вкладку экрана учеников (ensure_tab)
         self.unlocked = False
         self.blocked = False
-        self.timer_window = None
-        self.window = None
-        self.editors: list = []
         self._ticker = QTimer(self)
         self._ticker.setInterval(5000)
         self._ticker.timeout.connect(self._tick)
@@ -260,23 +258,18 @@ class EfirController(QObject):
     def agenda(self, now: datetime | None = None):
         return agenda_at(self.segments(), now or datetime.now())
 
-    def confirm_replace(self, current: str, new: str) -> bool:
-        """E9: идёт другой эфир — заменить его только с согласия."""
-        r = QMessageBox.question(self._owner(), "Идёт эфир", f"Сейчас идёт «{current}». Завершить его и начать «{new}»?")
-        return r == QMessageBox.StandardButton.Yes
-
-    def _may_replace(self, new_id: str, new_title: str) -> bool:
+    def _may_replace(self, new_id: str) -> bool:
+        """E9: идёт другой эфир — заменять его только с согласия (страница спросила и прислала force)."""
         cur = self.live_webinar()
-        if cur is None or cur.id == new_id:
-            return True
-        return self.confirm_replace(cur.title, new_title)
+        return cur is None or cur.id == new_id
 
-    def launch(self, wid: str, start: str | None = None) -> None:
+    def launch(self, wid: str, start: str | None = None, force: bool = False) -> bool:
         """Запустить эфир по шаблону. start: "" — сейчас, "ЧЧ:ММ" — в это время (запоминается в шаблоне как
-        прошлое время старта), None — идущий эфир не трогать (иначе — сейчас)."""
+        прошлое время старта), None — идущий эфир не трогать (иначе — сейчас). False — идёт другой эфир, а замену
+        не подтвердили (force), или шаблона нет."""
         w = self.store.get(wid)
-        if not w or not self._may_replace(w.id, w.title):
-            return
+        if not w or (not force and not self._may_replace(w.id)):
+            return False
         live = self.store.live
         now = datetime.now().replace(microsecond=0)
         if start is None and live and live.webinar_id == wid:
@@ -292,7 +285,7 @@ class EfirController(QObject):
         self.ensure_server()
         self.publish()
         self.live_changed.emit()
-        self.show_timer()
+        return True
 
     def lesson_look(self, t):
         """Оформление эфира урока: своё (Template.look), иначе — оформление шаблона, выбранного в 0.9
@@ -318,7 +311,7 @@ class EfirController(QObject):
         if not w.schedule:
             self.message.emit("У урока нет этапов с минутами — эфир по нему не начать", True)
             return False
-        if not force and not self._may_replace(w.id, w.title):
+        if not force and not self._may_replace(w.id):
             return False
         live = self.store.live
         now = datetime.now().replace(microsecond=0)
@@ -336,28 +329,11 @@ class EfirController(QObject):
         self.ensure_server()
         self.publish()
         self.live_changed.emit()
-        if show:
-            self.show_timer()
         return True
 
     def live_lesson_id(self) -> str:
         w = self.live_webinar()
         return w.lesson_id if w else ""
-
-    def edit_live(self) -> None:
-        """«Изменить…» в таймере. Идёт урок — правится его оформление (расписание урока — его этапы, их правят на
-        экране урока); идёт вебинар — его расписание."""
-        w = self.live_webinar()
-        if w is None:
-            return
-        if not w.lesson_id:
-            self.edit(w.id)
-            return
-        if not w.look_id or self.store.look(w.look_id) is None:
-            self.message.emit("У урока нет оформления экрана эфира — создайте его в «Эфир → Оформления»", True)
-            self.show_window()
-            return
-        self.edit_look(w.look_id)
 
     def refresh_live(self) -> None:
         """Шаблон идущего эфира поправили в редакторе — подхватить фон, зарядки, перерыв."""
@@ -374,9 +350,6 @@ class EfirController(QObject):
         self.mode = MODE_IDLE
         self.publish()
         self.live_changed.emit()
-        if self.timer_window is not None:
-            tw, self.timer_window = self.timer_window, None
-            tw.close_silently()
 
     def start_now(self, index: int | None = None) -> None:
         """«Этап заново с этой минуты»: блок index (по умолчанию — текущий, до начала — первый) начинается сейчас,
@@ -425,8 +398,6 @@ class EfirController(QObject):
         elif self.store.slide:                                      # слайд был у учеников — снова он
             self.mode, self.slide = MODE_SLIDE, dict(self.store.slide)
         self.publish()
-        if not w.lesson_id or getattr(self.settings, "start_timer", True):
-            self.show_timer()                       # урок ведут с экрана урока — мини-таймер только по настройке
 
     def _tick(self) -> None:
         """Раз в 5 с: «время вышло» перерыва постояло BREAK_HOLD_S — экран сам возвращается к фону (E6)."""
@@ -557,31 +528,7 @@ class EfirController(QObject):
             self.brk_left_paused = None
             self.publish()
 
-    # ================================================================ окна
-    def show_window(self) -> None:
-        from .efir_window import EfirWindow
-        if self.window is None:
-            self.window = EfirWindow(self, self._owner())
-        self.window.show_and_raise()
-
-    def _owner(self) -> QWidget | None:
-        """Окно-владелец для «Эфира» и редактора — главное окно (своей кнопки на панели задач у них нет)."""
-        return self.main if isinstance(self.main, QWidget) else None
-
-    def show_timer(self) -> None:
-        from .efir_timer import TimerWindow
-        if self.timer_window is None:
-            self.timer_window = TimerWindow(self)
-        self.timer_window.show_and_raise()
-
-    def edit_look(self, lid: str | None = None) -> None:
-        from .efir_editor import EditorWindow
-        look = self.store.look(lid) if lid else None
-        ed = EditorWindow(self, look, self.window if self.window is not None else self._owner(), mode="look")
-        self.editors.append(ed)
-        ed.closed.connect(lambda e=ed: self.editors.remove(e) if e in self.editors else None)
-        ed.show_and_raise()
-
+    # ================================================================ расписания и оформления (страница «Эфир»)
     def save_look(self, look) -> None:
         self.store.put_look(look)
         self.webinars_changed.emit()
@@ -589,20 +536,85 @@ class EfirController(QObject):
         if live is not None and live.look_id == look.id:
             self.refresh_live()
 
-    def edit(self, wid: str | None = None, parent=None) -> None:
-        from .efir_editor import EditorWindow
-        w = self.store.get(wid) if wid else None
-        ed = EditorWindow(self, w, self.window if self.window is not None else self._owner())
-        self.editors.append(ed)
-        ed.closed.connect(lambda e=ed: self.editors.remove(e) if e in self.editors else None)
-        ed.show_and_raise()
-
     def save_webinar(self, w: Webinar) -> None:
         self.store.put(w)
         self.webinars_changed.emit()
         live = self.store.live
         if live and live.webinar_id == w.id:
             self.refresh_live()
+
+    def put_webinar(self, d: dict) -> Webinar:
+        """Расписание со страницы: {id?, title, start, schedule: [{name, min, kind, demo}], break_min, look_id}.
+        Хотя бы один блок; оформление — выбранное (нет такого — как было у расписания)."""
+        old = self.store.get(str(d.get("id") or "")) if d.get("id") else None
+        rows = [r for r in (d.get("schedule") or []) if isinstance(r, dict) and str(r.get("name") or "").strip()]
+        if not rows:
+            raise ValueError("В расписании нужен хотя бы один блок с названием")
+        w = webinar_from_dict({**d, "schedule": rows})
+        lid = str(d.get("look_id") or (old.look_id if old else ""))
+        w.look_id = lid if self.store.look(lid) is not None else (old.look_id if old else "")
+        if old is not None:
+            w.id, w.lesson_id = old.id, old.lesson_id
+            if not w.look_id:
+                w.look_id = old.look_id
+        if not w.look_id and self.store.looks:
+            w.look_id = self.store.looks[0].id
+        w = self.store.put(w)
+        self.webinars_changed.emit()
+        if self.store.live and self.store.live.webinar_id == w.id:
+            self.refresh_live()
+        return w
+
+    def put_look(self, d: dict) -> Look:
+        """Оформление со страницы (всё: фон, надпись, зарядки, перерыв, шрифт, цвет). Новое — без id."""
+        old = self.store.look(str(d.get("id") or "")) if d.get("id") else None
+        look = look_from_dict(d)
+        if old is None:
+            from ..efir.model import new_id
+            look.id = new_id() if not d.get("id") or self.store.look(look.id) is not None else look.id
+        self.save_look(look)
+        return look
+
+    def delete_webinar(self, wid: str) -> None:
+        """Удалить расписание (идёт — эфир завершается)."""
+        if self.store.live and self.store.live.webinar_id == wid:
+            self.stop_live()
+        self.store.remove(wid)
+        self.webinars_changed.emit()
+
+    def look_users(self, lid: str, lessons=()) -> list[str]:
+        """Где используется оформление: расписания и уроки (названия)."""
+        names = [w.title for w in self.store.users_of(lid)]
+        names += [t.title for t in lessons if getattr(t, "look", "") == lid]
+        return names
+
+    def delete_look(self, lid: str, lessons=()) -> bool:
+        """Удалить оформление; False — оно используется (расписанием или уроком)."""
+        if self.look_users(lid, lessons) or not self.store.remove_look(lid):
+            return False
+        self.webinars_changed.emit()
+        return True
+
+    def copy_webinar(self, wid: str) -> Webinar | None:
+        w = self.store.get(wid)
+        if w is None:
+            return None
+        c = self.store.add([w.copy(f"{w.title} — копия")])[0]
+        self.webinars_changed.emit()
+        return c
+
+    def move_webinar(self, wid: str, delta: int) -> None:
+        self.store.move(wid, -1 if delta < 0 else 1)
+        self.webinars_changed.emit()
+
+    def add_webinars(self, items: list[Webinar]) -> list[Webinar]:
+        """Новые расписания (пусто, вставка, файл JSON, нейросеть): без оформления — оформление по умолчанию."""
+        for w in items:
+            if not w.look_id and self.store.looks and w.background == "color:#000000" and not w.exercises:
+                w.look_id = self.store.looks[0].id
+        added = self.store.add(items)
+        self.webinars_changed.emit()
+        return added
 
     def legacy_folder(self) -> Path | None:
         return legacy.find()
@@ -637,10 +649,5 @@ class EfirController(QObject):
             self.import_legacy(quiet=True)
 
     def shutdown(self) -> None:
-        for ed in list(self.editors):
-            ed.close()
-        for w in (self.timer_window, self.window):
-            if w is not None:
-                w.save_geometry()
         self.server.stop()
 

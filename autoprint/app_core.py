@@ -145,6 +145,10 @@ class App(QObject):
         self._restore_session()
         self.efir.live_changed.connect(lambda: self.changed.emit("library"))
         self.efir.webinars_changed.connect(lambda: self.changed.emit("efir"))
+        for sig in (self.efir.screen_changed, self.efir.tab_changed):
+            sig.connect(lambda: self.changed.emit("efir"))
+        self.efir_picked = {"seq": 0, "value": ""}      # фон, выбранный в галерее браузера, — оформлению на странице
+        self.efir.picked.connect(self._on_efir_picked)
         QTimer.singleShot(1200, self.efir.restore)   # эфир шёл до перезапуска — вернуть его
 
         QTimer.singleShot(8000, self._auto_check_updates)
@@ -536,6 +540,11 @@ class App(QObject):
         self._notify(msg)
         self.open_lesson(last.id)          # идёт урок — спросит, а не завершит его молча
         return last
+
+    def _on_efir_picked(self, value: str) -> None:
+        self.efir_picked = {"seq": self.efir_picked["seq"] + 1, "value": str(value or "")}
+        self.changed.emit("efir")
+        self.show_window()
 
     def add_new_lesson(self, t: Template, notes=(), style: str = "") -> str:
         """Урок из «Нового урока» (нейросеть, вставка): фото по ссылкам сначала скачиваются фоном («Пропустить» —

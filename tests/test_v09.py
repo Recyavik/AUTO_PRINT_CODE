@@ -274,8 +274,6 @@ class StartTest(unittest.TestCase):
         self.ctl.store.add([self.w])
 
     def tearDown(self):
-        if self.ctl.timer_window is not None:
-            self.ctl.timer_window.close_silently()
         self.ctl.server.stop()
 
     def test_anchor_at_future_today(self):
@@ -303,13 +301,6 @@ class StartTest(unittest.TestCase):
         self.assertEqual(anchor_at("", now), datetime(2026, 11, 23, 17, 12, 30))
         self.assertEqual(anchor_at("25:99", now), datetime(2026, 11, 23, 17, 12, 30))
 
-    def test_quick_times(self):
-        from datetime import datetime
-        from autoprint.ui.efir_start import quick_times
-        self.assertEqual(quick_times(datetime(2026, 1, 1, 17, 12)), ["17:30", "18:00"])
-        self.assertEqual(quick_times(datetime(2026, 1, 1, 17, 30)), ["18:00", "18:30"])
-        self.assertEqual(quick_times(datetime(2026, 1, 1, 23, 40)), ["00:00", "00:30"])
-
     def test_launch_now(self):
         from datetime import datetime
         self.ctl.launch(self.w.id, "")
@@ -336,63 +327,6 @@ class StartTest(unittest.TestCase):
         self.assertEqual(self.ctl.store.live.anchor, anchor_at("09:00", datetime.now()))
         self.ctl.set_start("")                      # «Сейчас» — с первого блока с этой минуты
         self.assertLess(abs((datetime.now() - self.ctl.store.live.anchor).total_seconds()), 3)
-
-    def test_editor_has_no_start_field(self):
-        from PySide6.QtWidgets import QTimeEdit
-        from autoprint.ui.efir_editor import EditorWindow
-        ed = EditorWindow(self.ctl, self.w)
-        try:
-            self.assertEqual(ed.findChildren(QTimeEdit), [])
-            ed.w.start = "18:00"
-            self.assertEqual(ed.result().start, "18:00")          # прошлое время старта не теряется
-        finally:
-            ed._dirty = False
-            ed.close()
-
-    def test_row_times_relative(self):
-        from autoprint.ui.efir_editor import EditorWindow
-        ed = EditorWindow(self.ctl, self.w)
-        try:
-            self.assertEqual([r.time_lbl.text() for r in ed.rows[:4]], ["0:00", "0:01", "0:06", "0:20"])
-        finally:
-            ed._dirty = False
-            ed.close()
-
-    def test_start_picker(self):
-        from datetime import datetime
-        from autoprint.ui.efir_start import StartPicker
-        p = StartPicker(last="11:00", now=datetime(2026, 1, 1, 17, 12))
-        got = []
-        p.chosen.connect(got.append)
-        texts = [b.text() for b in p.quick_buttons]
-        self.assertEqual(texts, ["17:30", "18:00", "11:00"])
-        p.now_btn.click()
-        p.quick_buttons[1].click()
-        p.time_edit.setTime(p.time_edit.time().fromString("19:15", "HH:mm"))
-        p.at_btn.click()
-        self.assertEqual(got, ["", "18:00", "19:15"])
-
-
-class StartPickerKeysTest(unittest.TestCase):
-    def test_type_time_from_keyboard(self):
-        """Ревью (решение по «Declined»): время в окне выбора начала набирается с клавиатуры — «1915» → 19:15."""
-        from datetime import datetime
-        from PySide6.QtTest import QTest
-        from autoprint.ui.efir_start import StartPicker
-        p = StartPicker(last="", now=datetime(2026, 1, 1, 17, 12))
-        p.show()
-        pump(40)
-        got = []
-        p.chosen.connect(got.append)
-        p.activateWindow()
-        p.time_edit.setFocus()
-        pump(30)
-        QTest.keyClicks(p.time_edit, "1915")
-        pump(30)
-        p.at_btn.click()
-        self.assertEqual(got, ["19:15"])
-        p.close()
-
 
 class LessonStartTest(unittest.TestCase):
     """Урок в суфлёре: «Начать сейчас» или «в ЧЧ:ММ»; начало идущего урока можно поправить."""
@@ -465,69 +399,21 @@ class LessonStartTest(unittest.TestCase):
 
 # ================================================================ Task 5: редактор шаблона «Эфира»
 
-class EfirEditorTest(unittest.TestCase):
+class EfirLookTest(unittest.TestCase):
+    """Оформление: надпись перерыва, предпросмотр (редактор — с 1.0 на странице «Эфир», tests/test_app_efir.py)."""
+
     def setUp(self):
         from autoprint.efir.model import sample_webinar
-        from autoprint.ui.efir_editor import EditorWindow
         self.ctl = efir_ctl("editor")
         self.w = self.ctl.store.add([sample_webinar()])[0]
-        self.ed = EditorWindow(self.ctl, self.w)                                      # расписание
-        self.ed.show()
-        self.led = EditorWindow(self.ctl, self.ctl.store.look(self.w.look_id), mode="look")   # оформление (0.10)
-        pump(30)
 
     def tearDown(self):
-        import shiboken6
-        for ed in (self.ed, self.led):
-            ed._dirty = False
-            ed.close()
-            shiboken6.delete(ed)
         self.ctl.server.stop()
-
-    def test_total_on_top(self):
-        self.assertEqual(self.ed.total.text(), "Всего 1 ч 40 мин · блоков: 12")
-        y_total = self.ed.total.mapTo(self.ed, QPoint(0, 0)).y()
-        y_row = self.ed.rows[0].mapTo(self.ed, QPoint(0, 0)).y()
-        self.assertLess(y_total, y_row)
-
-    def test_kind_button_sets_kind(self):
-        r = self.ed.rows[0]
-        next(a for a in r.kind_btn.build_menu().actions() if a.text() == "Перерыв").trigger()
-        self.assertEqual(r.activity().kind, "break")
-        self.assertIn("Перерыв", r.kind_btn.text())
-        self.assertTrue(self.ed._dirty)
-
-    def test_demo_button_sets_demo(self):
-        r = self.ed.rows[0]
-        next(a for a in r.demo_btn.build_menu().actions() if a.text() == "Демонстрация ВЫКЛ").trigger()
-        self.assertEqual(r.activity().demo, "off")
-
-    def test_name_guesses_kind_until_touched(self):
-        r = self.ed.rows[1]
-        r.name.setText("Зарядка для глаз")
-        r._name_edited("Зарядка для глаз")
-        self.assertEqual(r.activity().kind, "exercise")
-
-    def test_add_several_exercises(self):
-        from PySide6.QtWidgets import QFileDialog
-        a, b = TMP / "Гимнастика.mp4", TMP / "Шея.mp4"
-        for f in (a, b):
-            f.write_bytes(b"0" * 10)
-        old, old1 = QFileDialog.getOpenFileNames, QFileDialog.getOpenFileName
-        QFileDialog.getOpenFileNames = staticmethod(lambda *x, **k: ([str(a), str(b)], ""))
-        QFileDialog.getOpenFileName = staticmethod(lambda *x, **k: ("", ""))    # одиночный выбор — не диалог
-        try:
-            n = len(self.led.ex_rows)
-            self.led.add_exercise()
-        finally:
-            QFileDialog.getOpenFileNames, QFileDialog.getOpenFileName = old, old1
-        self.assertEqual([r.exercise().title for r in self.led.ex_rows[n:]], ["Гимнастика", "Шея"])
 
     def test_break_show_title_roundtrip(self):
         from autoprint.efir.model import look_from_dict, webinar_from_dict
-        self.led.show_title.setChecked(False)
-        lk = self.led.result()
-        self.assertFalse(lk.break_show_title)
+        lk = self.ctl.put_look({"title": "Без надписи", "break_show_title": False})
+        self.assertFalse(self.ctl.store.look(lk.id).break_show_title)
         self.assertFalse(look_from_dict(lk.to_dict()).break_show_title)
         self.assertTrue(webinar_from_dict({"schedule": [{"name": "А", "min": 5}]}).break_show_title)
 
@@ -539,8 +425,8 @@ class EfirEditorTest(unittest.TestCase):
         self.ctl.show_background()
 
     def test_preview_published(self):
-        self.led.break_title.setText("ОТДЫХАЕМ")
-        url = self.led.preview_break()
+        from autoprint.efir.model import Webinar, compose, look_from_dict
+        url = self.ctl.preview_break(compose(Webinar(title="П"), look_from_dict({"break_title": "ОТДЫХАЕМ"})))
         self.assertIn("ch=preview", url)
         st = self.ctl.server.snapshot("preview")
         self.assertEqual((st["mode"], st["brk"]["title"]), ("break", "ОТДЫХАЕМ"))
@@ -557,81 +443,11 @@ class EfirEditorTest(unittest.TestCase):
 # ================================================================ Task 6: таймер, кнопка «Эфир», экран
 
 class TimerTest(unittest.TestCase):
-    def test_agenda_slice(self):
-        """0.10: «сколько влезает, столько и показывать»: всё влезло — всё; иначе одна строка до текущей."""
-        from autoprint.ui.efir_timer import agenda_slice
-        self.assertEqual(agenda_slice(13, 5, 20), (0, 13))
-        self.assertEqual(agenda_slice(13, 5, 4), (4, 8))
-        self.assertEqual(agenda_slice(13, 0, 4), (0, 4))
-        self.assertEqual(agenda_slice(13, 12, 4), (9, 13))
-        self.assertEqual(agenda_slice(0, 0, 3), (0, 0))
-
-    def test_list_fit(self):
-        from autoprint.ui.efir_timer import list_fit
-        self.assertEqual(list_fit(700, 13), 13)                 # высокое окно — все 13, без «ещё»
-        self.assertGreaterEqual(list_fit(90, 13), 3)
-        self.assertEqual(list_fit(10, 13), 1)
-
-    def test_board_mode(self):
-        from autoprint.ui.efir_timer import board_mode
-        self.assertEqual(board_mode(900, 160), "strip")
-        self.assertEqual(board_mode(700, 400), "side")
-        self.assertEqual(board_mode(300, 500), "below")
-        self.assertEqual(board_mode(200, 80), "hero")
-        self.assertEqual(board_mode(420, 200), "below")           # окно по умолчанию — со списком
-
     def test_screen_no_hint(self):
         from autoprint.efir.server import PAGE_DIR
         html = (PAGE_DIR / "screen.html").read_text(encoding="utf-8")
         self.assertNotIn("Щёлкните по странице", html)
         self.assertNotIn('id="hint"', html)
-
-
-class TimerWindowTest(unittest.TestCase):
-    def setUp(self):
-        from autoprint.efir.model import sample_webinar
-        self.ctl = efir_ctl("timer")
-        self.w = sample_webinar()
-        self.ctl.store.add([self.w])
-        self.ctl.launch(self.w.id, "")
-        self.tw = self.ctl.timer_window
-
-    def tearDown(self):
-        if self.ctl.timer_window is not None:
-            self.ctl.timer_window.close_silently()
-        self.ctl.server.stop()
-
-    def test_open_tab_button(self):
-        self.tw.resize(520, 300)
-        pump(30)
-        self.ctl.clients = 0
-        self.ctl.tab_changed.emit()
-        self.assertTrue(self.tw.btn_tab.isVisibleTo(self.tw))
-        self.ctl.clients = 1
-        self.ctl.tab_changed.emit()
-        self.assertFalse(self.tw.btn_tab.isVisibleTo(self.tw))
-
-    def test_default_window_has_list(self):
-        self.tw.resize(440, 270)                                 # размер окна таймера по умолчанию
-        pump(30)
-        self.tw.board.grab()
-        self.assertEqual(self.tw.board.mode, "below")
-        self.assertGreaterEqual(len(self.tw.board._rows), 3)
-
-    def test_tall_shows_all(self):
-        self.tw.resize(520, 900)
-        pump(30)
-        self.tw.board.grab()
-        self.assertEqual(len(self.tw.board._rows), len(self.w.schedule))      # все 12 блоков, без «ещё N»
-
-    def test_board_paints_all_sizes(self):
-        for size in ((900, 190), (700, 420), (320, 560), (220, 110), (1600, 900)):
-            self.tw.resize(*size)
-            pump(20)
-            img = self.tw.grab()
-            self.assertFalse(img.isNull(), size)
-        self.assertIn(self.tw.board.mode, ("strip", "side", "below", "hero"))
-
 
 
 # ================================================================ Task 7: суфлёр как PDF — плашки ролей

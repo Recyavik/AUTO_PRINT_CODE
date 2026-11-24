@@ -610,7 +610,7 @@ def efir_controller(name: str, port: int):
 
 
 class EfirWindowTest(unittest.TestCase):
-    """Task 15: окно «Эфир» — «Расписания» и «Оформления»."""
+    """Task 15 (1.0 — раздел «Эфир» в окне программы, tests/test_app_efir.py): оформление отдельно от расписания."""
 
     def setUp(self):
         from autoprint.efir.model import Activity, Webinar
@@ -619,58 +619,27 @@ class EfirWindowTest(unittest.TestCase):
                                              background="anim:stars")])[0]
 
     def tearDown(self):
-        for ed in list(self.ctl.editors):
-            ed._dirty = False
-            ed.close()
-        if self.ctl.window is not None:
-            self.ctl.window.close()
         self.ctl.server.stop()
         pump()
 
-    def test_tabs(self):
-        from autoprint.ui.efir_window import LookCard, WebinarCard
-        self.ctl.show_window()
-        win = self.ctl.window
-        pump()
-        self.assertEqual([c.w.title for c in win.findChildren(WebinarCard)], ["Пара 1Т"])
-        win.tabs.set_value("looks")
-        win.refill()
-        pump()
-        self.assertEqual(len(win.findChildren(LookCard)), 1)
-        self.assertFalse(win.btn_import.isVisibleTo(win))
-
-    def test_look_editor_saves(self):
-        self.ctl.edit_look(self.w.look_id)
-        led = self.ctl.editors[-1]
-        led.bg.set_value("anim:aurora")
-        led.save()
+    def test_look_saves_for_schedule(self):
+        d = self.ctl.store.look(self.w.look_id).to_dict()
+        self.ctl.put_look({**d, "background": "anim:aurora"})
         self.assertEqual(self.ctl.store.look(self.w.look_id).background, "anim:aurora")
         self.assertEqual(self.ctl.store.get(self.w.id).background, "anim:aurora")     # расписание видит новое
         self.assertEqual([a.name for a in self.ctl.store.get(self.w.id).schedule], ["Теория"])
 
     def test_cant_delete_used_look(self):
-        from PySide6.QtWidgets import QMessageBox
-        import autoprint.ui.efir_window as EW
-        self.ctl.show_window()
-        shown = []
-        old = EW.QMessageBox.information
-        EW.QMessageBox.information = staticmethod(lambda *a, **k: shown.append(a[1]) or QMessageBox.StandardButton.Ok)
-        try:
-            self.ctl.window.remove_look(self.w.look_id)
-        finally:
-            EW.QMessageBox.information = old
-        self.assertTrue(shown)
+        self.assertFalse(self.ctl.delete_look(self.w.look_id))
         self.assertIsNotNone(self.ctl.store.look(self.w.look_id))
 
-    def test_schedule_editor_picks_look(self):
+    def test_schedule_picks_look(self):
         from autoprint.efir.model import Look
         other = Look(title="ФУ", background="anim:cube")
         self.ctl.store.put_look(other)
-        self.ctl.edit(self.w.id)
-        ed = self.ctl.editors[-1]
-        self.assertFalse(ed.bg.isVisibleTo(ed))                                     # фона в расписании нет
-        ed.look_combo.setCurrentIndex(ed.look_combo.findData(other.id))
-        ed.save()
+        w = self.ctl.store.get(self.w.id)
+        self.ctl.put_webinar({"id": w.id, "title": w.title, "look_id": other.id,
+                              "schedule": [{"name": a.name, "min": a.min} for a in w.schedule]})
         w = self.ctl.store.get(self.w.id)
         self.assertEqual((w.look_id, w.background), (other.id, "anim:cube"))
 
@@ -758,15 +727,10 @@ class FixTest(unittest.TestCase):
         from autoprint.efir.model import Activity, Webinar
         a, b = ctl.store.add([Webinar(title="A", schedule=[Activity("x", 30)]),
                               Webinar(title="B", schedule=[Activity("y", 30)])])
-        asked = []
-        ctl.confirm_replace = lambda cur, new: asked.append((cur, new)) or False
-        ctl.launch(a.id, "")
-        self.assertEqual(asked, [])
-        ctl.launch(b.id, "")
-        self.assertEqual(asked, [("A", "B")])
+        self.assertTrue(ctl.launch(a.id, ""))
+        self.assertFalse(ctl.launch(b.id, ""))                    # 1.0: вопрос — листом страницы, без force — нет
         self.assertEqual(ctl.live_webinar().id, a.id)
-        ctl.confirm_replace = lambda cur, new: True
-        ctl.launch(b.id, "")
+        self.assertTrue(ctl.launch(b.id, "", force=True))
         self.assertEqual(ctl.live_webinar().id, b.id)
         ctl.stop_live()
         ctl.server.stop()
@@ -781,7 +745,6 @@ class FixTest(unittest.TestCase):
         ctl.launch(w.id, "")
         ctl.start_break(10)
         ends = ctl.brk_ends
-        ctl.timer_window and ctl.timer_window.close_silently()
         ctl.server.stop()
         old = store_mod.efir_dir
         store_mod.efir_dir = lambda: folder
@@ -790,7 +753,6 @@ class FixTest(unittest.TestCase):
         finally:
             store_mod.efir_dir = old
         ctl2.settings = ctl.settings
-        ctl2.show_timer = lambda: None
         ctl2.ensure_server()
         self.assertEqual(ctl2.server.snapshot("screen")["mode"], "wait")       # до восстановления — прежний кадр
         ctl2.restore()
@@ -811,27 +773,6 @@ class FixTest(unittest.TestCase):
         self.assertEqual(ctl.mode, "break")
         ctl.stop_live()
         ctl.server.stop()
-
-    def test_editor_cancel_asks(self):
-        from PySide6.QtWidgets import QMessageBox
-        import autoprint.ui.efir_editor as ED
-        ctl = efir_controller("cancel", 18981)
-        from autoprint.efir.model import Activity, Webinar
-        w = ctl.store.add([Webinar(title="Пара", schedule=[Activity("A", 30)])])[0]
-        ctl.edit_look(w.look_id)
-        led = ctl.editors[-1]
-        led.caption.setText("Новая надпись")
-        led.caption.textEdited.emit("Новая надпись")                 # как при наборе с клавиатуры
-        asked = []
-        old = ED.QMessageBox.question
-        ED.QMessageBox.question = staticmethod(lambda *a, **k: asked.append(a[1]) or QMessageBox.StandardButton.Discard)
-        try:
-            led.close()
-        finally:
-            ED.QMessageBox.question = old
-        self.assertTrue(asked)
-        ctl.server.stop()
-
 
 # ================================================================ Task 16, 17: образцовый урок, примеры в базе
 
