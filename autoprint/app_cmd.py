@@ -15,6 +15,7 @@ from PySide6.QtWidgets import QFileDialog
 log = logging.getLogger(__name__)
 
 CALL_TIMEOUT_S = 600
+THREAD_CALLS = {"ai_check", "ai_models"}      # вызовы без окна и настроек Qt — в потоке сервера
 
 # окна выбора файла: назначение → (заголовок, фильтр, несколько файлов)
 PICK = {
@@ -45,6 +46,12 @@ class AppCommands(QObject):
 
     # ------------------------------------------------------------ из потока сервера
     def _call_from_server(self, d: dict) -> tuple[int, dict]:
+        if isinstance(d, dict) and d.get("cmd") in THREAD_CALLS:
+            # запрос в сеть (проверка нейросети, список моделей) — прямо здесь: окно программы не замирает
+            try:
+                return 200, self.call(d)
+            except Exception as e:  # noqa: BLE001
+                return 200, {"ok": False, "error": str(e) or type(e).__name__}
         fut: concurrent.futures.Future = concurrent.futures.Future()
         self._call.emit((d, fut))
         try:
@@ -319,6 +326,151 @@ class AppCommands(QObject):
                 t.title = topic
             self.app.add_new_lesson(t, notes + list(res.get("notes") or []), res.get("style") or "")
         return {"job": self.app.jobs.start("ai", fn, done, title)}
+
+    # ------------------------------------------------------------ «Настройки» (Task 14)
+    def call_set(self, d: dict) -> dict:
+        """Поле настроек: значение проверяется (settings_spec), применяется сразу. → значение, как оно есть теперь
+        (автозапуск мог не включиться)."""
+        from .settings_spec import clean
+        key = str(d.get("key") or "")
+        v = clean(key, d.get("value"))
+        s = self.app.settings
+        if getattr(s, key) != v:
+            setattr(s, key, v)
+            self.app.on_setting_changed(key)
+            if key.startswith("page_") or key in ("start_screen", "start_timer"):
+                self.app.lesson.schedule_publish()
+        self.app.publish_now()
+        return {"value": getattr(s, key)}
+
+    def call_set_hotkey(self, d: dict) -> dict:
+        """Хоткей: подходит ли, не занят ли другим, «Старт / пауза» — обязателен. → {ok, error}."""
+        from .hotkeys import parse_hotkey
+        from .settings_spec import HOTKEY_TITLES
+        s = self.app.settings
+        key, value = str(d.get("key") or ""), str(d.get("value") or "").strip()
+        if key not in dict(HOTKEY_TITLES):
+            raise ValueError("нет такого хоткея")
+        if key == "hotkey_toggle" and not value:
+            return {"ok": False, "error": "Хоткей «Старт / пауза» нужен всегда."}
+        if value:
+            wanted = parse_hotkey(value)        # сравниваются клавиши, а не текст: «Ctrl++» и «Ctrl+=» — одно
+            if wanted is None:
+                return {"ok": False, "error": f"«{value}» — не подходит"}
+            for k, title in HOTKEY_TITLES:
+                if k != key and parse_hotkey(getattr(s, k)) == wanted:
+                    return {"ok": False, "error": f"«{value}» уже назначен: «{title}»."}
+        if getattr(s, key) != value:
+            setattr(s, key, value)
+            self.app.on_setting_changed("hotkeys")
+        self.app.publish_now()
+        return {"ok": True}
+
+    def cmd_hotkey_capture(self, d: dict) -> None:
+        """Пока страница ждёт сочетание — глобальные хоткеи сняты."""
+        self.app.hotkey_capture(bool(d.get("on")))
+
+    def cmd_test_sound(self, _d: dict) -> None:
+        s = self.app.settings
+        self.app.test_sound(s.sound_style, s.sound_volume)
+
+    def call_sound_delete(self, _d: dict) -> bool:
+        from .sounds import DEFAULT_STYLE, delete_custom, is_custom
+        s = self.app.settings
+        key = s.sound_style
+        if not is_custom(key):
+            return False
+        s.sound_style = DEFAULT_STYLE                 # сначала переключить: файлы набора освободятся
+        self.app.on_setting_changed("sound_style")
+        delete_custom(key)
+        self.app.publish_now()
+        return True
+
+    def cmd_record_sound(self, _d: dict) -> None:
+        """«Записать звук клавиатуры…» (до листа записи в окне, Task 15 — прежнее окошко поверх окна программы)."""
+        from .ui.record_dialog import RecordDialog
+        self.app.hotkey_capture(True)
+        try:
+            dlg = RecordDialog(self.app.window, volume=max(40, self.app.settings.sound_volume))
+            dlg.exec()
+            key = dlg.style_key
+        finally:
+            self.app.hotkey_capture(False)
+        if key:
+            self.app.settings.sound_style = key
+            self.app.on_setting_changed("sound_style")
+            self.app._notify("Свой звук сохранён и выбран. «Послушать» — как он звучит при печати.")
+        self.app.publish_now()
+
+    def cmd_restart(self, _d: dict) -> None:
+        self.app.restart_app()
+
+    def cmd_open_log(self, _d: dict) -> None:
+        self.app._open_log()
+
+    def cmd_open_data(self, _d: dict) -> None:
+        self.app._open_data_dir()
+
+    def cmd_update_check(self, _d: dict) -> None:
+        self.app.check_updates(manual=True)
+
+    def cmd_report(self, _d: dict) -> None:
+        self.app.open_report()
+
+    def call_ai_set(self, d: dict) -> dict:
+        """Нейросеть (which: main | backup): provider, url, key (шифруется DPAPI), model. → {problem}. Ключ назад
+        не отдаётся."""
+        from . import ai
+        s = self.app.settings
+        field = "ai_backup_provider" if d.get("which") == "backup" else "ai_provider"
+        if "provider" in d:
+            pid = str(d.get("provider") or "")
+            if pid and ai.provider(pid) is None:
+                raise ValueError("нет такой нейросети")
+            setattr(s, field, pid)
+        pid = getattr(s, field)
+        if pid:
+            if "url" in d:
+                s.ai_urls[pid] = str(d.get("url") or "").strip()
+            if "key" in d:
+                s.ai_keys[pid] = ai.protect(str(d.get("key") or "").strip())
+            if "model" in d:
+                s.ai_models[pid] = str(d.get("model") or "").strip()
+        self.app.on_setting_changed("ai")
+        self.app.publish_now()
+        c = ai.config(s, pid) if pid else None
+        return {"problem": (ai.problem(c) or "") if c else ""}
+
+    def _ai_config(self, d: dict):
+        from . import ai
+        s = self.app.settings
+        pid = getattr(s, "ai_backup_provider" if d.get("which") == "backup" else "ai_provider")
+        c = ai.config(s, pid) if pid else None
+        if c is None:
+            raise ValueError("Нейросеть не выбрана")
+        return c
+
+    def call_ai_models(self, d: dict) -> list:
+        """Список моделей сервера (в потоке сервера: окно не замирает)."""
+        from . import ai
+        try:
+            return ai.list_models(self._ai_config(d))
+        except ai.AIError as e:
+            raise ValueError(f"Список моделей не получен: {e}") from None
+
+    def call_ai_check(self, d: dict) -> dict:
+        """«Проверить»: короткий запрос — время и ответ (в потоке сервера)."""
+        from . import ai
+        c = self._ai_config(d)
+        try:
+            ms, sample = ai.check(c)
+        except ai.AIError as e:
+            return {"ok": False, "text": str(e)}
+        return {"ok": True, "ms": ms, "text": f"{c.provider.name} ответил: «{sample}»"}
+
+    def call_copy_all_media(self, _d: dict) -> dict:
+        """«Скопировать файлы всех оформлений в программу» (Настройки → Урок)."""
+        return self.call_efir_copy_files({"all": True})
 
     # ------------------------------------------------------------ «Эфир» (Task 13)
     @property

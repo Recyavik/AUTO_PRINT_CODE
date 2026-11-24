@@ -1,0 +1,67 @@
+/* «Настройки»: слева разделы (прилипают при прокрутке), справа карточки со строками «подпись — управление». */
+.settings .setwrap { max-width: 1040px; margin: 0 auto; display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 28px;
+  align-items: start; }
+#setnav { position: sticky; top: 0; display: flex; flex-direction: column; gap: 2px; padding: 4px 0; }
+#setnav button { display: flex; align-items: center; gap: 10px; height: 38px; padding: 0 12px; border: 0; border-radius: var(--r);
+  background: none; color: var(--dim); font: inherit; font-weight: 500; text-align: left; cursor: pointer; }
+#setnav button:hover { background: var(--raised); color: var(--text); }
+#setnav button[aria-current="page"] { background: var(--accent-soft); color: var(--text); box-shadow: inset 2px 0 0 var(--accent); }
+#setnav button[aria-current="page"] .i { color: var(--accent); }
+#setnav button span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+#setbody { display: flex; flex-direction: column; gap: 18px; min-width: 0; }
+#setbody > h1 { margin-bottom: 4px; }
+.scard { background: var(--panel); border: 1px solid var(--line); border-radius: var(--r-lg); padding: 6px 20px; }
+.scard > h3 { font-size: 13.5px; font-weight: 600; color: var(--faint); padding: 12px 0 4px; }
+.srow { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 12px 0;
+  border-top: 1px solid var(--line); flex-wrap: wrap; }
+.scard > h3 + .srow, .scard > .srow:first-child { border-top: 0; }
+.srt { display: flex; flex-direction: column; gap: 2px; min-width: 200px; flex: 1 1 260px; }
+.srt b { font-weight: 500; }
+.srt small { font-size: 13px; color: var(--faint); line-height: 1.4; }
+.src { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: flex-end; min-width: 0; }
+.srow.swrow { display: block; padding: 8px 0; }
+.srow .sel { min-width: 220px; max-width: 100%; }
+.snote { color: var(--faint); font-size: 13.5px; line-height: 1.5; max-width: 72ch; padding: 0 4px; }
+
+/* громкость */
+#f-sound_volume { width: 180px; accent-color: var(--accent); }
+.vval { min-width: 48px; text-align: right; color: var(--dim); font-weight: 500; }
+
+/* хоткеи */
+.hk { min-width: 170px; height: 38px; padding: 0 14px; border-radius: var(--r); border: 1px solid var(--line2); background: var(--sunken);
+  color: var(--text); font: 500 14px var(--mono); cursor: pointer; text-align: center; }
+.hk:hover { border-color: var(--accent-line); }
+.hk.capturing { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
+.hk.clash { border-color: var(--live); color: var(--live); }
+.hkpad { width: 32px; flex: none; }
+
+/* нейросеть */
+.aibox { display: flex; flex-direction: column; gap: 14px; padding: 12px 0 16px; }
+.aibox .field > .src { justify-content: flex-start; }
+.aibox .inp { width: 100%; max-width: 520px; }
+.aibox .sel { max-width: 520px; }
+.aibox .phint { line-height: 1.45; max-width: 72ch; }
+#aiModelMain.inp, #aiModelBackup.inp { width: 300px; }
+#aiBackup { border-top: 1px solid var(--line); }
+
+/* о программе */
+.abouthead { display: flex; align-items: center; gap: 16px; }
+.abouthead h2 { font-size: 22px; font-weight: 700; }
+.alogo { width: 54px; height: 54px; border-radius: var(--r-md); display: grid; place-items: center; background: var(--accent);
+  color: var(--on-accent); flex: none; }
+.alogo .i { width: 28px; height: 28px; }
+.abtns { display: flex; flex-wrap: wrap; gap: 10px; }
+.howto { padding: 8px 0 14px 20px; display: flex; flex-direction: column; gap: 6px; }
+.howto b.mono { font-weight: 600; }
+.rolegrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; padding: 8px 0 14px; }
+.rolei { display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; border-radius: var(--r); background: var(--raised); }
+.rolei small { color: var(--faint); font-size: 13px; }
+.rel { align-self: flex-start; font-size: 14px; }
+
+@media (max-width: 760px) {
+  .settings .setwrap { grid-template-columns: minmax(0, 1fr); gap: 14px; }
+  #setnav { position: static; flex-direction: row; flex-wrap: wrap; }
+  #setnav button span { display: none; }
+  #setnav button[aria-current="page"] span { display: inline; }
+}

@@ -10,6 +10,7 @@
 <link rel="stylesheet" href="/static/app/wizard.css">
 <link rel="stylesheet" href="/static/app/compact.css">
 <link rel="stylesheet" href="/static/app/efir.css">
+<link rel="stylesheet" href="/static/app/settings.css">
 </head>
 <body>
 <div id="app"></div>
@@ -26,12 +27,14 @@ import "/static/app/sheets.js";
 import { wizardView } from "/static/app/wizard.js";
 import "/static/app/compact.js";
 import { efirView } from "/static/app/efir.js";
+import { settingsView } from "/static/app/settings.js";
 Object.assign(views, placeholders);
 views.dev = devView;
 views.lessons = lessonsView;
 views.lesson = lessonView;
 views.new = wizardView;
 views.efir = efirView;
+views.settings = settingsView;
 mountShell(document.getElementById("app"));
 boot();
 </script>

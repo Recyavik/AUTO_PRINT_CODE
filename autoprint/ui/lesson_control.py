@@ -142,11 +142,13 @@ class LessonController(QObject):
         self.schedule_publish()
 
     def _launch(self, t: Template, **kw) -> bool:
-        """«Начать урок» со страницы: мини-таймер и экран учеников — только если так в «Моих настройках»."""
+        """«Начать урок» со страницы: маленький режим и экран учеников — только если так в «Настройки → Урок»."""
         s = self.main.settings
-        ok = self.efir.launch_lesson(t, show=s.start_timer, **kw)
+        ok = self.efir.launch_lesson(t, **kw)
         if ok and s.start_screen and self.efir.clients <= 0:
             self.efir.open_tab()
+        if ok and s.start_timer:                       # «При начале урока — маленький режим» (бывший мини-таймер)
+            self.main.set_compact(True)
         return ok
 
     def chat_prompt(self, t: Template) -> None:

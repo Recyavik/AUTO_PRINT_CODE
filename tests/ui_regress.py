@@ -123,18 +123,6 @@ def main() -> int:
     check("пауза во время отсчёта: остаётся «Пауза», печать не началась", st == PAUSED and RUNNING not in states
           and e.state == IDLE, f"состояние={st}, поток жив={alive}, история={states}")
 
-    # хоткей без Ctrl/Alt/Win (просто буква) не принимается — он перестал бы печататься во всех программах
-    from PySide6.QtTest import QTest
-    from autoprint.ui.settings_window import HotkeyField
-    f = HotkeyField("Ctrl+F9")
-    got = []
-    f.edited.connect(got.append)
-    f.capturing = True
-    QTest.keyClick(f, Qt.Key.Key_A)
-    f.capturing = True
-    QTest.keyClick(f, Qt.Key.Key_F8, Qt.KeyboardModifier.ShiftModifier)
-    check("хоткей: буква без Ctrl отклонена, Shift+F8 принят", got == ["Shift+F8"], repr(got))
-
     # переводы строк Windows в образце из файла — как в редакторе
     from autoprint.storage import _block_from
     blk = _block_from({"type": "code", "text": "a = 1\r\nb = 2", "steps": ["1", 2]})

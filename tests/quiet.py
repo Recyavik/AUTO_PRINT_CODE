@@ -64,9 +64,10 @@ def patch() -> None:
     class FakeHotkeys(QObject):
         triggered = Signal(str)
         failed = Signal(str)
+        _bindings: dict = {}
 
-        def set_bindings(self, _b) -> None:
-            pass
+        def set_bindings(self, b) -> None:      # как у настоящего: что назначено сейчас (видно тестам)
+            self._bindings = dict(b)
 
         def shutdown(self) -> None:
             pass

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from . import __version__, scenario
 from .scenario_import import looks_like_scenario
-from .storage import BLOCK_IMAGE, BLOCK_STAGE, KIND_PLAN, STRUCTURES
+from .storage import BLOCK_IMAGE, BLOCK_STAGE, KIND_PLAN, PROFILES, STRUCTURES
 
 PREF_KEYS = ("page_plan", "page_past", "page_stage_timer", "start_screen", "start_timer")
 
@@ -82,6 +82,42 @@ def _look_state(lk, ef, lessons) -> dict:
             "users": ef.look_users(lk.id, lessons), "outside": outside_size(lk)}
 
 
+def _provider_state(s, which: str) -> dict:
+    """Нейросеть (основная или запасная) для «Настроек»: адрес, модель, есть ли ключ — сам ключ не уходит."""
+    from . import ai
+    pid = getattr(s, which) or ""
+    c = ai.config(s, pid) if pid else None
+    return {"id": pid, "url": c.url if c else "", "model": c.model if c else "",
+            "key_set": bool(s.ai_keys.get(pid)) if pid else False, "problem": (ai.problem(c) or "") if c else ""}
+
+
+def settings_state(app) -> dict:
+    """«Настройки»: поля экрана (settings_spec.FIELDS), хоткеи, звуки, нейросети, обновления. Без ключей нейросети."""
+    from . import __version__ as version, ai, updater
+    from .settings_spec import FIELDS, HOTKEY_TITLES
+    from .sounds import available_styles, is_custom
+    s = app.settings
+    d = {k: getattr(s, k) for k in FIELDS}
+    cli = _cli_found()
+    d.update(
+        hotkeys=[{"key": k, "title": t, "value": getattr(s, k)} for k, t in HOTKEY_TITLES],
+        sound_styles=[[k, title, is_custom(k)] for k, title in available_styles().items()],
+        providers=[{"id": p.id, "name": p.name, "kind": p.kind, "hint": p.hint, "url": p.url, "needs_key": p.needs_key,
+                    "models": [list(m) for m in p.models], "model": p.model,
+                    "installed": bool(cli.get("claude" if p.id == "claudeCli" else "codex")) if p.kind == "cli" else None}
+                   for p in ai.PROVIDERS],
+        ai={"main": _provider_state(s, "ai_provider"), "backup": _provider_state(s, "ai_backup_provider")},
+        version=version, update_last_check=s.update_last_check, can_self_update=updater.can_self_update(),
+        looks_outside=sum(lk.get("outside", 0) for lk in efir_state_cached(app).get("looks", [])),
+        profiles=[[k, t] for k, t in PROFILES.items()], releases_url=updater.RELEASES_PAGE,
+    )
+    return d
+
+
+def efir_state_cached(app) -> dict:
+    return getattr(app, "_efir_state_last", None) or efir_state(app)
+
+
 def efir_state(app) -> dict:
     """Раздел «Эфир»: расписания (без служебных эфиров уроков), оформления с файлами, идёт ли вебинар, экран."""
     from .efir.model import ANIMATIONS, FONTS
@@ -135,6 +171,7 @@ def app_state(app) -> dict:
                               "start_ms": int(sg.start.timestamp() * 1000), "end_ms": int(sg.end.timestamp() * 1000)}
                              for sg in segs]}
     win = app.window
+    efir = app._efir_state_last = efir_state(app)
     return {
         "version": __version__,
         "dark": bool(theme.dark),
@@ -155,8 +192,8 @@ def app_state(app) -> dict:
         "window": {"compact": bool(win.compact), "pinned": bool(win.pinned), "maximized": bool(win.isMaximized())},
         "drop": dict(app.drop_info),
         "nav": dict(app.nav),
-        "efir": efir_state(app),
-        "settings": {},
+        "efir": efir,
+        "settings": settings_state(app),
         # «Новый урок»: что выбрано в прошлый раз, шаблоны «Начать с» для своего плана, видео зарядок
         "wizard": {"plan": s.lesson_plan, "cls": s.lesson_class, "minutes": s.lesson_minutes, "brk": s.lesson_break,
                    "style": s.lesson_style, "task": s.lesson_task, "explain": s.lesson_explain,
