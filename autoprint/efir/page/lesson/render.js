@@ -529,7 +529,9 @@ export function renderPlan() {
   const stages = L ? stagesOf(A.items) : [];
   plan.hidden = !stages.length;
   if (!stages.length) { plan.innerHTML = ""; return; }
-  if (plan.contains(document.activeElement)) { plan.dataset.stale = "1"; return; }
+  // не перерисовывать, только пока набирают минуты в поле плана (кнопка в фокусе — не повод ждать: «Закрепить сбоку»)
+  const fa = document.activeElement;
+  if (plan.contains(fa) && fa.matches("input, textarea")) { plan.dataset.stale = "1"; return; }
   plan.dataset.stale = "";
   plan.innerHTML = "";
   const fixed = !!(L.fixed && L.plan);

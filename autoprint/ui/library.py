@@ -135,7 +135,7 @@ class LibraryPanel(QWidget):
         self.list.setEditTriggers(QAbstractItemView.EditTrigger.EditKeyPressed)
         self.list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.list.itemDoubleClicked.connect(lambda _it: self.open_requested.emit())
+        # двойной щелчок в Windows — это и itemDoubleClicked, и itemActivated: слушаем одно (иначе два окна суфлёра)
         self.list.itemActivated.connect(lambda _it: self.open_requested.emit())
         lay.addWidget(self.list, 1)
 

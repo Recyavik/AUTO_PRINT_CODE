@@ -1106,6 +1106,39 @@ class TabAutoOpenTest(unittest.TestCase):
             close(win)
 
 
+class OneWindowTest(unittest.TestCase):
+    def test_double_click_opens_lesson_once(self):
+        """Двойной щелчок по уроку в списке — одно открытие, а не два окна суфлёра."""
+        win = window([Template("У", [stage("А", 5)], id="U")], 18925)
+        opened = []
+        win.library.open_requested.connect(lambda: opened.append(1))
+        try:
+            lib = win.library.list
+            it = lib.item(0)
+            lib.itemDoubleClicked.emit(it)              # двойной щелчок в Windows: Qt шлёт оба сигнала подряд
+            lib.itemActivated.emit(it)
+            pump(50)
+            self.assertEqual(len(opened), 1)
+        finally:
+            close(win)
+
+    def test_page_window_not_launched_twice_while_starting(self):
+        """Окно суфлёра ещё открывается (Edge запущен, окна пока нет) — второй вызов не запускает второй Edge."""
+        from autoprint.ui.lesson_control import PageWindow
+
+        class Proc:
+            pid = 4242
+
+            def poll(self):
+                return None
+        launched = []
+        pw = PageWindow(TMP / "edge-prof", popen=lambda *a, **k: launched.append(1) or Proc(), edge=lambda: "msedge.exe",
+                        find_window=lambda pid: None, raise_window=lambda h: None)
+        self.assertTrue(pw.open("http://127.0.0.1:1/lesson"))
+        self.assertTrue(pw.open("http://127.0.0.1:1/lesson"))
+        self.assertEqual(len(launched), 1)
+
+
 class LiveSafetyTest(unittest.TestCase):
     def test_timer_close_hides_for_lesson(self):
         """× мини-таймера во время урока — только прячет таймер; урок идёт дальше, таймер открывается снова."""

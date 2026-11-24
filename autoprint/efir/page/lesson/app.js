@@ -1098,7 +1098,8 @@ $("plan").addEventListener("keydown", (e) => {
 $("plan").addEventListener("focusout", (e) => {
   const inp = e.target.closest(".pmin");
   if (inp && inp.isConnected) commitPlanMinutes(inp);
-  setTimeout(() => { if ($("plan").dataset.stale && !$("plan").contains(document.activeElement)) renderPlan(); }, 0);
+  setTimeout(() => { const fa = document.activeElement;
+    if ($("plan").dataset.stale && !($("plan").contains(fa) && fa.matches("input, textarea"))) renderPlan(); }, 0);
 });
 $("plan").addEventListener("input", (e) => {
   const inp = e.target.closest(".pmin");

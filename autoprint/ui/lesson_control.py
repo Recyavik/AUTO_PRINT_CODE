@@ -53,17 +53,21 @@ class PageWindow:
         self._find = find_window or winapi.find_process_window
         self._raise = raise_window or winapi.raise_window
         self.proc = None
+        self._started = -1e9      # когда запустили Edge: окно появляется не сразу
 
     def alive(self) -> bool:
         return self.proc is not None and self.proc.poll() is None
 
     def open(self, url: str) -> bool:
         """True — окно показано (поднято или открыто); False — Edge нет, пусть откроется браузер по умолчанию."""
+        import time
         if self.alive():
             hwnd = self._find(self.proc.pid)
             if hwnd:
                 self._raise(hwnd)
                 return True
+            if time.monotonic() - self._started < 15:
+                return True               # окно ещё открывается (двойной щелчок, повторное «Открыть») — не второй Edge
         edge = self._edge()
         if not edge:
             return False
@@ -78,6 +82,7 @@ class PageWindow:
             self.proc = proc          # главный процесс профиля; повторный запуск лишь передаёт ему адрес
             from .. import winapi
             winapi.own_pids.add(proc.pid)    # в окно экрана урока печатать нельзя (E13)
+        self._started = time.monotonic()
         return True
 
     def close(self) -> None:
