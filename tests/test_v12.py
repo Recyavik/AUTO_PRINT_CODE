@@ -607,5 +607,95 @@ class PromptTest(unittest.TestCase):
             close(win)
 
 
+# ================================================================ Task 9: картинки по ссылкам
+
+PNG = __import__("base64").b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==")
+
+
+class FakeResp:
+    def __init__(self, url, ctype, body, final=None):
+        self.url, self.body, self.final = url, body, final or url
+        self.headers = {"Content-Type": ctype}
+        self.pos = 0
+
+    def read(self, n=-1):
+        chunk = self.body[self.pos:self.pos + n] if n > 0 else self.body[self.pos:]
+        self.pos += len(chunk)
+        return chunk
+
+    def geturl(self):
+        return self.final
+
+    def close(self):
+        pass
+
+
+def fake(cases, seen=None):
+    def opener(url, timeout):
+        if seen is not None:
+            seen.append(url)
+        c = cases.get(url)
+        if c is None:
+            raise OSError("нет сети")
+        return FakeResp(url, *c)
+    return opener
+
+
+class WebImagesTest(unittest.TestCase):
+    def test_downloads_public_png(self):
+        from autoprint import web_images
+        t = Template("У", [Block(BLOCK_IMAGE, "https://ex.org/cat.png", title="Кот", id="i")])
+        seen = []
+        notes = web_images.fetch_images(t, opener=fake({"https://ex.org/cat.png": ("image/png", PNG)}),
+                                        resolve=lambda h: ["93.184.216.34"], progress=lambda a, b: seen.append((a, b)))
+        self.assertEqual(notes, [])
+        self.assertIsNotNone(storage.media_path(t.find_block("i").text))
+        self.assertEqual(seen[-1], (1, 1))
+        self.assertEqual(t.find_block("i").title, "Кот")
+
+    def test_private_html_big_redirect_refused(self):   # Review Focus 4
+        from autoprint import web_images
+        cases = {"http://192.168.1.1/x.png": ("image/png", PNG), "https://ex.org/page": ("text/html", b"<html>"),
+                 "https://ex.org/big.png": ("image/png", b"0" * (web_images.MAX_BYTES + 1)),
+                 "https://ex.org/redir.png": ("image/png", PNG, "http://127.0.0.1/x.png"), "ftp://ex.org/a.png": None,
+                 "https://ex.org/a.svg": ("image/svg+xml", b"<svg/>")}
+        t = Template("У", [Block(BLOCK_IMAGE, u, title=f"к{i}", id=f"b{i}") for i, u in enumerate(cases)])
+        res = {"192.168.1.1": ["192.168.1.1"], "127.0.0.1": ["127.0.0.1"]}
+        seen = []
+        notes = web_images.fetch_images(t, opener=fake(cases, seen), resolve=lambda h: res.get(h, ["93.184.216.34"]))
+        texts = [b.text for b in t.blocks]
+        # не интернет (частный адрес, перенаправление туда, не http) — место «Нужна картинка», ссылка убрана
+        self.assertEqual([texts[0], texts[3], texts[4]], ["", "", ""])
+        self.assertEqual([t.blocks[i].title for i in (0, 3, 4)], ["к0", "к3", "к4"])
+        # интернет, но не картинка / слишком большая / SVG — ссылка остаётся
+        self.assertEqual([texts[1], texts[2], texts[5]], ["https://ex.org/page", "https://ex.org/big.png", "https://ex.org/a.svg"])
+        self.assertIn("Не скачалось: 3", " ".join(notes))
+        self.assertIn("не из интернета: 3", " ".join(notes))
+        self.assertNotIn("http://192.168.1.1/x.png", seen)                       # в локальную сеть даже не ходили
+        self.assertNotIn("ftp://ex.org/a.png", seen)
+
+    def test_cancel_and_limit(self):
+        import threading
+        from autoprint import web_images
+        t = Template("У", [Block(BLOCK_IMAGE, f"https://ex.org/{i}.png") for i in range(45)])
+        ev = threading.Event()
+        ev.set()
+        web_images.fetch_images(t, cancel=ev, opener=fake({}), resolve=lambda h: ["93.184.216.34"])
+        self.assertTrue(all(b.text.startswith("https://") for b in t.blocks))
+        seen = []
+        cases = {f"https://ex.org/{i}.png": ("image/png", PNG) for i in range(45)}
+        web_images.fetch_images(t, opener=fake(cases, seen), resolve=lambda h: ["93.184.216.34"])
+        self.assertEqual(len(seen), 40)                                           # не больше 40 на урок
+        self.assertEqual(sum(1 for b in t.blocks if b.text.startswith("https://")), 5)
+
+    def test_is_local_url(self):
+        from autoprint import web_images
+        for u in ("http://localhost/a.png", "http://192.168.0.5/a.png", "http://[::1]/a.png", "http://printer.local/a.png",
+                  "http://10.0.0.1/a", "http://169.254.1.1/a", "file:///C:/x.png", "ftp://ex.org/a.png", "http://127.0.0.1:8791/x"):
+            self.assertTrue(web_images.is_local_url(u), u)
+        for u in ("https://ex.org/a.png", "http://93.184.216.34/a.png"):
+            self.assertFalse(web_images.is_local_url(u), u)
+
+
 if __name__ == "__main__":
     unittest.main()
