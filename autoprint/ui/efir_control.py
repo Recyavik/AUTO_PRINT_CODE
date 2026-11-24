@@ -36,6 +36,7 @@ class EfirController(QObject):
     webinars_changed = Signal()
     picked = Signal(str)            # фон выбран в галерее
     message = Signal(str, bool)     # текст, предупреждение
+    screen_key = Signal(str)        # кликер нажали на вкладке учеников (◀ ▶, PageUp / PageDown, B) — уроку
     _report = Signal(dict)          # из потока сервера → в поток интерфейса
     _pick = Signal(dict)
 
@@ -114,6 +115,9 @@ class EfirController(QObject):
 
     def _on_report(self, d: dict) -> None:
         kind = d.get("type")
+        if kind == "key":
+            self.screen_key.emit(str(d.get("key") or "")[:20])
+            return
         if kind == "clients":
             self.clients = int(d.get("count") or 0)
             if self.clients == 0:

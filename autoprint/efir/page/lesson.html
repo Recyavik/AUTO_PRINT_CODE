@@ -200,6 +200,9 @@ body.mode-prep .lbl .sub { cursor: text; }
   letter-spacing: 0; background: transparent; color: var(--dim); }
 .toscreen:hover { color: var(--text); border-color: var(--accent-line); }
 .blk.onscreen .r-image figure { box-shadow: 0 0 0 3px var(--accent); border-radius: 10px; }
+/* «Урок» на ноутбуке: слайд не выше 40% экрана — заметки к нему видны сразу под ним */
+body.mode-lesson .r-image figure img { max-height: min(40vh, 520px); }
+.blk[data-id] { scroll-margin-top: calc(var(--hh, 64px) + 12px); }
 .blk.onscreen .toscreen { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
 .r-goal { --rc: var(--say); }
 .lbl .how { text-transform: none; letter-spacing: 0; font-size: 12px; font-weight: 600; color: var(--dim); }

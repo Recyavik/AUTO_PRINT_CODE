@@ -42,7 +42,7 @@ _ROLE_BY_NAME = {**{k: k for k in ROLES}, **{v[1].lower(): k for k, v in ROLES.i
                  "ловушки": "trap", "вывод": "output", "подсказка": "hint", "домашка": "homework", "цель": "goal"}
 
 _STAGE = re.compile(r"^##\s+(.+?)\s*$")
-_STAGE_TAIL = re.compile(r"\s*·\s*(\d+)\s*мин(?:\s*·\s*(\S+))?\s*$", re.I)
+_STAGE_TAIL = re.compile(r"\s*(?:[·—–-]\s*|\()(\d+)\s*мин(?:ут[аы]?|\.)?\)?(?:\s*·\s*(\S+))?\s*$", re.I)
 _PART = re.compile(r"^#\s+(.+?)\s*$")
 _CALLOUT = re.compile(r"^\[!([^\]]+)\]\s*(.*)$")
 _FENCE = re.compile(r"^(`{3,}|~{3,})\s*([^\s`]*)\s*(.*)$")

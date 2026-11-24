@@ -119,6 +119,7 @@ class LessonController(QObject):
         self.efir.server.on_command = self._cmd.emit
         self.efir.server.on_edit = self._edit_from_server
         self.efir.server.on_upload = self._upload_from_server
+        self.efir.screen_key.connect(self._screen_key)
         self._cmd.connect(self.command)
         self._call.connect(self._do_call)
         self.edits = 0           # сколько правок со страницы применено — страница знает, какие уже в состоянии
@@ -231,6 +232,18 @@ class LessonController(QObject):
             return
         self.main._notify(msg, tray=bool(notes))
         self.main.open_lesson(new.id, ask=False)
+
+    def _screen_key(self, key: str) -> None:
+        """Кликер нажали на вкладке учеников (её могли щёлкнуть мышью) — листаем слайды так же, как с экрана урока."""
+        t = self.current()
+        if t is None:
+            return
+        if key in ("ArrowRight", "PageDown"):
+            self._slide_step(t, 1)
+        elif key in ("ArrowLeft", "PageUp"):
+            self._slide_step(t, -1)
+        elif key in ("b", "B", "и", "И", ".", "ю"):
+            self.efir.show_background()
 
     @staticmethod
     def _slides(t: Template) -> list:

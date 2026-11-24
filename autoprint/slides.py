@@ -148,59 +148,105 @@ def pptx_info(path: str) -> tuple[list[dict], list[tuple[str, list[int]]]]:
     return slides, sections
 
 
-# пометки в заметках докладчика → роли
-_MARKS = [(re.compile(r"^(скажи|говоришь|говорю|дословно)\s*:\s*", re.I), "say"),
-          (re.compile(r"^(спроси|вопрос)\s*:\s*", re.I), "ask"),
-          (re.compile(r"^(сделай|делаешь|действие)\s*:\s*", re.I), "do"),
-          (re.compile(r"^термин\s*:\s*", re.I), "term"),
-          (re.compile(r"^(важно!?)\s*:?\s+", re.I), "important"),
-          (re.compile(r"^(задание|задача)\s*:\s*", re.I), "task"),
-          (re.compile(r"^(расскажи|своими словами)\s*:\s*", re.I), "tell"),
-          (re.compile(r"^(покажи|показываешь)\s*:\s*", re.I), "show")]
+# пометки в заметках докладчика → роли (как пишут в конспектах: «Сказать:», «Вопрос классу:», «ДЗ —», «[Покажи]»)
+_ROLE_WORDS = {
+    "say": ("скажи", "сказать", "говоришь", "говорю", "дословно", "учитель", "реплика"),
+    "ask": ("спроси", "спросить", "вопрос", "вопросы", "вопрос классу", "вопрос к классу"),
+    "answer": ("ответ", "ответы", "дети", "ученики", "ответ учеников", "ответы учеников"),
+    "do": ("сделай", "сделать", "делаешь", "действие"),
+    "show": ("покажи", "показать", "показываешь"),
+    "tell": ("расскажи", "рассказать", "объясни", "объяснить", "своими словами"),
+    "term": ("термин", "определение"),
+    "important": ("важно", "важно!"),
+    "task": ("задание", "задача", "задание ученикам"),
+    "homework": ("дз", "д/з", "домашнее задание", "домашка"),
+    "goal": ("цель", "цель урока"),
+    "hint": ("подсказка", "если застрял", "если застряли"),
+    "extra": ("для быстрых",),
+    "trap": ("ошибки", "типичные ошибки", "ловушки"),
+    "text": ("для себя", "заметка"),
+    "stage": ("этап",),
+}
+_WORD_ROLE = {w: r for r, ws in _ROLE_WORDS.items() for w in ws}
+_MARK = re.compile(r"^\s*(?:[-•*]\s+|\d+[).]\s+)?(?:\[(?P<b>[^\]]{1,30})\]\s*|"
+                   r"(?P<w>[А-Яа-яЁёA-Za-z/! ]{2,30}?)(?:\s+\d+)?\s*(?::|—|–|-(?=\s))\s*)(?P<rest>.*)$")
+_BULLET = re.compile(r"^\s*(?:[-•*]|\d+[).])\s+")
+
+
+def _marker(line: str) -> tuple[str, str] | None:
+    """(роль, остаток строки) — если строка начинается с пометки, иначе None."""
+    m = _MARK.match(line)
+    if not m:
+        return None
+    word = re.sub(r"\s+", " ", (m.group("b") or m.group("w") or "").strip().lower())
+    role = _WORD_ROLE.get(word)
+    return (role, m.group("rest").strip()) if role else None
+
+
 _ANSWER = re.compile(r"^\s*(→|->)\s*")
 
 
 def notes_blocks(text: str) -> list[Block]:
-    """Заметки докладчика → плашки. Пустая строка заканчивает плашку; строки «→» — ответы к «Спроси»."""
+    """Заметки докладчика → плашки. Пометка действует до следующей пометки или пустой строки (реплику, разбитую
+    Enter'ом, не рвём); «Ответ:», «Ученики:», строки «→» и «- …» после «Ответы:» — ответы к вопросу;
+    «Этап: Название · 10 мин» — новый этап. Без пометки — «Расскажи»."""
+    from .lesson_md import _KIND_BY_WORD, _STAGE_TAIL
     out: list[Block] = []
-    role, lines = "", []
+    role, lines, answers = "", [], False
 
     def flush() -> None:
-        nonlocal role, lines
+        nonlocal role, lines, answers
         body = "\n".join(lines).strip()
         if body:
             r = role or "tell"
             if r == "term":
                 head, sep, rest = body.partition("\n")
                 m = re.match(r"^(.+?)\s+[—–-]\s+(.+)$", head)
-                if m and not sep:
-                    body = m.group(1).strip() + "\n" + m.group(2).strip()
-                elif m:
-                    body = m.group(1).strip() + "\n" + m.group(2).strip() + "\n" + rest
+                if m:
+                    body = m.group(1).strip() + "\n" + m.group(2).strip() + ("\n" + rest if sep else "")
             out.append(Block(BLOCK_MARKDOWN, body, role=r))
-        role, lines = "", []
+        role, lines, answers = "", [], False
+
+    def answer(a: str) -> None:
+        nonlocal role
+        if a:
+            if role != "ask":                     # «Учитель: …» / «Ученики: …» — реплика становится вопросом
+                role = "ask"
+            lines.append("→ " + a)
 
     for raw in (text or "").replace("\r", "\n").split("\n"):
         ln = raw.strip()
         if not ln:
             flush()
             continue
-        if _ANSWER.match(ln) and role == "ask":
-            lines.append("→ " + _ANSWER.sub("", ln))
+        if _ANSWER.match(ln):
+            answer(_ANSWER.sub("", ln).strip())
             continue
-        for rx, r in _MARKS:
-            m = rx.match(ln)
-            if m:
+        mk = _marker(ln)
+        if mk is None:
+            if answers and lines:
+                answer(_BULLET.sub("", ln).strip())
+            else:
+                lines.append(ln)
+            continue
+        r, rest = mk
+        if r == "answer":
+            if not lines:
                 flush()
-                role = r
-                rest = ln[m.end():].strip()
-                if rest:
-                    lines.append(rest)
-                break
-        else:
-            if role in ("say", "ask", "do", "important", "task", "show") and lines:
-                flush()                   # без пометки после помеченной строки — уже своими словами (у термина — определение)
-            lines.append(ln)
+            answers = True
+            answer(rest)
+            continue
+        flush()
+        if r == "stage":
+            tail = _STAGE_TAIL.search(rest)
+            minutes = int(tail.group(1)) if tail else 0
+            kind = _KIND_BY_WORD.get((tail.group(2) or "").lower(), "") if tail else ""
+            title = rest[:tail.start()].strip() if tail else rest
+            out.append(Block(BLOCK_STAGE, "", title=title or "Этап", minutes=min(minutes, 600), stage_kind=kind))
+            continue
+        role = r
+        if rest:
+            lines.append(rest)
     flush()
     return out
 
@@ -247,11 +293,21 @@ def from_pptx(path: str, pdf: str | None = None, minutes: int = DEFAULT_MINUTES,
     groups = [(n, g) for n, g in groups if g] or [("Презентация", use)]
     mins = _split_minutes(minutes, [len(g) for _n, g in groups])
     blocks: list[Block] = []
+    marked = 0                                      # минуты этапов из пометок «Этап: … · 10 мин»
     for (name, group), m in zip(groups, mins):
-        blocks.append(Block(BLOCK_STAGE, "", title=name, minutes=m))
+        part: list[Block] = []
         for s in group:
-            blocks.append(Block(BLOCK_IMAGE, images.get(s["n"], ""), title=s["title"], slide=s["n"]))
-            blocks += notes_blocks(s["notes"])
+            nb = notes_blocks(s["notes"])
+            stages = [b for b in nb if b.type == BLOCK_STAGE]
+            marked += sum(b.minutes for b in stages)
+            part += stages                          # этап из заметок начинается с этого слайда
+            part.append(Block(BLOCK_IMAGE, images.get(s["n"], ""), title=s["title"], slide=s["n"]))
+            part += [b for b in nb if b.type != BLOCK_STAGE]
+        if not (part and part[0].type == BLOCK_STAGE):
+            blocks.append(Block(BLOCK_STAGE, "", title=name, minutes=m))
+        blocks += part
+    if marked and not sections and blocks and blocks[0].type == BLOCK_STAGE and blocks[0].title == "Презентация":
+        blocks[0].minutes = max(5, minutes - marked)
     if need_pdf:
         warns.append("Картинок слайдов нет: сохраните презентацию как PDF (Файл → Сохранить как → PDF) и выберите "
                      "оба файла — заметки возьмём из PPTX.")

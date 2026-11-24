@@ -358,7 +358,7 @@ function renderScreenCtl() {
     back.title = "Ученикам — снова фон (B)";
     back.onclick = () => cmd({ cmd: "background" });
     box.appendChild(back);
-  } else {
+  } else if (stagesOf(A.items).some((s) => s.item.kind === "break")) {   // в уроке есть перерыв — кнопка под рукой
     const br = el("button", "", "Перерыв");
     br.title = "Перерыв ученикам — по плану урока (другие минуты — в «У учеников ▾»)";
     br.onclick = () => cmd({ cmd: "break", stage: currentBreakStage() });
@@ -672,7 +672,7 @@ function renderStrip(elapsed, cur, stages) {
   const first = stages[0], last = stages[stages.length - 1];
   if (cur >= 0) {
     const c = stages[cur], pv = stages[cur - 1], nx = stages[cur + 1];
-    const timer = prefs().page_stage_timer !== false ? " · " + mmss((c.end - elapsed) * 60) + " из " + c.minutes : "";
+    const timer = prefs().page_stage_timer !== false ? " · осталось " + mmss((c.end - elapsed) * 60) : "";
     set(pb, pv ? "‹ " + name(pv) : "", pv && pv.id);
     set(cb, "● " + name(c) + timer, c.id);
     set(nb, nx ? name(nx) + " (" + nx.minutes + ") ›" : "", nx && nx.id);
@@ -687,7 +687,7 @@ function renderStrip(elapsed, cur, stages) {
   }
   let endText = "";
   if (A.S && A.S.live) {
-    endText = "конец " + clockAt(A.S.live.anchor + total * 60000);
+    endText = "конец в " + clockAt(A.S.live.anchor + total * 60000);
     const sh = A.S.live.shift || 0;
     if (sh) endText += (sh > 0 ? " · +" : " · −") + Math.abs(sh) + " мин";
   }
@@ -1066,7 +1066,7 @@ function apply(state) {
   if (state.live && !(prev && prev.live) && A.mode !== "lesson") setMode("lesson");
   // слайд у учеников сменился (учитель листает) — «я здесь»: лента показывает этот слайд
   const sb = state.efir && state.efir.mode === "slide" ? state.efir.slide_bid : "";
-  if (sb && sb !== A.slideBid && A.mode === "lesson") requestAnimationFrame(() => nodeOf(sb)?.scrollIntoView({ behavior: "smooth", block: "center" }));
+  if (sb && sb !== A.slideBid && A.mode === "lesson") requestAnimationFrame(() => nodeOf(sb)?.scrollIntoView({ behavior: "smooth", block: "start" }));
   A.slideBid = sb;
   applyPrefs();
   rebuildItems();

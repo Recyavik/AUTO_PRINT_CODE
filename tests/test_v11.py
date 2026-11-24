@@ -413,7 +413,7 @@ class PresentationTest(unittest.TestCase):
         imgs = [(b.slide, b.title) for b in t.blocks if b.type == BLOCK_IMAGE]
         self.assertEqual(imgs, [(1, "Титул"), (2, "Вопрос"), (3, "Практика")])
         notes = [(b.role, b.text) for b in t.blocks if b.type == BLOCK_MARKDOWN]
-        self.assertEqual(notes, [("say", "Добрый день, сегодня функции."), ("tell", "Это тема всего урока."),
+        self.assertEqual(notes, [("say", "Добрый день, сегодня функции.\nЭто тема всего урока."),
                                  ("ask", "Что такое функция?\n→ блок кода с именем\n→ команда"),
                                  ("do", "открой редактор."), ("term", "Аргумент\nзначение в скобках"),
                                  ("important", "отступ 4 пробела."), ("task", "напишите функцию.")])
@@ -656,8 +656,8 @@ class StructureTest(Base):
         self.assertEqual(list(st), ["empty", "school45", "online90", "pair90"])
         t = self.win.store.add_from_structure("school45")
         stages = [(b.title, b.minutes) for b in t.blocks if b.type == BLOCK_STAGE]
-        self.assertEqual(stages, [("Оргмомент", 2), ("Актуализация знаний", 5), ("Новый материал", 15),
-                                  ("Закрепление", 15), ("Рефлексия", 5), ("Домашнее задание", 3)])
+        self.assertEqual(stages, [("Оргмомент", 2), ("Цель и мотивация", 3), ("Актуализация знаний", 5),
+                                  ("Новый материал", 15), ("Закрепление", 12), ("Домашнее задание", 3), ("Рефлексия", 5)])
         self.assertEqual(t.blocks[0].role, "goal")
         self.assertTrue(any(b.role == "homework" for b in t.blocks if b.type == BLOCK_MARKDOWN))
         t2 = self.win.store.add_from_structure("online90")
@@ -718,6 +718,90 @@ class SampleV3Test(unittest.TestCase):
             migrations.SAMPLE_V2_FINGERPRINTS = keep
         self.assertEqual(store.templates, [mine])
         self.assertIn("samples_v11", s.migrations)
+
+
+# ================================================================ Task 15: замечания методиста
+
+class MethodologyFixTest(unittest.TestCase):
+    def test_stage_line_tolerant(self):
+        from autoprint import lesson_md
+        md = ("---\ntitle: Т\n---\n\n## Разминка — 10 мин\n\nтекст\n\n## Теория (15 мин)\n\nтекст\n\n"
+              "## Практика · 20 минут\n\nтекст\n\n## Перерыв · 10 мин · перерыв\n")
+        t = lesson_md.parse(md, None, "Т")
+        st = [(b.title, b.minutes, b.stage_kind) for b in t.blocks if b.type == BLOCK_STAGE]
+        self.assertEqual(st, [("Разминка", 10, ""), ("Теория", 15, ""), ("Практика", 20, ""), ("Перерыв", 10, "break")])
+
+    def test_notes_markers_extended(self):
+        from autoprint.slides import notes_blocks
+        text = ("Сказать: Добрый день.\nСегодня клетка.\n\nВопрос классу: Из чего состоит клетка?\nОтвет: из ядра и цитоплазмы\n"
+                "Ответы:\n- ядро\n- мембрана\n\nДЗ: параграф 5\nЦель — узнать строение клетки\nПодсказка: вспомните микроскоп\n"
+                "Для быстрых: нарисуйте клетку\nОшибки: путают ядро и ядрышко\nДля себя: проверить проектор\n"
+                "Учитель: Откройте тетради.\nУченики: Открыли.\nОпределение: Клетка — единица живого\n[Покажи] слайд с ядром")
+        got = [(b.role, b.text) for b in notes_blocks(text)]
+        self.assertEqual(got, [
+            ("say", "Добрый день.\nСегодня клетка."),
+            ("ask", "Из чего состоит клетка?\n→ из ядра и цитоплазмы\n→ ядро\n→ мембрана"),
+            ("homework", "параграф 5"), ("goal", "узнать строение клетки"), ("hint", "вспомните микроскоп"),
+            ("extra", "нарисуйте клетку"), ("trap", "путают ядро и ядрышко"), ("text", "проверить проектор"),
+            ("ask", "Откройте тетради.\n→ Открыли."), ("term", "Клетка\nединица живого"), ("show", "слайд с ядром")])
+
+    def test_stage_marker_in_notes(self):
+        from autoprint import slides
+        deck = make_pptx(TMP / "stagenotes.pptx", [
+            {"file": 1, "title": "Титул", "notes": "Сказать: привет"},
+            {"file": 2, "title": "Клетка", "notes": "Этап: Новый материал · 15 мин\nСказать: клетка — основа"},
+            {"file": 3, "title": "Тест", "notes": "Этап: Закрепление — 10 мин\nЗадание: тест"}])
+        pdf = make_pdf(TMP / "stagenotes.pdf", ["Титул", "Клетка", "Тест"])
+        t, _w, _n = slides.from_pptx(deck, pdf=pdf, minutes=45)
+        order = [(b.type, b.title if b.type != BLOCK_MARKDOWN else b.role) for b in t.blocks]
+        self.assertEqual(order, [(BLOCK_STAGE, "Презентация"), (BLOCK_IMAGE, "Титул"), (BLOCK_MARKDOWN, "say"),
+                                 (BLOCK_STAGE, "Новый материал"), (BLOCK_IMAGE, "Клетка"), (BLOCK_MARKDOWN, "say"),
+                                 (BLOCK_STAGE, "Закрепление"), (BLOCK_IMAGE, "Тест"), (BLOCK_MARKDOWN, "task")])
+        self.assertEqual([b.minutes for b in t.blocks if b.type == BLOCK_STAGE], [20, 15, 10])
+
+    def test_slides_prompt_keeps_notes(self):
+        from autoprint import lesson_ai as L
+        p = L.slides_prompt(slides_lesson())
+        self.assertIn("Скажи про тему", p)                     # заметки учителя под слайдом 1 — в промпте
+        self.assertIn("почти дословно", p)
+        self.assertIn("Класс / возраст", p)
+        self.assertIn("ОБЯЗАТЕЛЬНО", p)
+        self.assertIn("→ частая ошибка", p)
+        self.assertIn("Строка этапа строго", p)
+        self.assertIn("Начни ответ строкой ~~~markdown", p)
+
+    def test_school45_structure(self):
+        st = storage.STRUCTURES["school45"][1]
+        self.assertEqual([s[0] for s in st], ["Оргмомент", "Цель и мотивация", "Актуализация знаний", "Новый материал",
+                                             "Закрепление", "Домашнее задание", "Рефлексия"])
+        self.assertEqual(sum(s[1] for s in st), 45)
+
+
+class ScreenKeysTest(Base):
+    port = 18979
+
+    def setUp(self):
+        self.L = slides_lesson("L")
+        self.win = make_window([self.L], port=self.port)
+        self.win.lesson.open_page = lambda: None
+        self.win.printer.set_focus("L")
+
+    def test_keys_from_students_tab(self):
+        ef = self.win.efir
+        ef._on_report({"type": "key", "key": "PageDown"})       # щёлкнули по вкладке учеников — кликер листает и там
+        pump(50)
+        self.assertEqual((ef.slide or {}).get("bid"), "sl1")
+        ef._on_report({"type": "key", "key": "ArrowRight"})
+        pump(50)
+        self.assertEqual(ef.slide["bid"], "sl2")
+        ef._on_report({"type": "key", "key": "b"})
+        pump(50)
+        self.assertEqual(ef.mode, "idle")
+
+    def test_screen_page_sends_keys(self):
+        from autoprint.efir.server import PAGE_DIR
+        html = (PAGE_DIR / "screen.html").read_text(encoding="utf-8")
+        self.assertIn("report({ type: 'key'", html)
 
 
 if __name__ == "__main__":

@@ -591,7 +591,10 @@ class PageV11Test(Page):
         btn = "[...document.querySelectorAll('header button')].find(b => b.textContent.trim() === '{}')"
         try:
             self.assertTrue(self.edge.wait(f"!!{chip} && {chip}.textContent.includes('Экран учеников не открыт')"))
-            self.js(btn.format("Перерыв") + ".click()")
+            self.assertFalse(self.js(f"!!{btn.format('Перерыв')}"))     # в уроке нет этапа-перерыва — кнопки нет
+            self.js(f"{chip}.click()")
+            self.assertTrue(self.edge.wait("!!document.querySelector('.menu')"))
+            self.js("[...document.querySelectorAll('.menu .mi')].find(b => b.textContent.includes('Перерыв по плану')).click()")
             self.assertTrue(self.wait_py(lambda: ef.mode == "break"))
             self.assertTrue(self.edge.wait(f"{chip}.textContent.includes('перерыв')"))
             self.js(btn.format("Вернуть фон") + ".click()")

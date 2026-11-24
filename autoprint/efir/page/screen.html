@@ -528,6 +528,13 @@ function startScreen() {
     report({ type: 'unlock' });
   };
   window.addEventListener('pointerdown', unlock, true);
+  // кликер: вкладку учеников могли щёлкнуть мышью — клавиши всё равно листают слайды урока
+  const KEYS = ['ArrowRight', 'ArrowLeft', 'PageDown', 'PageUp', 'b', 'B', '.', 'и', 'И', 'ю'];
+  window.addEventListener('keydown', (e) => {
+    if (e.ctrlKey || e.altKey || e.metaKey || !KEYS.includes(e.key)) return;
+    e.preventDefault();
+    report({ type: 'key', key: e.key });
+  });
   window.addEventListener('keydown', unlock, true);
   if (navigator.userActivation && navigator.userActivation.hasBeenActive) unlocked = true;
 
