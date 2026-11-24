@@ -57,6 +57,7 @@ mimetypes.add_type("image/svg+xml", ".svg")
 # app — окно программы (1.0): список уроков, эфир, настройки, состояние набора и окна
 CHANNELS = ("screen", "lesson", "preview", "app")
 _LANG_ICON = re.compile(r"/static/lang/([a-z0-9+#-]+\.svg)")
+_FONT = re.compile(r"/static/fonts/([A-Za-z0-9-]+\.(woff2|txt))")
 _STATIC = re.compile(r"/static/(lesson|vendor|app)/([a-z0-9-]+\.(js|css|txt))")
 _STATIC_TYPES = {"js": "text/javascript; charset=utf-8", "css": "text/css; charset=utf-8",
                  "txt": "text/plain; charset=utf-8"}
@@ -157,6 +158,13 @@ class _Handler(BaseHTTPRequestHandler):
                 f = PAGE_DIR / m.group(1) / m.group(2)
                 if f.is_file():
                     return self._send(200, f.read_bytes(), _STATIC_TYPES[m.group(3)])
+                return self._send(404, b"not found", "text/plain")
+            m = _FONT.fullmatch(path)
+            if m:                                   # шрифты окна программы — свои файлы, без интернета
+                f = PAGE_DIR / "fonts" / m.group(1)
+                if f.is_file():
+                    ctype = "font/woff2" if m.group(2) == "woff2" else "text/plain; charset=utf-8"
+                    return self._send(200, f.read_bytes(), ctype, {"Cache-Control": "max-age=86400"})
                 return self._send(404, b"not found", "text/plain")
             m = _LANG_ICON.fullmatch(path)
             if m:

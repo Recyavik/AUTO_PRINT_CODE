@@ -5,12 +5,15 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>AutoPrintCode</title>
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/static/app/app.css">
 </head>
 <body>
 <div id="app"></div>
 <script type="module">
-import { start } from "/static/app/core.js";
-start();
+import { views, boot } from "/static/app/main.js";
+import { devView } from "/static/app/devui.js";
+views.dev = devView;
+boot();
 </script>
 </body>
 </html>
