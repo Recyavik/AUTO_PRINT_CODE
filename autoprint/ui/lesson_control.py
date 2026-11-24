@@ -10,8 +10,6 @@ from __future__ import annotations
 import concurrent.futures
 import json
 import logging
-import os
-import subprocess
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -29,89 +27,6 @@ log = logging.getLogger(__name__)
 PREFS = {"page_zoom": "zoom", "page_plan": ("strip", "side", "hidden"), "page_past": ("dim", "collapse"),
          "page_stage_timer": "bool", "start_timer": "bool", "start_screen": "bool"}
 ANSWER_FETCH_LIMIT = 90     # «Вставить ответ нейросети»: фото качаются не дольше, потом урок добавляется со ссылками
-
-
-def _edge_path() -> str | None:
-    for base in (os.environ.get("ProgramFiles(x86)"), os.environ.get("ProgramFiles"), os.environ.get("LOCALAPPDATA")):
-        if base:
-            p = Path(base) / "Microsoft" / "Edge" / "Application" / "msedge.exe"
-            if p.is_file():
-                return str(p)
-    return None
-
-
-class PageWindow:
-    """Окно экрана урока — Edge без вкладок и адресной строки, со своим профилем (не смешивается с браузером
-    человека, его не перепутать с вкладкой, которую захватывают в демонстрации). Окно одно: повторное
-    «Открыть урок» поднимает его; программа завершается — окно закрывается вместе с ней."""
-
-    def __init__(self, profile_dir: Path, popen=subprocess.Popen, edge=_edge_path, find_window=None,
-                 raise_window=None) -> None:
-        from .. import winapi
-        self.profile_dir = Path(profile_dir)
-        self._popen, self._edge = popen, edge
-        self._find = find_window or winapi.find_process_window
-        self._raise = raise_window or winapi.raise_window
-        self.proc = None
-        self._started = -1e9      # когда запустили Edge: окно появляется не сразу
-
-    def alive(self) -> bool:
-        return self.proc is not None and self.proc.poll() is None
-
-    def open(self, url: str) -> bool:
-        """True — окно показано (поднято или открыто); False — Edge нет, пусть откроется браузер по умолчанию."""
-        import time
-        if self.alive():
-            hwnd = self._find(self.proc.pid)
-            if hwnd:
-                self._raise(hwnd)
-                return True
-            if time.monotonic() - self._started < 15:
-                return True               # окно ещё открывается (двойной щелчок, повторное «Открыть») — не второй Edge
-        edge = self._edge()
-        if not edge:
-            return False
-        try:
-            proc = self._popen([edge, f"--app={url}", f"--user-data-dir={self.profile_dir}", "--no-first-run",
-                                "--no-default-browser-check", "--window-size=1000,1000"], close_fds=True,
-                               creationflags=getattr(subprocess, "DETACHED_PROCESS", 0))
-        except OSError as e:
-            log.warning("Edge не запустился: %s", e)
-            return False
-        if not self.alive():
-            self.proc = proc          # главный процесс профиля; повторный запуск лишь передаёт ему адрес
-            from .. import winapi
-            winapi.own_pids.add(proc.pid)    # в окно экрана урока печатать нельзя (E13)
-        self._started = time.monotonic()
-        return True
-
-    def close(self) -> None:
-        if self.alive():
-            try:
-                self.proc.terminate()
-            except OSError as e:
-                log.warning("Окно экрана урока не закрылось: %s", e)
-        self.proc = None
-
-
-_window: PageWindow | None = None
-
-
-def page_window() -> PageWindow:
-    global _window
-    if _window is None:
-        from ..storage import DATA_DIR
-        _window = PageWindow(DATA_DIR / "edge-suflor")
-    return _window
-
-
-def launch_app_window(url: str) -> bool:
-    return page_window().open(url)
-
-
-def close_app_window() -> None:
-    if _window is not None:
-        _window.close()
 
 
 class LessonController(QObject):
@@ -161,7 +76,8 @@ class LessonController(QObject):
         return self.main.printer.focus()
 
     def page_alive(self) -> bool:
-        return _window is not None and _window.alive()
+        """Урок показывает окно программы — оно живёт, пока живёт программа."""
+        return True
 
     def schedule_publish(self) -> None:
         """Отправить состояние странице не позже чем через 300 мс после первого изменения. Уже ждём — не
@@ -540,14 +456,15 @@ class LessonController(QObject):
 
     # ------------------------------------------------------------ страница
     def shutdown(self) -> None:
-        close_app_window()
+        self._timer.stop()
 
     def open_page(self) -> None:
+        """Урок в фокусе — на экран урока в окне программы."""
         if not self.efir.ensure_server():
             return
         self.publish()
-        if not launch_app_window(self.url):
-            QDesktopServices.openUrl(QUrl(self.url))
+        t = self.current()
+        self.main.show_view(f"#/lesson/{t.id}" if t is not None else "#/lessons")
 
     # ------------------------------------------------------------ команды со страницы
     def command(self, d: dict) -> None:

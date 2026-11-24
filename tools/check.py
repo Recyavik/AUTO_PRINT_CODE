@@ -1,4 +1,4 @@
-"""Все автоматические проверки перед выпуском — одной командой.
+﻿"""Все автоматические проверки перед выпуском — одной командой.
 
     python tools/check.py          — тесты Python, эталоны, типы и тесты веб-версии
     python tools/check.py --ui     — плюс сквозной тест страницы в Chrome/Edge без окна (npm run test:ui)
@@ -19,7 +19,8 @@ WEB = ROOT / "web"
 NPM = "npm.cmd" if os.name == "nt" else "npm"
 # тихие тесты-сценарии: окна — только в памяти, без трея, уведомлений и настоящих нажатий
 SCRIPT_TESTS = ["test_steps", "test_engine", "test_human", "test_lesson_ai", "test_report", "test_sounds", "test_v10", "test_v11", "test_v12", "test_page",
-                "test_updater", "test_efir", "test_lesson", "test_v09", "ui_regress", "ui_smoke", "ui_sweep", "ui_import"]
+                "test_updater", "test_efir", "test_lesson", "test_v09", "ui_regress", "ui_import",
+                "test_app_shell", "test_app_core"]
 
 
 def run(title: str, cmd: list[str], cwd: Path = ROOT) -> bool:

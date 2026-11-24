@@ -68,7 +68,7 @@ class Page(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        from autoprint.ui.main_window import MainWindow
+        from autoprint.app_core import App
         storage.TEMPLATES_FILE.unlink(missing_ok=True)
         storage.TEMPLATES_FILE.with_suffix(".json.bak").unlink(missing_ok=True)
         store = TemplateStore()
@@ -80,8 +80,7 @@ class Page(unittest.TestCase):
         s.sound_enabled = False
         s.samples_seen = ["steps_v1", "tour_v1", "lesson_v1", "lesson_v2", "lesson_v3", "plan_v1"]
         s.migrations = ["tray_v1", "window_v10"]
-        cls.win = MainWindow(s, store)
-        cls.win.tray.showMessage = lambda *a, **k: None
+        cls.win = App(s, store, web=False)
         cls.store = store
         cls.t = store.templates[0]
         cls.win.printer.set_focus(cls.t.id)

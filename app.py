@@ -12,26 +12,32 @@ from PySide6.QtNetwork import QLocalServer, QLocalSocket
 from PySide6.QtWidgets import QApplication, QMessageBox
 
 from autoprint import APP_NAME
-from autoprint.storage import DATA_DIR, Settings, TemplateStore, migrate_legacy_data, user_data_dir
 
 
 def main() -> int:
     if sys.platform != "win32":
         print("AutoPrintCode работает только в Windows (использует WinAPI SendInput).")
         return 1
+    if "--selftest" in sys.argv:
+        # проверка сборки: невидимо загрузить окно программы со встроенным браузером. Данные — во временной папке:
+        # storage ещё не импортирован, своя папка данных задаётся до него
+        import tempfile
+        os.environ["QT_QPA_PLATFORM"] = "offscreen"
+        os.environ["AUTOPRINT_DATA"] = tempfile.mkdtemp(prefix="autoprint-selftest-")
+        from autoprint.ui.app_window import selftest
+        return selftest()
+    from autoprint.storage import DATA_DIR, Settings, TemplateStore, migrate_legacy_data, user_data_dir
     from autoprint import taskbar
     # своя иконка на панели задач, а не иконка python.exe
     taskbar.set_process_app_id()
 
-    # размер интерфейса (⚙ → Вид): масштаб Qt задаётся до создания приложения — поэтому после перезапуска
-    # Переменную, выставленную нами же, перезапущенная программа наследует — её заменяем; чужую не трогаем
-    if "QT_SCALE_FACTOR" not in os.environ or os.environ.get("AUTOPRINT_QT_SCALE") == os.environ["QT_SCALE_FACTOR"]:
+    # 1.0: размер — масштаб страницы окна (page_zoom), без перезапуска. Масштаб Qt, выставленный прежней версией
+    # (ui_scale), перезапущенная программа могла унаследовать — свою переменную убираем, чужую не трогаем
+    if os.environ.get("AUTOPRINT_QT_SCALE") and os.environ.get("AUTOPRINT_QT_SCALE") == os.environ.get("QT_SCALE_FACTOR"):
         os.environ.pop("QT_SCALE_FACTOR", None)
-        os.environ.pop("AUTOPRINT_QT_SCALE", None)
-        scale = Settings.load().ui_scale
-        if scale != 100 and 50 <= scale <= 300:
-            os.environ["QT_SCALE_FACTOR"] = os.environ["AUTOPRINT_QT_SCALE"] = f"{scale / 100:g}"
+    os.environ.pop("AUTOPRINT_QT_SCALE", None)
 
+    import PySide6.QtWebEngineWidgets  # noqa: F401  — встроенный браузер окна: до QApplication (общий OpenGL)
     app = QApplication(sys.argv)
     app.setApplicationName(APP_NAME)
     # программа живёт и в трее (без окон): выходит только явно — из меню или кнопкой «Закрыть»
@@ -100,19 +106,21 @@ def main() -> int:
     if store.warning:
         QMessageBox.warning(None, APP_NAME, store.warning)
 
+    from autoprint.app_core import App
     from autoprint.ui import logo
     from autoprint.ui.frameless import NativeFrameStyler
-    from autoprint.ui.main_window import MainWindow
     from autoprint.ui.theme import theme
     settings = Settings.load()
     theme.setup(app, settings.theme)
     styler = NativeFrameStyler(app)   # системные рамки диалогов — в цветах темы
     app.installEventFilter(styler)
-    win = MainWindow(settings, store)
-    app.setWindowIcon(win.windowIcon())   # и для диалогов
+    app.setWindowIcon(logo.make_icon(logo.APP))   # и для диалогов
+    prog = App(settings, store)
+    win = prog.window
     icon_file = DATA_DIR / "autoprintcode.ico"
     if logo.save_ico(icon_file):
         win.set_taskbar_icon(str(icon_file))
+    win.load()
     # повторный запуск программы присылает сюда «show» — показываем окно
     server = QLocalServer()
     QLocalServer.removeServer(channel)
@@ -122,7 +130,7 @@ def main() -> int:
         if sock is not None:   # содержимое не важно — сам факт подключения значит «покажи окно»
             sock.disconnectFromServer()
             sock.deleteLater()
-        win._show_window()
+        prog.show_window()
 
     if server.listen(channel):
         server.newConnection.connect(on_second_instance)
@@ -133,7 +141,7 @@ def main() -> int:
     # процесс ещё завершается, и должна сама занять канал (иначе её окно не покажется при повторном запуске)
     server.close()
     lock.unlock()
-    if win.relaunch_requested:   # установлено обновление: запустить уже новую версию
+    if prog.relaunch_requested:   # установлено обновление: запустить уже новую версию
         from autoprint import updater
         updater.relaunch()
     return code

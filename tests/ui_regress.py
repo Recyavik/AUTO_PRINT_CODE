@@ -35,7 +35,7 @@ sys.excepthook = _hook
 
 from autoprint.storage import BLOCK_CODE, BLOCK_MARKDOWN, Block, Settings, TemplateStore  # noqa: E402
 from autoprint.typer import IDLE, PAUSED, RUNNING, TypingEngine  # noqa: E402
-from autoprint.ui.main_window import MainWindow  # noqa: E402
+from autoprint.app_core import App  # noqa: E402
 from autoprint.ui.theme import theme  # noqa: E402
 
 failed: list[str] = []
@@ -57,7 +57,7 @@ def pump(seconds: float = 0.2) -> None:
 class StraySpy(QObject):
     """Виджет, показанный самостоятельным окном (setVisible(True)/show() до вставки в родителя), мелькает
     на панели задач. Ждём только настоящие окна программы, меню и подсказки."""
-    EXPECTED = ("MainWindow", "SettingsWindow", "ReportDialog", "QMenu", "QTipLabel", "QComboBoxPrivateContainer")
+    EXPECTED = ("AppWindow", "ReportDialog", "QMenu", "QTipLabel", "QComboBoxPrivateContainer")
 
     def __init__(self) -> None:
         super().__init__()
@@ -79,23 +79,15 @@ def main() -> int:
     store = TemplateStore()
     # блок с ролью, которой нет в программе (такое приходит из чужих .ipynb / .json)
     store.templates[0].blocks.insert(0, Block(BLOCK_MARKDOWN, "чужая роль", role="warning"))
-    win = MainWindow(s, store)
-    win.setAttribute(Qt.WidgetAttribute.WA_DontShowOnScreen, True)
-    win.show()
+    win = App(s, store, web=False)      # 1.0: программа — одно окно со встроенным браузером
+    win.window.setAttribute(Qt.WidgetAttribute.WA_DontShowOnScreen, True)
+    win.window.show()
     pump()
 
-    # 0.12: над уроками может быть группа «Планы уроков» — выделен урок, который в фокусе, а не заголовок
-    cur = win.library.list.currentItem()
-    check("при запуске урок выделен в списке", cur is not None and cur.data(Qt.ItemDataRole.UserRole) == win.printer.focus_id
-          and win.printer.focus() is not None and win.printer.focus().kind == "")
+    # 0.12: при запуске в фокусе — урок, а не план (над уроками может быть группа «Планы уроков»)
+    check("при запуске в фокусе урок", win.printer.focus() is not None and win.printer.focus().kind == "")
 
-    # смена темы после закрытия настроек и после вставки блока — без ошибок
-    win.open_settings()
-    win.settings_win.setAttribute(Qt.WidgetAttribute.WA_DontShowOnScreen, True)
-    win.settings_win.show()
-    pump()
-    win.settings_win.close()
-    pump()
+    # смена темы — без ошибок
     errors.clear()
     for mode in ("light", "dark", "light"):
         s.theme = mode
@@ -103,25 +95,15 @@ def main() -> int:
         pump()
     check("смена темы без ошибок", not errors, errors[0].splitlines()[-1] if errors else "")
 
-    # сочетания в меню логотипа — только подписи, иначе они перебивают сочетания окна
-    win._fill_logo_menu()
-    check("в меню логотипа нет двойных сочетаний", all(a.shortcut().isEmpty() for a in win.logo_menu.actions()))
-
-    # окно настроек принадлежит главному (иначе при «поверх остальных» оно под ним)
-    win.open_settings()
-    check("настройки — окно-владелец главного", win.settings_win.parentWidget() is win)
-    win.settings_win.close()
-    pump()
-
-    # окно «Сообщить об ошибке» — тоже из строк-карточек
+    # окно «Сообщить об ошибке» (до листа в окне) — без лишних окон на панели задач
     from autoprint.ui.report_dialog import ReportDialog
-    d = ReportDialog(win, s)
+    d = ReportDialog(win.window, s)
     d.setAttribute(Qt.WidgetAttribute.WA_DontShowOnScreen, True)
     d.show()
     pump()
     d.close()
     pump()
-    check("настройки и отчёт открываются без лишних окон на панели задач", not spy.stray,
+    check("окно программы и отчёт открываются без лишних окон на панели задач", not spy.stray,
           f"{len(spy.stray)}: {', '.join(sorted(set(spy.stray)))[:200]}")
 
     # пауза во время отсчёта: печать не начинается и не превращается в «Печатает» — остаётся «Пауза»
@@ -159,6 +141,7 @@ def main() -> int:
     check("образец из файла: \\r\\n → \\n, шаги — числа", blk.text == "a = 1\nb = 2" and blk.steps == [1, 2],
           repr((blk.text, blk.steps)))
 
+    win._quitting = True
     win.close()
     pump()
     check("закрытие без ошибок", not errors, errors[0].splitlines()[-1] if errors else "")

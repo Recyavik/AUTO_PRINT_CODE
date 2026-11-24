@@ -235,7 +235,7 @@ class FakeHotkeys(QObject):
         pass
 
 
-import autoprint.ui.main_window as M  # noqa: E402
+import autoprint.app_core as M  # noqa: E402
 
 M.InputGuard, M.HotkeyManager = FakeGuard, FakeHotkeys
 from autoprint.ui.theme import theme  # noqa: E402
@@ -266,10 +266,10 @@ def make_window(profile: str):
     s.button_countdown_s = 0
     s.hotkey_start_delay_ms = 0
     store = TemplateStore()
-    win = M.MainWindow(s, store)
-    win.tray.showMessage = lambda *a, **k: None   # без всплывающих уведомлений Windows
-    win.setAttribute(Qt.WidgetAttribute.WA_DontShowOnScreen, True)
-    win.show()
+    win = M.App(s, store, web=False)
+    win.tray.message = lambda *a, **k: None       # без всплывающих уведомлений Windows
+    win.window.setAttribute(Qt.WidgetAttribute.WA_DontShowOnScreen, True)
+    win.window.show()
     pump()
     return win, s, store
 

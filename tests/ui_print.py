@@ -1,4 +1,4 @@
-"""Сквозная проверка нового интерфейса: главное окно готовит текст активного блока и печатает его в Блокнот.
+﻿"""Сквозная проверка нового интерфейса: главное окно готовит текст активного блока и печатает его в Блокнот.
 
     python tests/ui_print.py [block steps lines vscode]
 
@@ -31,7 +31,7 @@ from autoprint import winapi as w  # noqa: E402
 from autoprint.comments import strip_comments  # noqa: E402
 from autoprint.storage import Settings, TemplateStore  # noqa: E402
 from autoprint.typer import FINISHED  # noqa: E402
-from autoprint.ui.main_window import MainWindow  # noqa: E402
+from autoprint.app_core import App as MainWindow  # noqa: E402  — 1.0: программа без старого окна
 from autoprint.ui.theme import theme  # noqa: E402
 
 _u = ctypes.windll.user32
@@ -225,9 +225,9 @@ def main() -> int:
     s.cpm, s.jitter, s.newline_pause_ms, s.punct_pause_ms = 1500, 0, 40, 0
     s.sound_enabled = False
     theme.setup(app, "dark")
-    win = MainWindow(s, TemplateStore())
-    win.setAttribute(Qt.WidgetAttribute.WA_DontShowOnScreen, True)
-    win.show()
+    win = MainWindow(s, TemplateStore(), web=False)
+    win.window.setAttribute(Qt.WidgetAttribute.WA_DontShowOnScreen, True)
+    win.window.show()
     pump(0.5)
     which = set(sys.argv[1:]) or {"block", "steps", "lines"}
     results = []

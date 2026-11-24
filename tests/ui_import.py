@@ -35,10 +35,33 @@ sys.excepthook = _hook
 
 from autoprint import ai, lesson_ai as L  # noqa: E402
 from autoprint.storage import Settings, TemplateStore  # noqa: E402
-from autoprint.ui.main_window import MainWindow  # noqa: E402
+from autoprint.app_core import App  # noqa: E402
 from autoprint.ui.theme import theme  # noqa: E402
 
 failed: list[str] = []
+
+
+def open_import(win, tab: str = "file"):
+    """Окно «Импорт урока» поверх окна программы — как открывало его прежнее главное окно (до «Нового урока»
+    в окне, Task 11)."""
+    from autoprint.ui.import_dialog import ImportDialog
+    d = ImportDialog(win.window, win.settings, tab=tab, open_ai_settings=lambda: None, plans=win.store.plans(),
+                     exercises=win.exercise_titles)
+    d.live_check = lambda: win.efir.live_webinar() is not None
+    d.accepted.connect(lambda: win._take_import(d))
+    d.show()
+    return d
+
+
+def open_settings_window(win, page: str):
+    """Прежнее окно настроек (до «Настроек» в окне, Task 14)."""
+    from autoprint.ui.settings_window import SettingsWindow
+    w = SettingsWindow(win.settings, win.window)
+    w.changed.connect(win.on_setting_changed)
+    w.reload()
+    w.show_page(page)
+    w.show()
+    return w
 
 
 def check(name: str, ok: bool, extra: str = "") -> None:
@@ -93,15 +116,14 @@ def main() -> int:
     s.sound_enabled = False
     s.update_auto_check = False
     theme.setup(app, "dark")
-    win = MainWindow(s, TemplateStore())
-    win.resize(1240, 800)
-    win.show()
+    win = App(s, TemplateStore(), web=False)
+    win.window.resize(1240, 800)
+    win.window.show()
     pump()
 
     # --- «Вставить»: просто код JavaScript
     n0 = len(win.store.templates)
-    win.import_files()
-    d = win._import_dlg
+    d = open_import(win)
     pump()
     check("окно импорта открылось на «Из файла»", d.isVisible() and d.tabs.value() == "file")
     d.grab().save(str(SHOTS / "import-file.png"))
@@ -118,8 +140,7 @@ def main() -> int:
           and win.printer.focus().code_blocks()[0].lang == "javascript" and not d.isVisible())
 
     # --- «С помощью нейросети» без подключения: промпт и ответ своего чата
-    win.import_files("ai")
-    d = win._import_dlg
+    d = open_import(win, "ai")
     pump()
     d.material.setPlainText(CODE)
     pump(0.2)
@@ -148,8 +169,7 @@ def main() -> int:
     check("выбор разбора запомнен в настройках", win.settings.lesson_style == L.STYLE_STEPS)
 
     # --- большой код: нейросеть только размечает строки, код берётся из материала
-    win.import_files("ai")
-    d = win._import_dlg
+    d = open_import(win, "ai")
     pump()
     big = "\n".join(f"value_{i} = compute({i})" for i in range(L.BIG_LINES + 30))
     d.material.setPlainText(big)
@@ -175,8 +195,7 @@ def main() -> int:
     s.ai_provider = "custom"
     s.ai_urls["custom"] = f"http://127.0.0.1:{srv.server_address[1]}"
     s.ai_models["custom"] = "teacher-7b"
-    win.import_files("ai")
-    d = win._import_dlg
+    d = open_import(win, "ai")
     pump()
     d.material.setPlainText(CODE)
     d._update_ai_buttons()
@@ -190,8 +209,7 @@ def main() -> int:
     pump()
 
     # --- ⚙ → Нейросеть
-    win.open_settings("ai")
-    sw = win.settings_win
+    sw = open_settings_window(win, "ai")
     pump()
     box = sw.ai_main
     check("страница «Нейросеть»: выбран подключённый провайдер и его адрес",

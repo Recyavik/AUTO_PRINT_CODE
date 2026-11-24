@@ -165,7 +165,7 @@ SEEN = ["steps_v1", "tour_v1", "lesson_v1", "lesson_v2", "lesson_v3", "plan_v1"]
 
 
 def make_window(templates: list[Template], port: int = 18961):
-    from autoprint.ui.main_window import MainWindow
+    from autoprint.app_core import App
     storage.TEMPLATES_FILE.unlink(missing_ok=True)
     storage.TEMPLATES_FILE.with_suffix(".json.bak").unlink(missing_ok=True)
     store = TemplateStore()
@@ -177,9 +177,7 @@ def make_window(templates: list[Template], port: int = 18961):
     s.sound_enabled = False
     s.samples_seen = list(SEEN)
     s.migrations = ["tray_v1", "window_v10"]
-    w = MainWindow(s, store)
-    w.tray.showMessage = lambda *a, **k: None
-    return w
+    return App(s, store, web=False)     # 1.0: программа без старого окна Qt; страница — в тестах окна
 
 
 class Recorder:
@@ -332,21 +330,6 @@ class OwnWindowTest(unittest.TestCase):
             winapi.window_pid, winapi.window_title = old_pid, old_title
             winapi.own_pids.discard(4242)
 
-    def test_page_window_pid_registered(self):
-        from autoprint import winapi
-        from autoprint.ui.lesson_control import PageWindow
-
-        class Proc:
-            pid = 7777
-
-            def poll(self):
-                return None
-        w = PageWindow(TMP / "edge", popen=lambda *a, **k: Proc(), edge=lambda: "msedge.exe",
-                           find_window=lambda pid: 0, raise_window=lambda h: None)
-        self.assertTrue(w.open("http://127.0.0.1:1/lesson"))
-        self.assertIn(7777, winapi.own_pids)
-        winapi.own_pids.discard(7777)
-
     def test_engine_message(self):
         from pathlib import Path as P
         src = P(storage.__file__).with_name("typer.py").read_text(encoding="utf-8")
@@ -358,57 +341,41 @@ class WindowTest(unittest.TestCase):
         self.L = Template("Идёт", [stage("A", 5), code("x", id="c1"), stage("B", 10), code("y")], id="L")
         self.M = Template("Другой", [note()], id="M")
         self.win = make_window([self.L, self.M], port=18962)
-        self.opened: list[int] = []
-        self.win.lesson.open_page = lambda: self.opened.append(1)
+        self.opened: list[str] = []
+        self.win.navigate.connect(self.opened.append)      # 1.0: урок открывается в окне программы
 
     def tearDown(self):
         self.win._quitting = True
         self.win.close()
         pump()
 
-    def test_compact(self):
-        from autoprint.ui.library import LibraryPanel
-        from autoprint.ui.main_window import PrintBar
-        self.assertIsNotNone(self.win.findChild(LibraryPanel))
-        bar = self.win.findChild(PrintBar)
-        self.assertIsNotNone(bar)
-        self.assertTrue(bar.isHidden())
-        self.assertEqual((self.win.width(), self.win.height()), (520, 720))
+    def test_one_window(self):
+        """1.0: одно окно со встроенным браузером; старого списка уроков и строки печати Qt нет."""
+        from autoprint.ui.app_window import AppWindow
+        self.assertIsInstance(self.win.window, AppWindow)
         import importlib.util
         for gone in ("control_strip", "template_view", "blocks", "prompter_window", "prompter_control",
-                     "code_editor", "prompter"):
+                     "code_editor", "prompter", "main_window", "library"):
             self.assertIsNone(importlib.util.find_spec(f"autoprint.ui.{gone}"), gone)
 
     def test_open_lesson_sets_focus(self):
         self.assertTrue(self.win.open_lesson("M"))
         self.assertEqual(self.win.printer.focus_id, "M")
-        self.assertEqual(self.opened, [1])
+        self.assertEqual(self.opened, ["#/lesson/M"])
         self.assertEqual(self.win.settings.page_lesson, "M")
 
     def test_open_other_while_live_asks(self):
-        from PySide6.QtWidgets import QMessageBox
-        import autoprint.ui.main_window as MW
+        """Идёт урок — другой урок сам не открывается: вопрос (с действием) уходит на страницу."""
         self.win.efir.live_lesson_id = lambda: "L"
         stopped = []
         self.win.efir.stop_live = lambda: stopped.append(1)
-        old = MW.QMessageBox.question
-        try:
-            MW.QMessageBox.question = staticmethod(lambda *a, **k: QMessageBox.StandardButton.No)
-            self.assertFalse(self.win.open_lesson("M"))
-            self.assertEqual(stopped, [])
-            self.assertEqual(self.opened, [])
-            MW.QMessageBox.question = staticmethod(lambda *a, **k: QMessageBox.StandardButton.Yes)
-            self.assertTrue(self.win.open_lesson("M"))
-            self.assertEqual(stopped, [1])
-            self.assertEqual(self.win.printer.focus_id, "M")
-        finally:
-            MW.QMessageBox.question = old
-
-    def test_library_meta(self):
-        from autoprint.ui.library import ROLE_META
-        it = self.win.library.list.item(0)
-        self.assertEqual(it.data(ROLE_META), "15 мин · 2 этапа · 2 кода")
-        self.assertEqual(self.win.library.list.item(1).data(ROLE_META), "без кода")
+        self.assertFalse(self.win.open_lesson("M"))
+        self.assertEqual(stopped, [])
+        self.assertEqual(self.opened, [])
+        self.assertEqual(self.win.notice["action"]["cmd"], {"cmd": "open", "lesson": "M", "force": True})
+        self.assertTrue(self.win.open_lesson("M", ask=False))       # страница спросила — ответили «да»
+        self.assertEqual(stopped, [1])
+        self.assertEqual(self.win.printer.focus_id, "M")
 
     def test_new_lesson_opens(self):
         n = len(self.win.store.templates)
@@ -420,9 +387,7 @@ class WindowTest(unittest.TestCase):
 
     def test_session_page(self):
         self.win.printer.set_focus("M")
-        self.win.lesson.page_alive = lambda: True
         self.win._save_session()
-        self.assertTrue(self.win.settings.page_open)
         self.assertEqual(self.win.settings.page_lesson, "M")
 
 
@@ -1401,33 +1366,6 @@ class ReviewFixTest(unittest.TestCase):
         self.assertEqual(self.win.efir.live_lesson_id(), "L")        # идущий урок не завершён молча
         self.assertEqual(self.p.focus().id, "L")
         self.assertTrue(any(x.title == "Занятие 7 (сценарий)" for x in self.win.store.templates))
-
-    def test_print_bar_resume_counts_down(self):
-        from autoprint.typer import COUNTDOWN, PAUSED
-        self.p.arm("ca")
-        self.p.job = self.p.job_for_armed()
-        self.p.engine.state = PAUSED
-        resumed, minimized = [], []
-        self.p.engine.resume = lambda *a: resumed.append(a) or setattr(self.p.engine, "state", COUNTDOWN)
-        self.win.showMinimized = lambda: minimized.append(1)
-        self.win.print_bar.btn_pause.click()
-        self.assertEqual(resumed, [(0.0, 3)])          # отсчёт, как у кнопки в 0.9: успеть вернуться в редактор
-        self.assertEqual(minimized, [1])               # окно уходит — фокус возвращается в редактор
-
-    def test_print_bar_pause_stays_paused(self):
-        from autoprint.typer import PAUSED, RUNNING
-        self.p.arm("ca")
-        self.p.job = self.p.job_for_armed()
-        self.p.engine.state = RUNNING
-        resumed = []
-        self.p.engine.resume = lambda *a: resumed.append(a)
-        btn = self.win.print_bar.btn_pause
-        btn.pressed.emit()                             # нажали — окно программы стало активным: автопауза
-        self.p.engine.state = PAUSED
-        self.p.engine.auto_paused_at = time.monotonic()
-        btn.clicked.emit()
-        self.assertEqual(resumed, [])
-        self.assertEqual(self.p.engine.state, PAUSED)
 
     def test_no_pult_in_messages(self):
         root = Path(storage.__file__).resolve().parent

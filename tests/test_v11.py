@@ -710,10 +710,6 @@ class StructureTest(Base):
         t = self.win.printer.focus()
         self.assertEqual([b.minutes for b in t.blocks if b.type == BLOCK_STAGE], [45, 10, 45])
         self.assertIn("structures", self.state())
-        menu = self.win.library.new_menu()
-        texts = [a.text() for a in menu.actions() if a.text()]
-        for x in ("Пустой урок", "Школа, 45 мин", "Онлайн-занятие, 90 мин", "Пара, 2×45", "Из презентации…"):
-            self.assertIn(x, texts)
 
 
 # ================================================================ Task 13: образцовый урок v3

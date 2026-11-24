@@ -34,8 +34,6 @@ def patch() -> None:
 
     from autoprint import recorder
     recorder.AudioRecorder.start = lambda self, *a, **k: False
-    from autoprint.ui import lesson_control      # суфлёр урока: окно Edge не открывать (ссылка — заглушка выше)
-    lesson_control.launch_app_window = lambda url: False
 
     class FakeGuard(QObject):
         tripped = Signal(str)
@@ -73,7 +71,7 @@ def patch() -> None:
         def shutdown(self) -> None:
             pass
 
-    import autoprint.ui.main_window as M
+    import autoprint.app_core as M
     if not getattr(M.InputGuard, "_test_fake", False):   # у теста могут быть свои заглушки — не перебивать
         FakeGuard._test_fake = True
         M.InputGuard, M.HotkeyManager = FakeGuard, FakeHotkeys

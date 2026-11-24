@@ -630,33 +630,29 @@ class ControllerTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         from autoprint.efir import store as store_mod
+        from autoprint.app_core import App
         from autoprint.storage import Settings, TemplateStore
-        from autoprint.ui import lesson_control
-        from autoprint.ui.main_window import MainWindow
         cls.data = TMP / "ctl-efir"
         cls._efir_dir = store_mod.efir_dir
         store_mod.efir_dir = lambda: cls.data
         cls.opened = []
-        cls._launch = lesson_control.launch_app_window
-        lesson_control.launch_app_window = lambda url: cls.opened.append(url) or True
         s = Settings()
         s.efir_port = PORT + 40
         cls.store = TemplateStore()
         cls.t = dark_theme_lesson()
         cls.store.insert(cls.t)
-        cls.win = MainWindow(s, cls.store)
+        cls.win = App(s, cls.store, web=False)
+        cls.win.navigate.connect(cls.opened.append)       # 1.0: урок открывается в окне программы
         cls.win.printer.set_focus(cls.t.id)
         pump(50)
 
     @classmethod
     def tearDownClass(cls):
         from autoprint.efir import store as store_mod
-        from autoprint.ui import lesson_control
         cls.win.efir.stop_live()
         cls.win.efir.shutdown()
         cls.win.hotkeys.stop() if hasattr(cls.win.hotkeys, "stop") else None
         cls.win.close()
-        lesson_control.launch_app_window = cls._launch
         store_mod.efir_dir = cls._efir_dir
 
     def snap(self):
@@ -714,7 +710,7 @@ class ControllerTest(unittest.TestCase):
     def test_open_page(self):
         self.opened.clear()
         self.win.lesson.open_page()
-        self.assertTrue(self.opened and self.opened[-1].endswith("/lesson"))
+        self.assertEqual(self.opened[-1], f"#/lesson/{self.win.printer.focus().id}")   # 1.0: в окне программы
         self.assertTrue(self.win.efir.server.running)
 
     def test_preset_saved(self):

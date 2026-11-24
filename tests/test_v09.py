@@ -1,4 +1,4 @@
-"""Доработка 0.9: колёсико, тема без зависаний, трей и окно суфлёра, начало эфира при запуске, редактор
+﻿"""Доработка 0.9: колёсико, тема без зависаний, трей и окно суфлёра, начало эфира при запуске, редактор
 «Эфира», таймер, суфлёр как PDF, картинки в редакторе, пример урока, урок в Markdown, картинка в Jupyter.
 Всё без окон на экране.
 
@@ -184,21 +184,23 @@ def big_template(n: int = 120, title: str = "Большое занятие"):
 
 
 def make_main(port: int):
+    from autoprint.app_core import App
     from autoprint.storage import Settings, TemplateStore
-    from autoprint.ui.main_window import MainWindow
     s = Settings()
     s.efir_port = port
     store = TemplateStore()
-    win = MainWindow(s, store)
-    win.show()
+    win = App(s, store, web=False)
+    win.window.show()
     pump(30)
     return win, store
 
 
 def drop_main(win) -> None:
-    """Главное окно теста — удалить совсем: иначе следующая смена темы перекрашивает и его."""
+    """Программа теста — удалить совсем: иначе следующая смена темы перекрашивает и её окно."""
     import shiboken6
-    win.hide()
+    win.window.hide()
+    win.efir.shutdown()
+    shiboken6.delete(win.window)
     shiboken6.delete(win)
     pump(10)
 
@@ -210,7 +212,7 @@ class TrayTest(unittest.TestCase):
 
     def test_migration_turns_tray_on_once(self):
         from autoprint.storage import Settings
-        from autoprint.ui.main_window import apply_migrations
+        from autoprint.app_core import apply_migrations
         s = Settings()
         s.close_to_tray = False                 # так было сохранено у тех, кто ставил 0.8 и раньше
         self.assertTrue(apply_migrations(s))
@@ -219,77 +221,6 @@ class TrayTest(unittest.TestCase):
         s.close_to_tray = False                 # выключили сами после обновления — больше не трогаем
         self.assertFalse(apply_migrations(s))
         self.assertFalse(s.close_to_tray)
-
-
-class FakeProc:
-    def __init__(self, args):
-        self.args = args
-        self.code = None
-        self.terminated = False
-        self.pid = 4242
-
-    def poll(self):
-        return self.code
-
-    def terminate(self):
-        self.terminated = True
-        self.code = 1
-
-
-class PrompterWinTest(unittest.TestCase):
-    def make(self, edge="C:/Edge/msedge.exe", window=True):
-        from autoprint.ui.lesson_control import PageWindow
-        self.launched, self.raised = [], []
-
-        def popen(args, **_kw):
-            proc = FakeProc(args)
-            self.launched.append(proc)
-            return proc
-        return PageWindow(TMP / "edge-suflor", popen=popen, edge=lambda: edge,
-                              find_window=lambda pid: 77 if window else 0,
-                              raise_window=lambda hwnd: self.raised.append(hwnd))
-
-    def test_single_window(self):
-        w = self.make()
-        self.assertTrue(w.open("http://127.0.0.1:1/lesson"))
-        self.assertTrue(w.open("http://127.0.0.1:1/lesson"))
-        self.assertEqual(len(self.launched), 1)
-        self.assertEqual(self.raised, [77])
-
-    def test_relaunch_after_closed(self):
-        w = self.make()
-        w.open("http://x/lesson")
-        self.launched[0].code = 0                # окно закрыли руками — процесс вышел
-        w.open("http://x/lesson")
-        self.assertEqual(len(self.launched), 2)
-
-    def test_relaunch_when_no_window(self):
-        w = self.make(window=False)              # процесс жив (фоновый режим Edge), а окна нет
-        w.open("http://x/lesson")
-        w.open("http://x/lesson")                # 0.12: окно ещё открывается — второй Edge не запускаем
-        self.assertEqual(len(self.launched), 1)
-        w._started -= 60                         # прошла минута, окна так и нет (закрыли) — запустить снова
-        w.open("http://x/lesson")
-        self.assertEqual(len(self.launched), 2)
-
-    def test_profile_dir_own(self):
-        w = self.make()
-        w.open("http://x/lesson")
-        args = self.launched[0].args
-        self.assertIn("--app=http://x/lesson", args)
-        self.assertIn(f"--user-data-dir={TMP / 'edge-suflor'}", args)
-
-    def test_closed_on_shutdown(self):
-        w = self.make()
-        w.open("http://x/lesson")
-        w.close()
-        self.assertTrue(self.launched[0].terminated)
-        w.close()                                # второй раз — без ошибок
-
-    def test_no_edge_falls_back(self):
-        w = self.make(edge=None)
-        self.assertFalse(w.open("http://x/lesson"))
-        self.assertEqual(self.launched, [])
 
 
 class FaviconTest(unittest.TestCase):
@@ -308,13 +239,6 @@ class FaviconTest(unittest.TestCase):
                     self.assertIn('rel="icon" href="/favicon.svg"', r.read().decode("utf-8"))
         finally:
             srv.stop()
-
-    def test_title_logo_is_brand(self):
-        from autoprint.ui import logo
-        from autoprint.ui.main_window import title_logo_icon
-        a = title_logo_icon().pixmap(32, 32).toImage()
-        b = logo.make_icon(logo.APP).pixmap(32, 32).toImage()
-        self.assertEqual(a, b)
 
 
 
@@ -655,14 +579,6 @@ class TimerTest(unittest.TestCase):
         self.assertEqual(board_mode(300, 500), "below")
         self.assertEqual(board_mode(200, 80), "hero")
         self.assertEqual(board_mode(420, 200), "below")           # окно по умолчанию — со списком
-
-    def test_efir_token(self):
-        from autoprint.ui.main_window import efir_token
-        self.assertEqual(efir_token("", "idle"), "dim")
-        self.assertEqual(efir_token("before", "idle"), "accent")
-        self.assertEqual(efir_token("live", "idle"), "live")
-        self.assertEqual(efir_token("live", "break"), "accent")
-        self.assertEqual(efir_token("after", "idle"), "dim")
 
     def test_screen_no_hint(self):
         from autoprint.efir.server import PAGE_DIR

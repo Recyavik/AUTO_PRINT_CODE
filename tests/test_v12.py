@@ -384,76 +384,6 @@ class PlanEditTest(unittest.TestCase):
 
 # ================================================================ Task 4: список — планы и уроки
 
-class LibraryTest(unittest.TestCase):
-    def test_groups_and_meta(self):
-        from PySide6.QtCore import Qt
-        from autoprint.ui.library import ROLE_HEADER, ROLE_META
-        p = plan90()
-        t = plans.new_topic(p, "Функции")
-        f = Template("Свободный", [stage("А", 5)])
-        win = window([t, f, p], 18905)
-        try:
-            lib = win.library.list
-            rows = [(lib.item(i).text(), bool(lib.item(i).data(ROLE_HEADER))) for i in range(lib.count())]
-            self.assertEqual(rows, [("Планы уроков", True), ("Онлайн 90", False), ("Уроки", True), ("Функции", False),
-                                    ("Свободный", False)])
-            self.assertEqual(lib.item(1).data(ROLE_META), "План · 1 ч 5 мин · 4 этапа · уроков: 1")
-            self.assertEqual(lib.item(3).data(ROLE_META), "1 ч 5 мин · 4 этапа · без кода · план «Онлайн 90»")
-            self.assertFalse(lib.item(0).flags() & Qt.ItemFlag.ItemIsSelectable)
-            self.assertTrue(win.library.group_label.isHidden())                    # подпись «Уроки» над списком — в списке
-            self.assertNotEqual(lib.currentRow(), 0)                                # заголовок не выбирается
-            win.library.search.setText("функ")
-            self.assertEqual([lib.item(i).text() for i in range(lib.count()) if not lib.item(i).isHidden()],
-                             ["Уроки", "Функции"])                                 # пустая группа прячет заголовок
-        finally:
-            close(win)
-
-    def test_no_plans_looks_like_before(self):
-        from autoprint.ui.library import ROLE_HEADER
-        win = window([Template("Свободный", [stage("А", 5)])], 18906)
-        try:
-            lib = win.library.list
-            self.assertEqual([bool(lib.item(i).data(ROLE_HEADER)) for i in range(lib.count())], [False])
-            self.assertFalse(win.library.group_label.isHidden())
-        finally:
-            close(win)
-
-    def test_new_menu_lists_plans(self):
-        win = window([plan90()], 18907)
-        try:
-            m = win.library.new_menu([("P", "Онлайн 90")])
-            texts = [a.text() for a in m.actions() if a.text()]
-            self.assertEqual(texts[0], "По плану «Онлайн 90»")
-            self.assertIn("Новый план урока", texts)
-            self.assertIn("Из презентации…", texts)
-            sub = next(a.menu() for a in m.actions() if a.text() == "Новый план урока")
-            self.assertEqual([a.text() for a in sub.actions() if a.text()][0], "Пустой план")
-            self.assertEqual([a.text() for a in win.library.new_menu().actions() if a.text()][0], "По плану «Онлайн 90»")
-            win.library.new_structure.emit("plan:P")
-            self.assertTrue(any(x.plan_id == "P" for x in win.store.templates))
-            win.library.new_structure.emit("newplan:pair90")
-            self.assertEqual(len(win.store.plans()), 2)
-        finally:
-            close(win)
-
-    def test_context_menu_actions(self):
-        p = plan90()
-        t = plans.new_topic(p, "Функции")
-        f = Template("Свободный", [stage("А", 5)], id="F")
-        win = window([t, f, p], 18908)
-        try:
-            texts = {x: [a.text() for a in win._library_menu_for(win.store.get(x)).actions() if a.text()]
-                     for x in ("P", t.id, "F")}
-            self.assertEqual(texts["P"][0], "Новый урок по этому плану")
-            self.assertIn("Отвязать от плана", texts[t.id])
-            self.assertNotIn("Сделать из этапов план", texts[t.id])
-            self.assertIn("Сделать из этапов план", texts["F"])
-            self.assertIn("Привязать к плану", texts["F"])
-            self.assertNotIn("Отвязать от плана", texts["F"])
-        finally:
-            close(win)
-
-
 # ================================================================ Task 5: состояние страницы — план и урок по плану
 
 BASE = dict(live_anchor_ms=None, media_url=lambda p: "", presets=[], preset="", dark=True, efir_mode="", tab="",
@@ -824,17 +754,6 @@ class ImportLessonTest(unittest.TestCase):
             d.close()
             d.deleteLater()
 
-    def test_library_button_opens_lesson_tab(self):
-        win = window([plan90()], 18912)
-        try:
-            win.library.btn_ai.click()
-            pump(100)
-            self.assertEqual(win._import_dlg.tabs.value(), "lesson")
-            self.assertEqual([x.id for x in win._import_dlg.lesson_page.plans], ["P"])
-            win._import_dlg.close()
-        finally:
-            close(win)
-
 
 # ================================================================ Task 11: места для картинок, слайды, ответ на странице
 
@@ -1106,39 +1025,6 @@ class TabAutoOpenTest(unittest.TestCase):
             close(win)
 
 
-class OneWindowTest(unittest.TestCase):
-    def test_double_click_opens_lesson_once(self):
-        """Двойной щелчок по уроку в списке — одно открытие, а не два окна суфлёра."""
-        win = window([Template("У", [stage("А", 5)], id="U")], 18925)
-        opened = []
-        win.library.open_requested.connect(lambda: opened.append(1))
-        try:
-            lib = win.library.list
-            it = lib.item(0)
-            lib.itemDoubleClicked.emit(it)              # двойной щелчок в Windows: Qt шлёт оба сигнала подряд
-            lib.itemActivated.emit(it)
-            pump(50)
-            self.assertEqual(len(opened), 1)
-        finally:
-            close(win)
-
-    def test_page_window_not_launched_twice_while_starting(self):
-        """Окно суфлёра ещё открывается (Edge запущен, окна пока нет) — второй вызов не запускает второй Edge."""
-        from autoprint.ui.lesson_control import PageWindow
-
-        class Proc:
-            pid = 4242
-
-            def poll(self):
-                return None
-        launched = []
-        pw = PageWindow(TMP / "edge-prof", popen=lambda *a, **k: launched.append(1) or Proc(), edge=lambda: "msedge.exe",
-                        find_window=lambda pid: None, raise_window=lambda h: None)
-        self.assertTrue(pw.open("http://127.0.0.1:1/lesson"))
-        self.assertTrue(pw.open("http://127.0.0.1:1/lesson"))
-        self.assertEqual(len(launched), 1)
-
-
 class ExerciseSoundTest(unittest.TestCase):
     def test_lesson_page_knows_when_exercise_is_silent_or_waiting(self):
         """Зарядка без звука или стоит до щелчка (браузер не дал автозапуск) — экран урока это видит и говорит, что
@@ -1289,7 +1175,7 @@ class PackageTest(unittest.TestCase):
         package.export_package(f, lessons=[t], plans=[p], looks=[look])
         win = window([Template("Мой", [stage("А", 5)], id="M")], 18928)
         try:
-            d = ImportDialog(win, win.settings)
+            d = ImportDialog(win.window, win.settings)
             d._take_files([str(f)])
             self.assertEqual(len(d.result), 2)
             win._take_import(d)
@@ -1320,7 +1206,7 @@ class PackageTest(unittest.TestCase):
             self.assertEqual((s["plans"], s["looks"]), (1, 1))
             self.assertGreater(win.package_media_size([t], include_looks=True), 100)
             from autoprint.ui.export_package import ExportPackageDialog
-            d = ExportPackageDialog(win, [t], win)
+            d = ExportPackageDialog(win.window, [t], win)
             self.assertTrue(d.include_plans() and d.include_looks())
             self.assertIn("видео зарядок", d.cb_look.text())
             self.assertIn("КБ", d.cb_look.text())
