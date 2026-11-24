@@ -78,7 +78,7 @@ class Page(unittest.TestCase):
         s.efir_port = PORT
         s.update_auto_check = False
         s.sound_enabled = False
-        s.samples_seen = ["steps_v1", "tour_v1", "lesson_v1", "lesson_v2", "lesson_v3"]
+        s.samples_seen = ["steps_v1", "tour_v1", "lesson_v1", "lesson_v2", "lesson_v3", "plan_v1"]
         s.migrations = ["tray_v1", "window_v10"]
         cls.win = MainWindow(s, store)
         cls.win.tray.showMessage = lambda *a, **k: None

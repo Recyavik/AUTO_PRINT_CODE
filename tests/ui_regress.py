@@ -84,7 +84,10 @@ def main() -> int:
     win.show()
     pump()
 
-    check("при запуске урок выделен в списке", win.library.list.currentRow() == 0)
+    # 0.12: над уроками может быть группа «Планы уроков» — выделен урок, который в фокусе, а не заголовок
+    cur = win.library.list.currentItem()
+    check("при запуске урок выделен в списке", cur is not None and cur.data(Qt.ItemDataRole.UserRole) == win.printer.focus_id
+          and win.printer.focus() is not None and win.printer.focus().kind == "")
 
     # смена темы после закрытия настроек и после вставки блока — без ошибок
     win.open_settings()

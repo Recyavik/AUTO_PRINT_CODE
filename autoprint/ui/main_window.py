@@ -897,8 +897,14 @@ class MainWindow(FramelessWindow):
     def _ensure_samples(self) -> str:
         """Образцовый урок — один раз (и новым пользователям, и после обновления). Возвращает его id, если его
         добавили только что (у обновившихся — его и показать), иначе пустую строку."""
-        from ..samples_lesson import LESSON_SAMPLE_ID, LESSON_TITLE, lesson_sample
+        from ..samples_lesson import LESSON_SAMPLE_ID, LESSON_TITLE, PLAN_SAMPLE_ID, PLAN_TITLE, lesson_sample, plan_sample
         seen = self.settings.samples_seen
+        if PLAN_SAMPLE_ID not in seen:          # 0.12: образец плана урока — в конец (урок в фокусе не меняется)
+            seen.append(PLAN_SAMPLE_ID)
+            if not any(x.title == PLAN_TITLE and x.kind == KIND_PLAN for x in self.store.templates):
+                self.store.templates.append(plan_sample())
+            self._save_store()
+            self._save_settings()
         if LESSON_SAMPLE_ID in seen:
             return ""
         seen.append(LESSON_SAMPLE_ID)

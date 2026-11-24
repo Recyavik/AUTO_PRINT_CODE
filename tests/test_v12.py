@@ -927,5 +927,38 @@ class PlacesTest(unittest.TestCase):
             close(win)
 
 
+# ================================================================ Task 12: образец плана
+
+class SamplePlanTest(unittest.TestCase):
+    def test_sample_plan(self):
+        from autoprint.samples_lesson import PLAN_SAMPLE_ID, PLAN_TITLE, plan_sample
+        p = plan_sample()
+        st = stages_of(p)
+        self.assertEqual((PLAN_SAMPLE_ID, p.title, p.kind), ("plan_v1", PLAN_TITLE, "plan"))
+        self.assertEqual(PLAN_TITLE, "Пример плана: онлайн-урок 90 мин")
+        self.assertEqual(sum(b.minutes for b in st), 90)
+        self.assertEqual([b.title for b in st], ["Приветствие и проверка связи", "Повторение", "Новая тема", "Зарядка для глаз",
+                                                 "Практика 1", "Перерыв", "Практика 2", "Итоги и рефлексия", "Домашнее задание"])
+        self.assertEqual([b.minutes for b in st], [5, 10, 20, 3, 12, 10, 20, 7, 3])
+        self.assertEqual((st[3].stage_kind, st[5].stage_kind), ("exercise", "break"))
+        self.assertTrue(any(b.role == "do" and "Проверить звук и демонстрацию" in b.text for b in p.blocks))
+        self.assertTrue(any(b.role == "ask" and "Что сегодня получилось? Что было трудно?" in b.text for b in p.blocks))
+        self.assertTrue(any(b.role == "homework" for b in p.blocks))
+
+    def test_sample_plan_added_once_at_the_end(self):
+        win = window([Template("Мой", [stage("А", 5)], id="M")], 18916)
+        try:
+            self.assertEqual(win.store.plans(), [])                              # уже видели — не добавляется
+            win.settings.samples_seen.remove("plan_v1")
+            win._ensure_samples()
+            self.assertEqual([p.title for p in win.store.plans()], ["Пример плана: онлайн-урок 90 мин"])
+            self.assertEqual(win.store.templates[0].id, "M")                       # в конец: урок в фокусе не меняется
+            self.assertIn("plan_v1", win.settings.samples_seen)
+            win._ensure_samples()
+            self.assertEqual(len(win.store.plans()), 1)
+        finally:
+            close(win)
+
+
 if __name__ == "__main__":
     unittest.main()

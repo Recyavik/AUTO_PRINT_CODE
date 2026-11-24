@@ -18,7 +18,7 @@ ROOT = Path(__file__).resolve().parent.parent
 WEB = ROOT / "web"
 NPM = "npm.cmd" if os.name == "nt" else "npm"
 # тихие тесты-сценарии: окна — только в памяти, без трея, уведомлений и настоящих нажатий
-SCRIPT_TESTS = ["test_steps", "test_engine", "test_human", "test_lesson_ai", "test_report", "test_sounds", "test_v10", "test_v11", "test_page",
+SCRIPT_TESTS = ["test_steps", "test_engine", "test_human", "test_lesson_ai", "test_report", "test_sounds", "test_v10", "test_v11", "test_v12", "test_page",
                 "test_updater", "test_efir", "test_lesson", "test_v09", "ui_regress", "ui_smoke", "ui_sweep", "ui_import"]
 
 

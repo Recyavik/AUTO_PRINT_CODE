@@ -129,7 +129,11 @@ def main() -> int:
     step("сообщение внизу окна", lambda: win._notify("проверка"))
     step("шаг назад", lambda: (win.printer.set_option("mode", "steps"), win.printer.step_back(),
                                win.printer.set_option("mode", "block")))
-    step("меню списка уроков", lambda: win._library_menu(QPoint(10, 10)))
+    # 0.12: строка 0 может быть заголовком группы «Планы уроков» (у него меню нет) — щёлкаем по строке урока
+    lib_row = lambda: next(i for i in range(win.library.list.count())
+                           if win.library.list.item(i).data(Qt.ItemDataRole.UserRole))
+    step("меню списка уроков", lambda: win._library_menu(
+        win.library.list.visualItemRect(win.library.list.item(lib_row())).center()))
     step("новый урок", win.new_template)
     step("смена темы", lambda: (theme.set_mode("light"), theme.set_mode("dark")))
 

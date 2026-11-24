@@ -161,7 +161,7 @@ class MigrationTest(unittest.TestCase):
 
 # ================================================================ Task 2, 3, 5: печать, окно, экран урока
 
-SEEN = ["steps_v1", "tour_v1", "lesson_v1", "lesson_v2", "lesson_v3"]     # встроенные примеры уже добавлены — не мешают
+SEEN = ["steps_v1", "tour_v1", "lesson_v1", "lesson_v2", "lesson_v3", "plan_v1"]   # встроенные примеры уже добавлены — не мешают
 
 
 def make_window(templates: list[Template], port: int = 18961):
