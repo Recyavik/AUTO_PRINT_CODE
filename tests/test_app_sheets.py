@@ -506,6 +506,16 @@ class PdfRealTest(unittest.TestCase):
         self.assertIn("pdf: True", r.stdout, r.stdout + r.stderr[-2000:])
         self.assertTrue(out.is_file())
         self.assertEqual(out.read_bytes()[:5], b"%PDF-")
+        # 1.1: поля страницы (12 мм) — белые и в тёмной теме окна, а не чёрная рамка вокруг урока
+        from PySide6.QtCore import QSize
+        from PySide6.QtPdf import QPdfDocument
+        doc = QPdfDocument()
+        doc.load(str(out))
+        img = doc.render(0, QSize(420, 594))
+        for x, y in ((6, 6), (210, 4), (414, 300), (210, 590)):
+            c = img.pixelColor(x, y)                      # не закрашено (прозрачно) — белая бумага; иначе — почти белое
+            self.assertTrue(c.alpha() < 10 or min(c.red(), c.green(), c.blue()) > 240,
+                            f"поле страницы ({x},{y}) = {c.name()} α={c.alpha()}")
 
 
 class ExportModuleRemovedTest(unittest.TestCase):

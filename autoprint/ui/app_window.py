@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import logging
 import os
+from contextlib import contextmanager
 from pathlib import Path
 
 from PySide6.QtCore import QByteArray, QRect, QSize, Qt, QTimer, QUrl, Signal
@@ -288,7 +289,8 @@ class AppWindow(FramelessWindow):
         page = self.view.page()
         layout = QPageLayout(QPageSize(QPageSize.PageSizeId.A4), QPageLayout.Orientation.Portrait,
                              QMarginsF(12, 12, 12, 12), QPageLayout.Unit.Millimeter)
-        ok = self._wait(page.pdfPrintingFinished, lambda: page.printToPdf(str(path), layout), 120_000)
+        with self._paper():
+            ok = self._wait(page.pdfPrintingFinished, lambda: page.printToPdf(str(path), layout), 120_000)
         if ok and open_after:
             try:
                 os.startfile(str(path))
@@ -306,7 +308,19 @@ class AppWindow(FramelessWindow):
         dlg.setWindowTitle("Печать урока")
         if dlg.exec() != QPrintDialog.DialogCode.Accepted:
             return False
-        return self._wait(self.view.printFinished, lambda: self.view.print(printer), 300_000)
+        with self._paper():
+            return self._wait(self.view.printFinished, lambda: self.view.print(printer), 300_000)
+
+    @contextmanager
+    def _paper(self):
+        """На время печати фон под страницей — белый: Chromium закрашивает им поля листа, а в тёмной теме окна
+        это был #161A22 — чёрная рамка вокруг урока в PDF и на бумаге."""
+        page = self.view.page()
+        page.setBackgroundColor(QColor("#FFFFFF"))
+        try:
+            yield
+        finally:
+            page.setBackgroundColor(QColor(_bg()))
 
     # ------------------------------------------------------------ области и кнопки окна
     def set_regions(self, data: dict) -> None:

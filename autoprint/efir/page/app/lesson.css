@@ -488,8 +488,9 @@ body > .menu.wide { width: 340px; } body > .menu.roles { width: 330px; }
     --line: #ddd; --line2: #bbb; --text: #111; --dim: #555; --faint: #666; --accent: #9A6200; --accent-soft: transparent;
     --say: #1F5FBF; --tell: #237A32; --ask: #9A6200; --do: #555; --imp: #B00020; --trap: #B00020; --show: #6B2FB0;
     --extra: #6B2FB0; --term: #0E7C6E; --output: #237A32; --tc: #777; --tk: #9A5500; --tb: #0F6A85; --tf: #1F5FBF;
-    --tcl: #7A4E00; --tt: #B00020; --ta: #8A4513; --ts: #1E6B2B; --tnum: #6B2FB0; --to: #555; }
-  html { zoom: 1 !important; }
+    --tcl: #7A4E00; --tt: #B00020; --ta: #8A4513; --ts: #1E6B2B; --tnum: #6B2FB0; --to: #555;
+    color-scheme: light; }          /* тёмная схема окна красила поля страницы (холст) в #121212 — чёрная рамка */
+  html { zoom: 1 !important; background: #fff; }
   body { overflow: visible; font-size: 12px; }
   #shell { height: auto; display: block; }
   #titlebar, #rail, #onair, #lessonLine, #planRibbon, #nowbar, #toasts, .toast, .rtb, .toscreen, .armbtn, .efirbtn, nav#plan .phint,
