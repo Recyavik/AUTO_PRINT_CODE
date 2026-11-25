@@ -243,10 +243,13 @@ function codeName(id) {
   return k >= 0 ? "код " + (k + 1) : "код";
 }
 
+// почему пауза — коротко (полное — в полосе набора)
+function whyShort(P) { return (P.pause_why || "").split(" — ")[0]; }
+
 function stateText(P) {
   const pct = Math.round((P.progress || 0) * 100);
   if (P.state === "countdown") return "Начну через " + (P.countdown || "") + "…";
-  if (P.state === "paused") return "Пауза · " + pct + "%";
+  if (P.state === "paused") return "Пауза · " + (whyShort(P) || pct + "%");
   if (P.state === "line_wait") return "Жду Enter" + (P.line ? " · строка " + P.line.i + " из " + P.line.n : "");
   return "Набираю · " + pct + "%";
 }
@@ -303,12 +306,14 @@ function buildTypingBar() {
   const fill = h("i");
   const act = btn("Пауза", { size: "sm", icon: "pause", cls: "tact", onClick: () => cmd({ cmd: "typing", op: act.dataset.op || "pause" }) });
   const stopB = btn("Стоп", { size: "sm", kind: "stop", icon: "stop", cls: "tstop", onClick: () => cmd({ cmd: "typing", op: "stop" }) });
+  const why = h("div", { class: "twhy", hidden: true });
   const bar = h("section", { id: "typingBar", hidden: true, "aria-label": "Набор кода", "aria-live": "polite" },
     say,
     h("div", { class: "trow" }, h("span", { class: "tkey" }, icon("keyboard")),
       h("div", { class: "ttext" }, h("div", { class: "tl1" }, name, info), target),
-      h("div", { class: "tprog" }, fill), act, stopB));
-  Object.assign(bar, { say, name, info, target, fill, act });
+      h("div", { class: "tprog" }, fill), act, stopB),
+    why);
+  Object.assign(bar, { say, name, info, target, fill, act, why });
   return bar;
 }
 
@@ -336,6 +341,11 @@ function updateTyping() {
     bar.act.querySelector(".bl").textContent = text;
     bar.act.querySelector(".i")?.replaceWith(icon(ic));
   }
+  // пауза не кнопкой — почему и что делать (иначе «Пауза» непонятна: «я же не нажимал»)
+  const whyText = P.state === "paused" && P.pause_why
+    ? "Пауза: " + P.pause_why + ". Поставьте курсор, где печатать, и нажмите «Продолжить» или " + hotkey() + "." : "";
+  bar.why.hidden = !whyText;
+  set(bar.why, whyText);
   const sayText = (P.say || []).join("\n");
   bar.say.hidden = !sayText;
   if (bar.say.dataset.k !== sayText) {

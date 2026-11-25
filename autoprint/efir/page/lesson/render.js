@@ -268,20 +268,46 @@ function oldArmSlot(slot, it, P, hk, on, busy, st) {
   }
 }
 
+// столбец на экране: табуляция — до следующей позиции, кратной 8 (как у <pre>)
+function visualCol(line, col) {
+  let x = 0;
+  for (const ch of line.slice(0, col)) x = ch === "\t" ? (Math.floor(x / 8) + 1) * 8 : x + 1;
+  return x;
+}
+
 function decorateLines(n, it, P, on) {
-  // подсветка строк: следующий шаг или строка
+  // подсветка строк. Не печатается — следующий шаг или строка. Печатается (P.cur) — набранное, текущая строка
+  // и следующая разным цветом, и курсор там, где набор сейчас
   const hls = n.querySelector(".hls");
-  const lines = on && !(P.step && P.step.done) ? (P.next_lines || []) : [];
-  const hk2 = lines.join(",");
+  const busy = on && ["running", "countdown", "paused", "line_wait"].includes(P.state);
+  const cur = busy && P.cur ? P.cur : null;
+  const nexts = on && !(P.step && P.step.done) ? (P.next_lines || []) : [];
+  const rows = [];
+  if (cur) {
+    for (let ln = Math.max(1, cur.from); ln < cur.line; ln++) rows.push([ln, "done"]);
+    rows.push([cur.line, "cur"]);
+    for (const ln of nexts) if (ln > cur.line) rows.push([ln, "next"]);
+  } else for (const ln of nexts) rows.push([ln, ""]);
+  const hk2 = rows.map((r) => r.join(":")).join(",");
   if (hls.dataset.k !== hk2) {
     hls.dataset.k = hk2;
     hls.innerHTML = "";
-    for (const ln of lines) {
-      const d = el("div", "hl");
+    for (const [ln, cls] of rows) {
+      const d = el("div", "hl" + (cls ? " " + cls : ""));
       d.style.top = (12 + (ln - 1) * LINE_H) + "px";
       hls.appendChild(d);
     }
   }
+  let caret = hls.querySelector(".caret");
+  if (cur) {
+    if (!caret) { caret = el("i", "caret"); hls.appendChild(caret); }
+    else if (caret !== hls.lastChild) hls.appendChild(caret);
+    const gut = n.querySelector(".gut");
+    const text = ((it.text || "").split("\n")[cur.line - 1]) || "";
+    caret.style.top = (12 + (cur.line - 1) * LINE_H) + "px";
+    caret.style.left = `calc(${gut ? gut.offsetWidth : 0}px + 14px + ${visualCol(text, cur.col)}ch)`;
+    caret.classList.toggle("wait", P.state === "line_wait" || P.state === "paused");
+  } else if (caret) caret.remove();
   const say = n.querySelector(".say");
   const sayText = on ? (P.say || []).join("\n") : "";
   if (say.dataset.k !== sayText) {

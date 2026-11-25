@@ -625,6 +625,28 @@ class PrintController(QObject):
                 self.notify.emit("Напечатано. Весь код урока напечатан.", False, True)
 
     # ================================================================ для экрана урока
+    # почему пауза — словами для полосы набора (пауза кнопкой или хоткеем — без пояснения)
+    PAUSE_WHY = {"клик мышью": "вы щёлкнули мышью — курсор мог сместиться",
+                 "нажата клавиша": "вы нажали клавишу",
+                 "сменилось окно": "сменилось активное окно",
+                 "ошибка ввода": "Windows не приняла нажатие"}
+
+    def _cur(self, job: dict, block) -> dict | None:
+        """Где набор сейчас — строка и столбец в тексте блока (с 1 и с 0) и строка, с которой начали."""
+        text = job["text"]
+
+        def src(i: int) -> int:     # позиция в тексте задания → в тексте блока (как в _lines_next)
+            omap = job.get("omap")
+            if omap is not None:
+                i = omap[i] if i < len(omap) else job.get("src_len", len(text))
+            return job.get("base", 0) + i
+        bt = block.text
+        k = max(0, min(self._last_pos, len(text)))      # за последним набранным знаком (не за «\n» — он у следующей строки)
+        p = max(0, min(len(bt), src(k - 1) + 1 if k else src(0)))
+        start = max(0, min(len(bt), src(0)))
+        return {"line": bt.count("\n", 0, p) + 1, "col": p - (bt.rfind("\n", 0, p) + 1),
+                "from": bt.count("\n", 0, start) + 1}
+
     def snapshot(self) -> dict:
         """Состояние печати для экрана урока и строки печати в окне программы."""
         s = self.s
@@ -641,9 +663,13 @@ class PrintController(QObject):
             d["progress"] = round(max(0, min(self._last_pos, len(text))) / max(1, len(text)), 4)
             if self._line_info:
                 d["line"] = {"i": self._line_info[0], "n": self._line_info[1]}
+        if st == PAUSED:
+            d["pause_why"] = self.PAUSE_WHY.get(self.engine.pause_reason, "")
         _t, block = self.find_block(bid) if bid else (None, None)
         if block is None or block.type != BLOCK_CODE:
             return d
+        if job and st != COUNTDOWN and self._last_pos > 0:
+            d["cur"] = self._cur(job, block)
         if s.print_mode == MODE_STEPS:
             k = job["step"] if job and job.get("kind") == MODE_STEPS else self.step_pointer(block.id)
             nums = self._block_steps(block)

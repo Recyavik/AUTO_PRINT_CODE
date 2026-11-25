@@ -113,7 +113,12 @@ function reportView() {
   clearTimeout(viewTimer);
   viewTimer = setTimeout(() => { if (location.hash) send({ cmd: "view", hash: location.hash }).catch(() => {}); }, 400);
 }
-window.addEventListener("hashchange", () => { emit("route", route()); reportView(); });
+// последнее место вне настроек — «Назад» в настройках ведёт туда (урок, эфир, уроки)
+let outside = "";
+export function lastPlace() { return outside; }
+function rememberPlace() { if (location.hash && route().view !== "settings") outside = location.hash; }
+window.addEventListener("hashchange", () => { rememberPlace(); emit("route", route()); reportView(); });
+rememberPlace();
 on("ready", reportView);
 
 export function start() {

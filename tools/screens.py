@@ -230,7 +230,8 @@ class Shots:
 
         def fake():
             d = real()
-            d.update(state="paused", progress=0.42, block=self.t.next_code().id if self.t.next_code() else d["block"])
+            d.update(state="paused", progress=0.42, block=self.t.next_code().id if self.t.next_code() else d["block"],
+                     cur={"line": 2, "col": 6, "from": 1}, next_lines=[3], pause_why="вы щёлкнули мышью — курсор мог сместиться")
             return d
         p.snapshot = fake
         self.app.lesson.publish()

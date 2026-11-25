@@ -668,6 +668,17 @@ export function lessonView(root, r) {
   viewer.addEventListener("click", closeViewer);
   nowbar.addEventListener("click", () => { if (nowbar.dataset.id) goStage(nowbar.dataset.id); nowbar.hidden = true; });
   content.addEventListener("scroll", () => { if (!V) return; const c = computeCurrent(); updateNowbar(c.cur, c.stages); }, { passive: true });
+  // масштаб поменяли — то же место текста посередине экрана (иначе текст «уезжает» при каждом шаге)
+  let anchor = null;
+  const offBefore = on("beforezoom", () => {
+    anchor = content.scrollHeight ? (content.scrollTop + content.clientHeight / 2) / content.scrollHeight : null;
+  });
+  const offZoom = on("zoom", () => {
+    if (anchor === null) return;
+    const a = anchor;
+    anchor = null;
+    requestAnimationFrame(() => { content.scrollTop = a * content.scrollHeight - content.clientHeight / 2; });
+  });
   applyPlanPos();
   for (const f of hooks.mount) f(V);
   const timer = setInterval(tick, 1000);
@@ -691,6 +702,8 @@ export function lessonView(root, r) {
     destroy: () => {
       clearInterval(timer);
       offLesson();
+      offBefore();
+      offZoom();
       E.finishEditing();
       Q.flushDrafts();
       V = null;

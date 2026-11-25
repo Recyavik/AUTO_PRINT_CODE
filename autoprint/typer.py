@@ -126,6 +126,7 @@ class TypingEngine(QObject):
         super().__init__()
         self.settings = settings
         self.state = IDLE
+        self.pause_reason = ""            # почему последняя пауза: «клик мышью», «нажата клавиша», «сменилось окно»…
         self._text = ""
         self._units: list[Unit] = []
         self._pos = 0
@@ -231,6 +232,7 @@ class TypingEngine(QObject):
             if not self.active:
                 return
             self._run.clear()
+            self.pause_reason = reason
             self._set_state(PAUSED)
         log.info("Пауза (%s) на %d/%d", reason, self._pos, len(self._units))
 
@@ -345,7 +347,7 @@ class TypingEngine(QObject):
         if not clicked and (not w.mouse_pressed() or w.cursor_over_own_window()):
             return False
         self.auto_paused_at = time.monotonic()
-        self._pause_from_worker(gen)
+        self._pause_from_worker(gen, "клик мышью")
         log.info("Пауза (клик мышью) на %d/%d", self._pos, len(self._units))
         self.interrupted.emit("mouse")
         return True
@@ -421,9 +423,10 @@ class TypingEngine(QObject):
         self._target_hwnd = hwnd
         return hwnd
 
-    def _pause_from_worker(self, gen: int) -> None:
+    def _pause_from_worker(self, gen: int, reason: str = "") -> None:
         if self._alive(gen):
             self._run.clear()
+            self.pause_reason = reason
             self._wset(gen, PAUSED)
 
     def _worker(self, gen: int, delay: float, countdown: int) -> None:
@@ -490,7 +493,7 @@ class TypingEngine(QObject):
             # автопауза при смене окна выключена
             if fg != target and (self.settings.autopause_on_focus_change or w.is_own_window(fg)):
                 self.auto_paused_at = time.monotonic()
-                self._pause_from_worker(gen)
+                self._pause_from_worker(gen, "сменилось окно")
                 log.info("Пауза (сменилось окно → %s) на %d/%d", w.describe_window(fg), self._pos, len(self._units))
                 self.message.emit("Пауза: сменилось активное окно. Вернитесь в нужное окно и продолжите.")
                 continue
@@ -498,7 +501,7 @@ class TypingEngine(QObject):
                 self._execute(unit, gen, enter_done=entered == self._pos)
             except OSError as e:
                 log.error("Ошибка SendInput на %d/%d: %s", self._pos, len(self._units), e)
-                self._pause_from_worker(gen)
+                self._pause_from_worker(gen, "ошибка ввода")
                 self.message.emit(f"Ошибка ввода: {e}")
                 continue
             self._pos += 1

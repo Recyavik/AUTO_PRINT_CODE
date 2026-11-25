@@ -56,6 +56,41 @@ class CompactTest(AppPage):
             self.size(w, h)
             self.assertTrue(self.wait_js(f"document.body.dataset.size === {want!r}"), (w, h, want, self.js("document.body.dataset.size")))
 
+    def test_auto_zoom_follows_window_but_not_in_compact(self):
+        """«Масштаб под размер окна»: шире окно — крупнее (90…150 %, после того как окно отпустили); Ctrl+= — снова
+        вручную. В маленьком режиме — обычный масштаб (раскладки табло считают пиксели страницы)."""
+        self.app.set_compact(False)
+        self.app.publish_now()
+        self.assertTrue(self.wait_js("!document.body.classList.contains('compact')"))
+        zoom = "parseFloat(document.documentElement.style.zoom || '1')"
+        try:
+            self.app.settings.page_zoom_auto = True
+            self.app.publish_now()
+            self.size(1500, 860)
+            self.assertTrue(self.wait_js(f"{zoom} === 1"), self.js(zoom))
+            self.size(2100, 900)
+            self.assertTrue(self.wait_js(f"{zoom} === 1.4"), self.js(zoom))
+            self.size(900, 700)
+            self.assertTrue(self.wait_js(f"{zoom} === 0.9"), self.js(zoom))
+            self.size(2100, 900)
+            self.assertTrue(self.wait_js(f"{zoom} === 1.4"))
+            self.app.set_compact(True)                                   # маленький режим — свой, обычный масштаб
+            self.app.publish_now()
+            self.assertTrue(self.wait_js(f"document.body.classList.contains('compact') && {zoom} === 1"), self.js(zoom))
+            self.app.set_compact(False)
+            self.app.publish_now()
+            self.assertTrue(self.wait_js(f"{zoom} === 1.4"))
+            self.js("document.dispatchEvent(new KeyboardEvent('keydown', {key: '=', ctrlKey: true, bubbles: true}))")
+            self.assertTrue(self.wait_py(lambda: not self.app.settings.page_zoom_auto))   # Ctrl+= — снова вручную
+            self.assertTrue(self.wait_py(lambda: self.app.settings.page_zoom == 150),     # от 140 % — на шаг крупнее
+                            (self.app.settings.page_zoom, self.js("S.zoom"), self.js(zoom), self.edge.errors()[-3:]))
+        finally:
+            self.app.settings.page_zoom_auto = False
+            self.app.settings.page_zoom = 100
+            self.app.publish_now()
+            self.app.set_compact(True)
+            self.app.publish_now()
+
     def test_layout_menu_resizes_window(self):
         """Вид маленького режима — выбором, а не только растягиванием: табло, со списком, полоса, только время."""
         self.size(360, 600)

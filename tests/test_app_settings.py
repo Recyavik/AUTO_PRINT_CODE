@@ -70,6 +70,21 @@ class SettingsTest(AppPage):
         self.assertIn("Копировать картинки и видео в программу", texts[1])
         self.assertIn("Сворачивать окно при наборе", texts[2])
 
+    def test_back_to_where_you_came_from(self):
+        """В настройках — понятное «Назад»: туда, откуда пришли (урок — «К уроку»), сколько разделов ни листали."""
+        self.go("#/lesson/L", "lesson")
+        self.go("#/settings/view", "settings")
+        self.assertTrue(self.wait_js("!!document.querySelector('#setBack')"))
+        self.assertIn("К уроку", self.js("document.querySelector('#setBack').textContent"))
+        self.js("document.querySelector('#setnav [data-sec=typing]').click()")
+        self.assertTrue(self.wait_js("location.hash === '#/settings/typing'"))
+        self.click("#setBack")
+        self.assertTrue(self.wait_js("location.hash === '#/lesson/L'"))
+        self.go("#/efir", "efir")
+        self.go("#/settings/about", "settings")
+        self.assertIn("К эфиру", self.js("document.querySelector('#setBack').textContent"))
+        self.go("#/settings", "settings")
+
     def test_number_limits_clamped(self):
         self.section("typing")
         self.set_value("#f-cpm", "99999")

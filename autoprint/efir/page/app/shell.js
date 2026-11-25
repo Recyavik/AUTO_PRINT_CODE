@@ -2,9 +2,9 @@
 // закрыть), меню разделов, области перетаскивания окна для программы, клавиши окна, файлы, перетащенные в окно.
 "use strict";
 import { S, on, send, go, emit } from "./core.js";
-import { h, iconBtn, clear, popover, seg, btn, $ } from "./ui.js";
+import { h, iconBtn, clear, popover, seg, btn, toggle, $ } from "./ui.js";
 import { icon } from "./icons.js";
-import { zoomBy } from "./main.js";
+import { zoomBy, zoomNow, autoZoomOn } from "./main.js";
 
 let crumbsEl, extraEl, railEl, viewEl;
 
@@ -112,14 +112,22 @@ export function setWidth(v) {
 }
 
 function zoomPanel(anchor) {
-  const val = h("b", { class: "zval mono" }, (S.zoom || 100) + " %");
-  const upd = () => { val.textContent = (S.zoom || 100) + " %"; };
+  const val = h("b", { class: "zval mono" }, zoomNow() + " %");
+  const upd = () => { val.textContent = zoomNow() + " %"; auto.input.checked = autoZoomOn(); };
+  const auto = toggle("Под размер окна", autoZoomOn(), (v) => {
+    S.prefs = Object.assign({}, S.prefs, { page_zoom_auto: v });
+    send({ cmd: "prefs", key: "page_zoom_auto", value: v });
+    emit("app", S);                                 // применить сразу
+    setTimeout(upd, 50);
+  }, "шире окно — крупнее");
+  auto.input.id = "zoomAuto";
   const box = h("div", { class: "zoompanel" },
     h("div", { class: "phead" }, "Размер"),
     h("div", { class: "zrow" },
       iconBtn("minus", "Мельче (Ctrl −)", () => { zoomBy(-10); upd(); }, { size: "sm" }), val,
       iconBtn("plus", "Крупнее (Ctrl +)", () => { zoomBy(10); upd(); }, { size: "sm" }),
       btn("Обычный", { kind: "ghost", size: "sm", onClick: () => { zoomBy(0); upd(); } })),
+    auto,
     h("div", { class: "phead" }, "Ширина текста урока"),
     widthSeg(),
     h("p", { class: "meta" }, "Или тяните край текста урока мышью — шире или уже."),

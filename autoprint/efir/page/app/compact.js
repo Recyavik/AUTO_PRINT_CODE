@@ -197,7 +197,7 @@ function tick() {
   const busy = BUSY.includes(P.state);
   B.typing.hidden = !busy;
   if (busy) {
-    const bits = [P.state === "paused" ? "Пауза" : P.state === "line_wait" ? "Жду Enter" : P.state === "countdown" ? "Начну через " + (P.countdown || "") : "Набираю"];
+    const bits = [P.state === "paused" ? "Пауза" + (P.pause_why ? " — " + P.pause_why.split(" — ")[0] : "") : P.state === "line_wait" ? "Жду Enter" : P.state === "countdown" ? "Начну через " + (P.countdown || "") : "Набираю"];
     if (P.line) bits.push("строка " + P.line.i + " из " + P.line.n);
     if (P.step && !P.step.done) bits.push("шаг " + P.step.i + " из " + P.step.n);
     set(B.tname, bits.join(" · "));

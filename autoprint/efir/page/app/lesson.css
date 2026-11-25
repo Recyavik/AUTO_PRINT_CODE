@@ -127,6 +127,8 @@ body.lw-drag, body.lw-drag * { cursor: col-resize !important; user-select: none 
 #typingBar .tinfo { color: var(--dim); }
 #typingBar .tprog { flex: 1; min-width: 80px; height: 6px; border-radius: 3px; background: var(--line2); overflow: hidden; }
 #typingBar .tprog i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .3s linear; }
+#typingBar .twhy { margin: 8px 0 0 50px; font-size: 14px; color: var(--live); }
+#typingBar .twhy[hidden] { display: none; }
 .typepanel { display: flex; flex-direction: column; gap: 10px; width: 340px; padding: 4px 6px 6px; }
 .typepanel .phead { padding: 0; }
 .typepanel .meta { margin: -2px 0 0; font-size: 12.5px; }
@@ -204,6 +206,8 @@ nav#plan .phint { margin: 12px 10px 0; font-size: 13px; color: var(--faint); }
 /* ---------------------------------------------------------------- этапы */
 .stage, .intro { background: var(--panel); border: 1px solid var(--line); border-radius: var(--r-xl); overflow: hidden;
   scroll-margin-top: 12px; }
+/* этапы за пределами экрана браузер не раскладывает: масштаб и растягивание окна — вдвое меньше работы */
+.stage, .intro { content-visibility: auto; contain-intrinsic-size: auto 600px; }
 .intro { background: none; border-style: dashed; }
 .intro .introh { font-size: 13px; font-weight: 600; color: var(--faint); padding: 12px 20px 0; }
 .intro:not(.has-stages) .introh { display: none; }
@@ -348,9 +352,14 @@ body.mode-prep .lbl .sub { cursor: text; }
 .rtb button:hover { background: var(--raised); }
 .rtb .rt-bold { font-weight: 800; } .rtb .rt-italic { font-style: italic; font-family: Georgia, serif; } .rtb .rt-code { font-family: var(--mono); }
 .blk.editing .row { box-shadow: 0 0 0 1.5px var(--accent-line) inset; }
-.toscreen { margin-left: 10px; height: 26px; padding: 0 10px; font-size: 12.5px; border-radius: 999px; font-variant-caps: normal;
-  letter-spacing: 0; background: transparent; color: var(--dim); border: 1px solid var(--line2); cursor: pointer; }
-.toscreen:hover { color: var(--text); border-color: var(--accent-line); }
+/* «На экран» — справа у картинки, заметная; на большом окне крупнее (до предела) */
+.toscreen { margin-left: auto; display: inline-flex; align-items: center; gap: .45em; height: clamp(32px, 2.3vw, 44px);
+  padding: 0 clamp(14px, 1.2vw, 22px); font-size: clamp(13.5px, .95vw, 17px); font-weight: 650; border-radius: 999px;
+  font-variant-caps: normal; letter-spacing: 0; background: var(--accent-soft); color: var(--accent);
+  border: 1.5px solid var(--accent-line); cursor: pointer; flex: none; }
+.toscreen::before { content: ""; width: .9em; height: .62em; border: 2px solid currentColor; border-radius: 3px; }
+.toscreen:hover { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 20%, transparent); }
+.r-image figure { display: flex; justify-content: center; }
 .blk.onscreen .r-image figure { box-shadow: 0 0 0 3px var(--accent); border-radius: var(--r); }
 .blk.onscreen .toscreen { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
 body.mode-lesson .r-image figure img { max-height: min(calc(var(--vh) * 40), 520px); }
@@ -399,6 +408,15 @@ body.mode-prep .codebox { cursor: text; }
 .hls { position: absolute; inset: 0; pointer-events: none; }
 .hl { position: absolute; left: 0; right: 0; height: 21px; background: color-mix(in srgb, var(--accent) 16%, transparent);
   border-left: 3px solid var(--accent); }
+/* набор идёт: набранное — зелёным, текущая строка — акцентом, следующая — пунктиром; курсор — где набор сейчас */
+.hl.done { background: color-mix(in srgb, var(--ok) 8%, transparent); border-left-color: color-mix(in srgb, var(--ok) 55%, transparent); }
+.hl.cur { background: color-mix(in srgb, var(--accent) 20%, transparent); }
+.hl.next { background: color-mix(in srgb, var(--accent) 6%, transparent); border-left: 3px dashed var(--accent-line); }
+.hls .caret { position: absolute; width: 2px; height: 21px; margin-left: -1px; background: var(--accent); font: 14px/21px var(--mono);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--accent) 70%, transparent); transition: left .08s linear, top .12s ease; }
+.hls .caret.wait { animation: caretblink 1s steps(1) infinite; }
+@keyframes caretblink { 50% { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .hls .caret { transition: none; } .hls .caret.wait { animation: none; } }
 .pbar { position: absolute; left: 0; right: 0; bottom: 0; height: 3px; }
 .pbar i { display: block; height: 3px; background: var(--accent); width: 0; transition: width .2s linear; }
 .selnote { margin-top: 6px; font-size: 13px; color: var(--accent); }
@@ -510,6 +528,7 @@ body > .menu.wide { width: 340px; } body > .menu.roles { width: 330px; }
   #frame, #view, .lview, .lbody { display: block; height: auto; overflow: visible; }
   .lcontent { overflow: visible; padding: 0; }
   nav#plan { display: block !important; width: auto; border: 0; overflow: visible; margin-bottom: 14px; }
+  .stage, .intro { content-visibility: visible !important; }
   .stage { break-inside: auto; margin-bottom: 10px; } .stage .body, .stage.collapsed .body { display: block !important; }
   body.mode-prep .body { padding-left: 20px; } .prow .m { display: inline !important; }
   .stage.past.collapsed { opacity: 1; } .sh { break-after: avoid; break-inside: avoid; } .row { break-inside: avoid; }

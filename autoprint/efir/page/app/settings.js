@@ -2,7 +2,7 @@
 // (их же проверяет программа). Хоткей записывается здесь: нужен Ctrl / Alt / Win (кроме F1–F24, Pause, ScrollLock),
 // занятое — тост, «Старт / пауза» обязателен; пока ждём сочетание — глобальные хоткеи сняты.
 "use strict";
-import { S, L as LC, send, call, go } from "./core.js";
+import { S, L as LC, send, call, go, lastPlace } from "./core.js";
 import { h, btn, iconBtn, seg, toggle, numberField, select, toast, clear, tip } from "./ui.js";
 import { icon } from "./icons.js";
 import { setCrumbs } from "./shell.js";
@@ -84,6 +84,7 @@ function secView() {
     segRow("theme", "Тема оформления", "«Как в Windows» — светлая или тёмная, как в системе", [["system", "Как в Windows"], ["dark", "Тёмная"], ["light", "Светлая"]])),
   card("Размер и урок",
     num("page_zoom", "Масштаб", "Всё окно крупнее или мельче; ещё — Ctrl+колесо мыши и Ctrl+= / Ctrl+−"),
+    sw("page_zoom_auto", "Масштаб под размер окна", "Шире окно — крупнее (90–150 %), когда его отпустили. Ctrl+колесо — снова вручную"),
     segRow("page_plan", "План в уроке", "", [["side", "Сбоку"], ["top", "Сверху"], ["hidden", "Скрыть"]]),
     segRow("page_width", "Ширина текста урока", "Шире — меньше листать; ещё — «Аа» в шапке окна",
       [["narrow", "Узко"], ["normal", "Обычно"], ["wide", "Широко"], ["full", "Во всё окно"]]),
@@ -386,8 +387,22 @@ const BUILD = { view: secView, lesson: secLesson, typing: secTyping, sound: secS
   ai: secAi, updates: secUpdates, about: secAbout };
 
 // ---------------------------------------------------------------- экран
+// «Назад» из настроек — туда, откуда пришли (урок — «К уроку»), а не на первый экран
+function backButton() {
+  const place = lastPlace() || "#/lessons";
+  const r = place.replace(/^#\/?/, "").split(/[/?]/);
+  const lesson = r[0] === "lesson" && (S.lessons || []).find((x) => x.id === r[1]);
+  const [label, hint] = r[0] === "lesson" ? ["К уроку", lesson ? "Вернуться к уроку «" + lesson.title + "»" : "Вернуться к уроку"]
+    : r[0] === "efir" ? ["К эфиру", "Вернуться в «Эфир»"] : r[0] === "new" ? ["К новому уроку", "Вернуться к новому уроку"]
+      : ["К урокам", "Вернуться к списку уроков"];
+  const b = btn(label, { icon: "chevron-left", kind: "ghost", cls: "setback", tip: hint, onClick: () => go(place) });
+  b.id = "setBack";
+  return b;
+}
+
 export function settingsView(root, r) {
   const nav = h("nav", { id: "setnav", "aria-label": "Разделы настроек" });
+  nav.append(backButton());
   for (const [k, ic, title] of SECTIONS) {
     const b = h("button", { type: "button", "data-sec": k }, icon(ic), h("span", null, title));
     b.addEventListener("click", () => go("#/settings/" + k));

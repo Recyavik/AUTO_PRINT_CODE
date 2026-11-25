@@ -21,7 +21,7 @@ B = ("bool",)
 FIELDS: dict[str, tuple] = {
     # вид
     "theme": ("choice", ("system", "dark", "light")),
-    "page_zoom": ("int", 80, 200),
+    "page_zoom": ("int", 80, 200), "page_zoom_auto": B,
     "page_plan": ("choice", ("side", "top", "hidden")),
     "page_width": ("width",),               # вариант или своя ширина в пикселях (ручки по краям текста урока)
     "page_past": ("choice", ("dim", "collapse")),

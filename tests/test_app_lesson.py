@@ -130,6 +130,23 @@ class LessonViewTest(AppPage):
         self.assertTrue(self.wait_js("document.querySelector('#shiftBack').hidden", 6))
         self.stop_live()
 
+    def test_zoom_never_jumps_back(self):
+        """Ctrl+= несколько раз подряд — масштаб только растёт: ответ программы на прошлый шаг не откатывает его
+        (было: 110 → 120 → 130 → 110 → 120 → 130 — «как будто два интерфейса»)."""
+        self.js("window.__z = []; new MutationObserver(() => __z.push(parseFloat(document.documentElement.style.zoom)))"
+                ".observe(document.documentElement, {attributes: true, attributeFilter: ['style']})")
+        try:
+            for _ in range(3):
+                self.js("document.dispatchEvent(new KeyboardEvent('keydown', {key: '=', ctrlKey: true, bubbles: true}))")
+            self.assertTrue(self.wait_py(lambda: self.app.settings.page_zoom == 130))
+            pump(1200)
+            z = [x for x in self.js("__z") if x]
+            self.assertEqual(z[-1], 1.3, z)
+            self.assertTrue(all(b >= a for a, b in zip(z, z[1:])), z)
+        finally:
+            self.js("document.dispatchEvent(new KeyboardEvent('keydown', {key: '0', ctrlKey: true, bubbles: true}))")
+            self.assertTrue(self.wait_py(lambda: self.app.settings.page_zoom == 100))
+
     def lcol_width(self):
         return self.js("getComputedStyle(document.querySelector('.lcol')).maxWidth")
 
@@ -466,6 +483,76 @@ class ScreenCtlTest(AppPage):
             lk = self.app.efir.store.look(self.look.id)
             lk.title = old
             self.app.efir.save_look(lk)
+
+    def fake_print(self, **kw):
+        p = self.app.printer
+        real = p.snapshot
+
+        def fake():
+            d = real()
+            d.update(kw)
+            return d
+        p.snapshot = fake
+        self.app.lesson.publish()
+        return lambda: (setattr(p, "snapshot", real), self.app.lesson.publish())
+
+    def test_typing_marks_current_line_and_caret(self):
+        """Набор: набранное, текущая строка и следующая — разным цветом; курсор бежит там, где набор."""
+        undo = self.fake_print(state="running", block="ac1", progress=0.6, next_lines=[2],
+                               cur={"line": 2, "col": 3, "from": 1})
+        try:
+            sel = "[data-id=ac1] .hls"
+            self.assertTrue(self.wait_js(f"!!document.querySelector('{sel} .hl.cur')"))
+            self.assertEqual(self.js(f"document.querySelector('{sel} .hl.cur').style.top"), "33px")      # строка 2
+            self.assertEqual(self.js(f"document.querySelectorAll('{sel} .hl.done').length"), 1)          # строка 1
+            self.assertEqual(self.js(f"document.querySelectorAll('{sel} .hl.next').length"), 0)          # 2 — текущая
+            caret = self.js(f"(() => {{ const c = document.querySelector('{sel} .caret'); const g = document.querySelector("
+                            f"'[data-id=ac1] .gut'); return c ? [c.style.top, c.getBoundingClientRect().left > "
+                            f"g.getBoundingClientRect().right] : null; }})()")
+            self.assertEqual(caret, ["33px", True])
+        finally:
+            undo()
+        undo = self.fake_print(state="line_wait", block="ac1", progress=0.5, next_lines=[2],
+                               cur={"line": 1, "col": 8, "from": 1})
+        try:
+            sel = "[data-id=ac1] .hls"
+            self.assertTrue(self.wait_js(f"document.querySelectorAll('{sel} .hl.next').length === 1"))   # следующая
+            self.assertTrue(self.js(f"document.querySelector('{sel} .caret').classList.contains('wait')"))
+        finally:
+            undo()
+
+    def test_pause_says_why(self):
+        """Пауза, которую поставил не человек кнопкой, — с причиной: «вы щёлкнули мышью…»."""
+        undo = self.fake_print(state="paused", block="ac1", progress=0.3, pause_why="вы щёлкнули мышью — курсор мог сместиться")
+        try:
+            self.assertTrue(self.wait_js("!document.querySelector('#typingBar').hidden"))
+            self.assertTrue(self.wait_js("document.querySelector('#typingBar').textContent.includes('вы щёлкнули мышью')"))
+            self.assertIn("Продолжить", self.js("document.querySelector('#typingBar').textContent"))
+            self.assertIn("щёлкнули мышью", self.js("document.querySelector('[data-id=ac1] .armslot').textContent"))
+        finally:
+            undo()
+
+    def test_to_screen_button_right_and_grows(self):
+        """«На экран» — справа от картинки, заметная и крупнее на большом окне (до предела); картинка — по центру."""
+        geo = ("(() => { const b = document.querySelector('[data-id=im1] .toscreen').getBoundingClientRect();"
+               " const r = document.querySelector('[data-id=im1] .row').getBoundingClientRect();"
+               " const i = document.querySelector('[data-id=im1] figure img').getBoundingClientRect();"
+               " return [r.right - b.right, b.height, Math.abs((i.left + i.right) / 2 - (r.left + r.right) / 2)]; })()")
+        self.edge.call("Emulation.setDeviceMetricsOverride", {"width": 1100, "height": 800, "deviceScaleFactor": 1, "mobile": False})
+        try:
+            pump(400)
+            small = self.js(geo)
+            self.edge.call("Emulation.setDeviceMetricsOverride", {"width": 2400, "height": 1300, "deviceScaleFactor": 1, "mobile": False})
+            pump(400)
+            big = self.js(geo)
+        finally:
+            self.edge.call("Emulation.clearDeviceMetricsOverride")
+            pump(200)
+        self.assertLess(small[0], 24, small)                  # у правого края строки картинки
+        self.assertGreaterEqual(small[1], 32, small)          # не мелкая
+        self.assertGreater(big[1], small[1] + 4, (small, big))  # на большом окне — крупнее
+        self.assertLessEqual(big[1], 46, big)                 # но до предела
+        self.assertLess(small[2], 2, small)                   # картинка по центру
 
     def stage_ex_btn(self, sid):
         return f"#main [data-act=exercise][data-stage={sid}]"

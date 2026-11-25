@@ -508,16 +508,21 @@ def prompter_lines() -> None:
         return "\n".join(win.printer.snapshot()["say"])
     said = [say()]
     lines = [win.printer.snapshot()["next_lines"]]
+    cur = [win.printer.snapshot().get("cur")]
     win.printer.toggle()
     while wait_for(lambda: win.engine.state in (LINE_WAIT, FINISHED)) and win.engine.state == LINE_WAIT:
         pump(0.02)
         said.append(say())
         lines.append(win.printer.snapshot()["next_lines"])
+        cur.append(win.printer.snapshot().get("cur"))
         if not press_enter(win):
             break
     exp = ["в начале\nхвост x", "между", "перед z\nхвост z"]
     check("экран урока по строкам: «Скажи» — комментарии между строками и хвостовые", said == exp, repr(said))
     check("экран урока по строкам: подсвечена следующая строка блока", lines == [[2], [4], [7]], repr(lines))
+    # 1.1.1: где набор сейчас — строка и столбец в блоке (бегущий курсор), с какой строки начали (набранное)
+    check("экран урока по строкам: курсор набора — конец набранной строки блока",
+          cur == [None, {"line": 2, "col": 5, "from": 2}, {"line": 4, "col": 5, "from": 2}], repr(cur))
     check("суфлёр по строкам: напечатан код без комментариев", ED.text == "x = 1\ny = 2\n\nz = 3", repr(ED.text))
     win.close()
     pump()
@@ -670,6 +675,7 @@ def mouse_click_pauses() -> None:
         MOUSE.update(down=False, own=False)
     check("клик по окну программы не ставит паузу", own_ok)
     check("клик мышью в редакторе — пауза", paused and hits == ["mouse"], hits)
+    check("1.1.1: у паузы есть причина — клик мышью", e.pause_reason == "клик мышью", e.pause_reason)
 
     # короткий тап (кнопка уже отпущена к опросу) — виден по счётчику Raw Input
     e = TypingEngine(s)

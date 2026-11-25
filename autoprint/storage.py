@@ -229,6 +229,7 @@ class Settings:
     page_lesson: str = ""              # какой урок был на экране урока
     # «Мои настройки» экрана урока
     page_zoom: int = 100               # размер текста страницы, % (80…200)
+    page_zoom_auto: bool = False       # 1.1.1: масштаб под размер окна (шире — крупнее, 90…150 %)
     page_plan: str = "side"            # план в «Уроке»: side — сбоку, top — строкой сверху, hidden — скрыт
     page_past: str = "dim"             # пройденные этапы: dim — приглушать, collapse — сворачивать
     page_stage_timer: bool = True      # «осталось» на текущем этапе
