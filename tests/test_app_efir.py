@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 
@@ -266,6 +267,63 @@ class LooksTest(EfirPage):
         p = Path(ef.store.look(lk.id).background[6:])
         self.assertEqual(p.parent, storage.DATA_DIR / storage.MEDIA_FOLDER)
         self.assertTrue(img.exists())
+        ef.delete_look(lk.id)
+
+    def test_copy_does_not_lose_edits(self):
+        """Копирование файлов оформления и правка в это время: правка остаётся; сохранение со старыми путями после
+        копии не возвращает их наружу."""
+        from autoprint import media_copy
+        ef = self.app.efir
+        img = OUT / "фон-гонка.png"
+        img.write_bytes(b"\x89PNG" + b"0" * 2000)
+        lk = Look(title="До правки", background="image:" + str(img))
+        ef.save_look(lk)
+        gate = threading.Event()
+        real = media_copy.copy_look_files
+
+        def slow(look, dest, progress=None, cancel=None):
+            gate.wait(5)
+            return real(look, dest, progress, cancel)
+        media_copy.copy_look_files = slow
+        try:
+            job = self.app.commands.call_efir_copy_files({"id": lk.id})["job"]
+            old_data = {"id": lk.id, "title": "После правки", "background": "image:" + str(img), "exercises": []}
+            self.app.commands.call_efir_put_look({"look": old_data})        # учитель сохранил правку во время копии
+            gate.set()
+            self.assertTrue(self.wait_py(lambda: any(j["id"] == job and j["done"] for j in self.app.jobs.state()), 8))
+        finally:
+            media_copy.copy_look_files = real
+        cur = ef.store.look(lk.id)
+        self.assertEqual(cur.title, "После правки")                         # правка не затёрта копией
+        self.assertNotEqual(cur.background, "image:" + str(img))            # а путь — уже копия в программе
+        self.app.commands.call_efir_put_look({"look": dict(old_data, title="Ещё правка")})   # редактор со старыми путями
+        cur = ef.store.look(lk.id)
+        self.assertEqual(cur.title, "Ещё правка")
+        self.assertNotEqual(cur.background, "image:" + str(img))
+        ef.delete_look(lk.id)
+
+    def test_big_file_copies_in_background(self):
+        """Большое видео для оформления копируется в фоне (окно не замирает); сохранили оформление с ним — путь
+        заменяется на копию, когда она готова."""
+        from autoprint import media_copy
+        ef = self.app.efir
+        vid = OUT / "большое-видео.mp4"
+        vid.write_bytes(b"V" * 4000)
+        old_limit = media_copy.TAKE_SYNC_LIMIT
+        media_copy.TAKE_SYNC_LIMIT = 1000
+        try:
+            r = self.app.commands.call_efir_take_file({"path": str(vid)})
+            self.assertTrue(r.get("job"))
+            self.assertEqual(r["path"], str(vid))                            # пока — исходный путь
+            lk = Look(title="С видео", exercises=[])
+            ef.save_look(lk)
+            self.app.commands.call_efir_put_look({"look": {"id": lk.id, "title": "С видео", "background": "",
+                                                           "exercises": [{"title": "Глаза", "path": str(vid)}]}})
+            self.assertTrue(self.wait_py(lambda: any(j["id"] == r["job"] and j["done"] for j in self.app.jobs.state()), 8))
+        finally:
+            media_copy.TAKE_SYNC_LIMIT = old_limit
+        cur = ef.store.look(lk.id)
+        self.assertEqual(Path(cur.exercises[0].path).parent, storage.DATA_DIR / storage.MEDIA_FOLDER)
         ef.delete_look(lk.id)
 
     def test_new_look_and_list(self):

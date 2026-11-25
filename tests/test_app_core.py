@@ -84,9 +84,8 @@ class AppCoreTest(unittest.TestCase):
         self.a.printer.set_focus("LA")
         self.assertTrue(self.a.efir.launch_lesson(self.a.store.get("LA"), start="", show=False))
         self.assertFalse(self.a.open_lesson("LB"))
-        n = self.a.notice
-        self.assertIn("Идёт урок «A»", n["text"])
-        self.assertEqual(n["action"]["cmd"], {"cmd": "open", "lesson": "LB", "force": True})
+        q = self.a.sheet_req                                           # вопрос — листом с явной кнопкой, не тостом
+        self.assertEqual((q["name"], q["data"]), ("open_live", {"lesson": "LB", "title": "B", "live_title": "A"}))
         self.assertEqual(self.a.efir.live_lesson_id(), "LA")          # идущий урок не тронут
         self.assertTrue(self.a.open_lesson("LB", ask=False))
         self.assertEqual(self.a.efir.live_lesson_id(), "")
@@ -152,6 +151,58 @@ class AppCoreTest(unittest.TestCase):
         self.assertEqual(calls, ["min", "normal"])
         to("idle")
         self.assertEqual(calls, ["min", "normal"])
+
+    def test_publish_does_not_search_path_or_decrypt_each_time(self):
+        """Состояние окна уходит часто: поиск Claude Code в PATH и расшифровка ключей — не на каждую публикацию."""
+        from autoprint import ai, app_state
+        s = self.a.settings
+        s.ai_provider, s.ai_backup_provider, s.ai_backup_enabled = "claudeCli", "openai", True
+        s.ai_keys["openai"] = ai.protect("sk-test")
+        app_state._CLI = None
+        calls = {"which": 0, "dpapi": 0}
+        real_which, real_dpapi = ai.shutil.which, ai._dpapi
+
+        def which(name, *a, **k):
+            calls["which"] += 1
+            return real_which(name, *a, **k)
+
+        def dpapi(*a, **k):
+            calls["dpapi"] += 1
+            return real_dpapi(*a, **k)
+        ai.shutil.which, ai._dpapi = which, dpapi
+        try:
+            app_state.app_state(self.a)
+            first = dict(calls)
+            for _ in range(5):
+                app_state.app_state(self.a)
+        finally:
+            ai.shutil.which, ai._dpapi = real_which, real_dpapi
+            s.ai_provider, s.ai_backup_provider, s.ai_backup_enabled, s.ai_keys = "", "", False, {}
+        self.assertEqual(calls, first, (first, calls))
+
+    def test_publish_does_not_stat_look_files_each_time(self):
+        """Файлы оформлений (могут быть на сетевой папке) проверяются не на каждую публикацию, а с паузой."""
+        from autoprint import app_state, media_copy
+        from autoprint.efir.model import Exercise, Look
+        lk = Look(title="С файлом", background="image:C:/нет/фон.png", exercises=[Exercise("Глаза", "C:/нет/глаза.mp4")])
+        self.a.efir.save_look(lk)
+        n = {"stat": 0}
+        real = media_copy.file_status
+
+        def counting(p):
+            n["stat"] += 1
+            return real(p)
+        media_copy.file_status = counting
+        try:
+            app_state.app_state(self.a)
+            first = n["stat"]
+            app_state.app_state(self.a)
+            app_state.app_state(self.a)
+        finally:
+            media_copy.file_status = real
+            self.a.efir.delete_look(lk.id)
+        self.assertGreater(first, 0)
+        self.assertEqual(n["stat"], first)
 
     def test_show_view_emits_navigate(self):
         self.a.show_view("#/lesson/LA")
@@ -352,6 +403,49 @@ class SessionTest(unittest.TestCase):
         b.efir.restore()
         self.assertEqual(b.efir.live_lesson_id(), "LB")
         b.set_compact(False)
+
+    def test_compact_position_survives_restart(self):
+        """Вышли в маленьком режиме — маленькое окно там же, где его поставили."""
+        a = self.start([lesson("A", "LA")])
+        a.set_compact(True)
+        a.window.move(223, 150)
+        pump()
+        pos = a.window.pos()
+        b = self.restart(a)
+        self.assertTrue(b.window.compact)
+        self.assertEqual((b.window.pos().x(), b.window.pos().y()), (pos.x(), pos.y()))
+        b.set_compact(False)
+
+    def test_tray_start_in_compact_stays_hidden(self):
+        """Автозапуск (--tray): последний раз был маленький режим, а большое окно — развёрнуто. Окна не видно."""
+        a = self.start([lesson("A", "LA")])
+        a.window.showMaximized()
+        pump()
+        a._save_session()
+        a.set_compact(True)
+        b = self.restart(a)
+        self.assertFalse(b.window.isVisible())
+        b.start(tray=True)
+        pump()
+        self.assertFalse(b.window.isVisible())
+        b.set_compact(False)
+
+    def test_first_window_fits_screen(self):
+        """Первый запуск (геометрии нет): окно не больше рабочей области и по центру."""
+        from autoprint.app_core import App
+        a = self.start([lesson("A", "LA")])
+        s = a.settings
+        a._quitting = True
+        a.shutdown()
+        a.window.hide()
+        self.apps.remove(a)
+        s.window_geometry, s.compact = "", False          # как после миграции v1
+        b = App(s, TemplateStore(), web=False)
+        self.apps.append(b)
+        scr = b.window.screen().availableGeometry()
+        g = b.window.frameGeometry()
+        self.assertTrue(scr.contains(g), (scr, g))
+        self.assertLessEqual(abs(g.center().x() - scr.center().x()), 2)
 
     def test_tray_flag_starts_hidden(self):
         a = self.start([lesson("A", "LA")])

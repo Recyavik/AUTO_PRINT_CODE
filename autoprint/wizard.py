@@ -212,8 +212,14 @@ def lesson_task(settings, opt: L.Options, *, plan: Template | None = None, exerc
                 user = L.material_for(material, opt)
             else:
                 user = "Составь урок" + (f" на тему «{opt.topic.strip()}»." if (opt.topic or "").strip() else ".")
+        def as_text() -> tuple[str, str]:
+            """Для запасной, которая файлы не читает: текст тех же файлов — в запрос."""
+            whole = gather(list(send_files), material).text
+            return (L.lesson_instruction(opt, plan=plan, exercises=exercises, source="next" if whole.strip() else "topic"),
+                    L.material_for(whole, opt) if whole.strip() else user)
+        extra = {"as_text": as_text} if send_files else {}
         text, who = ai.ask(settings, system, user, job.cancel_event, on_status=job.status, on_progress=job.progress,
-                           files=send_files)
+                           files=send_files, **extra)
         if job.cancelled:
             raise ai.Cancelled("Отменено.")
         try:

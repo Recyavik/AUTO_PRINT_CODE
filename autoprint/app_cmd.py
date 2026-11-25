@@ -640,7 +640,14 @@ class AppCommands(QObject):
         return {"id": w.id}
 
     def call_efir_put_look(self, d: dict) -> dict:
+        """Сохранить оформление. Редактор мог держать пути, которые уже скопированы в программу, — они заменяются."""
         lk = self._ef.put_look(dict(d.get("look") or {}))
+        if self.app.media_moves:
+            from .media_copy import remap
+            new = remap(lk, self.app.media_moves)
+            if new != lk:
+                lk = new
+                self._ef.save_look(new)
         self.app.lesson.schedule_publish()
         self.app.publish_now()
         return {"id": lk.id}
@@ -736,14 +743,31 @@ class AppCommands(QObject):
 
     def call_efir_take_file(self, d: dict) -> dict:
         """Выбранный для оформления файл: копия в программу (настройка «Копировать картинки и видео в программу»)."""
+        from . import media_copy, storage
         from .media_copy import file_status, take_file
         path = str(d.get("path") or "")
         if not Path(path).is_file():
             raise ValueError(f"Файла нет: {path}")
-        if self.app.settings.copy_media:
-            path = take_file(path)
+        job = ""
+        if self.app.settings.copy_media and file_status(path) == "outside":
+            dest = storage.DATA_DIR / storage.MEDIA_FOLDER
+            have = media_copy.existing_copy(Path(path), dest)
+            if have is not None or Path(path).stat().st_size <= media_copy.TAKE_SYNC_LIMIT:
+                path = str(have) if have is not None else take_file(path)
+            else:                           # большое видео — в фоне: окно (и идущий урок) не замирает
+                src = path
+                ef = self._ef
+
+                def done(out: str) -> None:
+                    self.app.media_moves[src] = out
+                    for lk in list(ef.store.looks):        # уже сохранили оформление с этим файлом — путь на копию
+                        new = media_copy.remap(lk, {src: out})
+                        if new != lk:
+                            ef.save_look(new)
+                    self.app.publish_now()
+                job = self.app.jobs.start("copy", lambda _job: take_file(src), done, f"Копирую «{Path(src).name}»")
         return {"path": path, "name": Path(path).name, "size": Path(path).stat().st_size, "status": file_status(path),
-                "url": self._ef.server.media_url(path)}
+                "url": self._ef.server.media_url(path), "job": job}
 
     def call_efir_copy_files(self, d: dict) -> dict:
         """«Скопировать в программу»: файлы оформления (или всех оформлений — all) — в фоне, с ходом и отменой; ссылки
@@ -765,8 +789,13 @@ class AppCommands(QObject):
             return out
 
         def done(new_looks):
+            # оформление могли поправить, пока шла копия: берётся текущее, в нём меняются только скопированные пути
             for lk in new_looks:
-                ef.save_look(lk)
+                moves = getattr(lk, "copied", {}) or {}
+                self.app.media_moves.update(moves)
+                cur = ef.store.look(lk.id)
+                if cur is not None:
+                    ef.save_look(media_copy.remap(cur, moves))
             self.app._notify("Файлы оформлений скопированы в программу.", quiet=True)
         title = "Копирую файлы оформлений" if d.get("all") else f"Копирую файлы «{looks[0].title}»"
         return {"job": self.app.jobs.start("copy", work, done, title)}

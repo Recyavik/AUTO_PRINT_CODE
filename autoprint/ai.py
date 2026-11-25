@@ -121,16 +121,25 @@ def protect(secret: str) -> str:
         return "plain:" + secret
 
 
+_UNPROTECTED: dict[str, str] = {}      # расшифрованное — в памяти процесса (настройки окну уходят часто)
+
+
 def unprotect(stored: str) -> str:
     if not stored:
         return ""
     if stored.startswith("plain:"):
         return stored[6:]
     if stored.startswith("dpapi:"):
+        if stored in _UNPROTECTED:
+            return _UNPROTECTED[stored]
         try:
-            return _dpapi(base64.b64decode(stored[6:]), False).decode("utf-8")
+            out = _dpapi(base64.b64decode(stored[6:]), False).decode("utf-8")
         except (OSError, ValueError, AttributeError):
             return ""   # другой компьютер или учётная запись — ключ придётся ввести заново
+        if len(_UNPROTECTED) > 32:
+            _UNPROTECTED.clear()
+        _UNPROTECTED[stored] = out
+        return out
     return stored
 
 
@@ -348,8 +357,18 @@ def _openai_chat(c: Config, system: str, user: str, timeout: float, json_mode: b
     raise AIError("Сервер не ответил.")
 
 
+_CLI_SEEN: dict[str, tuple[float, str | None]] = {}
+CLI_RECHECK_S = 60          # поставили Claude Code при открытой программе — увидим через минуту
+
+
 def cli_path(p: Provider) -> str | None:
-    return shutil.which("claude" if p.id == "claudeCli" else "codex")
+    """Где программа агента (поиск по PATH — не на каждую публикацию состояния окна, а раз в минуту)."""
+    name = "claude" if p.id == "claudeCli" else "codex"
+    hit = _CLI_SEEN.get(name)
+    now = time.monotonic()
+    if hit is None or now - hit[0] > CLI_RECHECK_S:
+        hit = _CLI_SEEN[name] = (now, shutil.which(name))
+    return hit[1]
 
 
 def _empty_dir() -> str:
@@ -578,9 +597,10 @@ def _ask_one(settings, c: Config, system: str, user: str, cancel, progress, file
 
 
 def ask(settings, system: str, user: str, cancel: threading.Event | None = None,
-        on_status=None, on_progress=None, files=()) -> tuple[str, str]:
+        on_status=None, on_progress=None, files=(), as_text=None) -> tuple[str, str]:
     """Запрос основному провайдеру, при ошибке — запасному. → (ответ, имя провайдера). files — файлы материала
-    (читают только Claude Code и Codex; для остальных текст материала уже в user)."""
+    (читают только Claude Code и Codex; для остальных текст материала уже в user). as_text() → (system, user) с текстом
+    этих файлов — для запасной, которая файлы читать не умеет (иначе она составила бы урок по одной теме)."""
     main = config(settings)
     if main is None:
         raise AIError("Нейросеть не подключена — ⚙ Настройки → Нейросеть, или «Скопировать промпт».")
@@ -601,8 +621,14 @@ def ask(settings, system: str, user: str, cancel: threading.Event | None = None,
         log.warning("Основной провайдер не справился (%s) — пробую запасной: %s", e, back.provider.name)
         if on_status:
             on_status(back.provider.name + f" (запасная: {main.provider.name} не ответил)")
+        b_system, b_user, b_files = system, user, files
+        if files and back.provider.kind != "cli":          # запасная файлы не читает — материал текстом
+            if as_text is None:
+                raise AIError(f"{e} Запасная ({back.provider.name}) не читает файлы материала.") from None
+            b_system, b_user = as_text()
+            b_files = ()
         try:
-            return _ask_one(settings, back, system, user, cancel, on_progress, files), back.provider.name
+            return _ask_one(settings, back, b_system, b_user, cancel, on_progress, b_files), back.provider.name
         except AIError as e2:
             if isinstance(e2, Cancelled):
                 raise

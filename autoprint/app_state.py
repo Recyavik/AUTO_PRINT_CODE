@@ -55,7 +55,26 @@ def _legacy_found(ef) -> bool:
     return _LEGACY
 
 
+_LOOKS: dict[str, tuple[float, str, dict]] = {}
+LOOK_RECHECK_S = 10          # файлы оформлений (флешка, сетевая папка) — проверка не чаще раза в 10 с
+
+
 def _look_state(lk, ef, lessons) -> dict:
+    """Оформление для страницы. Статусы файлов — из кэша: проверка файла на сетевой папке может длиться секунды."""
+    import time
+    sig = repr((lk.background, lk.break_background, lk.font, [(e.title, e.path) for e in lk.exercises]))
+    hit = _LOOKS.get(lk.id)
+    if hit is None or hit[1] != sig or time.monotonic() - hit[0] > LOOK_RECHECK_S:
+        hit = _LOOKS[lk.id] = (time.monotonic(), sig, _look_files_state(lk, ef))
+    d = dict(hit[2])
+    d.update(id=lk.id, title=lk.title, caption=lk.caption, break_countdown=lk.break_countdown, break_title=lk.break_title,
+             break_show_title=lk.break_show_title, break_done=lk.break_done, font=lk.font, text_color=lk.text_color,
+             users=ef.look_users(lk.id, lessons))
+    d["exercises"] = [dict(x, title=e.title) for x, e in zip(hit[2]["exercises"], lk.exercises)]
+    return d
+
+
+def _look_files_state(lk, ef) -> dict:
     from .media_copy import file_status, outside_size
 
     def bg(v: str) -> dict:
@@ -75,11 +94,8 @@ def _look_state(lk, ef, lessons) -> dict:
         ex.append({"title": e.title, "path": e.path, "name": e.path.replace("\\", "/").rsplit("/", 1)[-1], "status": st,
                    "size": size})
     font_status = file_status(lk.font[5:]) if (lk.font or "").startswith("file:") else "ok"
-    return {"id": lk.id, "title": lk.title, "background": bg(lk.background), "caption": lk.caption, "exercises": ex,
-            "break_countdown": lk.break_countdown, "break_background": bg(lk.break_background),
-            "break_title": lk.break_title, "break_show_title": lk.break_show_title, "break_done": lk.break_done,
-            "font": lk.font, "font_status": font_status, "text_color": lk.text_color,
-            "users": ef.look_users(lk.id, lessons), "outside": outside_size(lk)}
+    return {"background": bg(lk.background), "exercises": ex, "break_background": bg(lk.break_background),
+            "font_status": font_status, "outside": outside_size(lk)}
 
 
 def _provider_state(s, which: str) -> dict:
@@ -89,6 +105,18 @@ def _provider_state(s, which: str) -> dict:
     c = ai.config(s, pid) if pid else None
     return {"id": pid, "url": c.url if c else "", "model": c.model if c else "",
             "key_set": bool(s.ai_keys.get(pid)) if pid else False, "problem": (ai.problem(c) or "") if c else ""}
+
+
+_SELF_UPDATE: bool | None = None
+
+
+def _can_self_update() -> bool:
+    """Умеет ли установка обновляться сама — проверяется один раз за запуск (смотрит папку программы и git)."""
+    global _SELF_UPDATE
+    if _SELF_UPDATE is None:
+        from . import updater
+        _SELF_UPDATE = updater.can_self_update()
+    return _SELF_UPDATE
 
 
 def settings_state(app) -> dict:
@@ -107,7 +135,7 @@ def settings_state(app) -> dict:
                     "installed": bool(cli.get("claude" if p.id == "claudeCli" else "codex")) if p.kind == "cli" else None}
                    for p in ai.PROVIDERS],
         ai={"main": _provider_state(s, "ai_provider"), "backup": _provider_state(s, "ai_backup_provider")},
-        version=version, update_last_check=s.update_last_check, can_self_update=updater.can_self_update(),
+        version=version, update_last_check=s.update_last_check, can_self_update=_can_self_update(),
         looks_outside=sum(lk.get("outside", 0) for lk in efir_state_cached(app).get("looks", [])),
         profiles=[[k, t] for k, t in PROFILES.items()], releases_url=updater.RELEASES_PAGE,
     )

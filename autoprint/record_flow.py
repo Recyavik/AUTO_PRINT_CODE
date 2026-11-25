@@ -104,6 +104,7 @@ class RecordFlow(QObject):
         self.raw: dict[str, list[list[float]]] = {k: [] for k in KINDS}
         self._samples: dict[str, list[float]] = {k: [] for k in KINDS}
         self._spans: dict[str, list[tuple[int, int]]] = {k: [] for k in KINDS}
+        self._cache: dict[str, dict] = {}    # итог записи (удары, волна, отметки) — считается один раз, при «Стоп»
         self.skipped: set[str] = set()
         self.recording = ""          # вид клавиш, который сейчас пишется
         self.monitoring = False      # шаг «Микрофон»: только уровень
@@ -170,6 +171,7 @@ class RecordFlow(QObject):
             return False
         self.recording = kind
         self.skipped.discard(kind)
+        self._cache.pop(kind, None)
         self._started = time.monotonic()
         self._live.clear()
         self._tick.start()
@@ -186,6 +188,7 @@ class RecordFlow(QObject):
         dc = sum(samples) / len(samples) if samples else 0.0
         self.raw[kind] = [cut_clip(samples, a, b, RATE, dc) for a, b in spans]
         self._samples[kind], self._spans[kind] = samples, spans
+        self._cache.pop(kind, None)
         self.recording = ""
         self.level = 0.0
         self.changed.emit()
@@ -194,6 +197,7 @@ class RecordFlow(QObject):
         if kind not in ("space", "enter") or self.recording:
             return
         self.raw[kind], self._samples[kind], self._spans[kind] = [], [], []
+        self._cache.pop(kind, None)
         self.skipped.add(kind)
         self.changed.emit()
 
@@ -208,8 +212,15 @@ class RecordFlow(QObject):
         self.changed.emit()
 
     # ------------------------------------------------------------ что получилось
+    def _summary(self, kind: str) -> dict:
+        c = self._cache.get(kind)
+        if c is None:
+            c = self._cache[kind] = {"hits": len(filter_hits(self.raw[kind])), "wave": self._wave_of(kind),
+                                     "marks": self._marks_of(kind)}
+        return c
+
     def hits(self, kind: str) -> int:
-        return len(filter_hits(self.raw[kind]))
+        return self._summary(kind)["hits"]
 
     def noise(self, kind: str) -> int:
         return len(self.raw[kind]) - self.hits(kind)
@@ -252,6 +263,9 @@ class RecordFlow(QObject):
         """Волна для рисунка: ≤ 600 точек 0..1 (идёт запись — уровни по ходу, потом — пики записи)."""
         if self.recording == kind:
             return list(self._live)
+        return self._summary(kind)["wave"]
+
+    def _wave_of(self, kind: str) -> list[float]:
         s = self._samples[kind]
         if not s:
             return []
@@ -265,6 +279,9 @@ class RecordFlow(QObject):
 
     def marks(self, kind: str) -> list[list[float]]:
         """Найденные удары — доли длины записи [начало, конец]."""
+        return self._summary(kind)["marks"]
+
+    def _marks_of(self, kind: str) -> list[list[float]]:
         n = len(self._samples[kind])
         return [[round(a / n, 4), round(b / n, 4)] for a, b in self._spans[kind]] if n else []
 
@@ -298,6 +315,7 @@ class RecordFlow(QObject):
         except OSError as e:
             raise ValueError(f"Не удалось сохранить набор: {e}") from None
         self.saved = key
+        self._cache.clear()
         self.changed.emit()
         return key
 

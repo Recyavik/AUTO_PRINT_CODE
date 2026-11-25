@@ -372,7 +372,8 @@ class WindowTest(unittest.TestCase):
         self.assertFalse(self.win.open_lesson("M"))
         self.assertEqual(stopped, [])
         self.assertEqual(self.opened, [])
-        self.assertEqual(self.win.notice["action"]["cmd"], {"cmd": "open", "lesson": "M", "force": True})
+        self.assertEqual(self.win.sheet_req["name"], "open_live")
+        self.assertEqual(self.win.sheet_req["data"]["lesson"], "M")
         self.assertTrue(self.win.open_lesson("M", ask=False))       # страница спросила — ответили «да»
         self.assertEqual(stopped, [1])
         self.assertEqual(self.win.printer.focus_id, "M")

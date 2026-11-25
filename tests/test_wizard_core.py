@@ -253,6 +253,37 @@ class LessonTaskTest(unittest.TestCase):
         finally:
             ai.ask = old
 
+    def test_backup_gets_file_text_when_agent_fails(self):
+        """Claude Code читал файл материала и не ответил — запасная (обычный сервер) получает текст файла, а не одну тему."""
+        import tempfile
+        d = Path(tempfile.mkdtemp())
+        f = d / "методичка.md"
+        f.write_text("# Циклы\n\nУникальная строка материала 7319.", encoding="utf-8")
+        s = Settings()
+        s.ai_provider, s.ai_backup_provider, s.ai_backup_enabled = "claudeCli", "custom", True
+        s.ai_urls["custom"], s.ai_models["custom"] = "http://127.0.0.1:9", "m"
+        calls = []
+
+        def one(settings, c, system, user, cancel, progress, files=()):
+            calls.append((c.provider.id, system, user, tuple(files)))
+            if c.provider.kind == "cli":
+                raise ai.AIError("агент не ответил")
+            return ANSWER
+        old_one, old_problem = ai._ask_one, ai.problem
+        ai._ask_one = one
+        ai.problem = lambda c: None
+        try:
+            m = wizard.gather([str(f)], "", agent=True)
+            self.assertEqual(m.files, [str(f)])
+            opt = L.Options(style=L.STYLE_SCENARIO, topic="Циклы")
+            res = wizard.lesson_task(s, opt, material=m.text, files=m.files, pdf=m.pdf)(FakeJob())
+        finally:
+            ai._ask_one, ai.problem = old_one, old_problem
+        self.assertEqual([c[0] for c in calls], ["claudeCli", "custom"])
+        self.assertEqual(calls[1][3], ())                                  # запасной файлы не передаются…
+        self.assertIn("Уникальная строка материала 7319", calls[1][2])     # …а их текст — в запросе
+        self.assertIsNotNone(res["template"])
+
     def test_code_task_with_fake_server(self):
         """Своя OpenAI-совместимая нейросеть (подставной сервер) разбирает код по шагам."""
         class Fake(http.server.BaseHTTPRequestHandler):

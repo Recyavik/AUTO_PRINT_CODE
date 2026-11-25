@@ -70,13 +70,37 @@ def _unique(dest: Path, name: str) -> Path:
     return p
 
 
+TAKE_SYNC_LIMIT = 16 * 1024 * 1024      # файлы больше копируются в фоне (видео с флешки — секунды)
+
+
+def existing_copy(src: Path, dest: Path) -> Path | None:
+    """Уже сделанная копия этого файла в dest (то же имя, размер и время изменения) — чтобы не плодить «-2», «-3»."""
+    try:
+        st = src.stat()
+    except OSError:
+        return None
+    stem, suf = os.path.splitext(src.name)
+    for p in [dest / src.name, *sorted(dest.glob(f"{stem}-*{suf}"))]:
+        try:
+            q = p.stat()
+        except OSError:
+            continue
+        if q.st_size == st.st_size and int(q.st_mtime) == int(st.st_mtime):
+            return p
+    return None
+
+
 def take_file(path: str, dest: Path | None = None) -> str:
-    """Выбрали файл для оформления — копия в data/media (уже в программе — тот же путь). OSError — не скопировался."""
+    """Выбрали файл для оформления — копия в data/media (уже в программе — тот же путь; уже копировали — та же
+    копия). OSError — не скопировался."""
     src = Path(path)
     if file_status(str(src)) != "outside":
         return str(src)
     dest = dest or storage.DATA_DIR / storage.MEDIA_FOLDER
     dest.mkdir(parents=True, exist_ok=True)
+    have = existing_copy(src, dest)
+    if have is not None:
+        return str(have)
     out = _unique(dest, src.name)
     shutil.copy2(src, out)
     return str(out)
@@ -110,12 +134,21 @@ def copy_look_files(look: Look, dest_dir: Path, progress: Callable[[int, int, st
             except OSError:
                 pass
         raise
+    new = remap(look, done)
+    new.copied = done                    # что куда скопировано — заменить и в оформлении, которое успели поправить
+    return new
+
+
+def remap(look: Look, moves: dict[str, str]) -> Look:
+    """Копия оформления, где пути из moves (старый → копия в программе) заменены на новые; остальное — как было."""
     new = copy.deepcopy(look)
+    if not moves:
+        return new
     for attr, prefix in (("background", "image:"), ("break_background", "image:"), ("font", "file:")):
         v = getattr(new, attr) or ""
-        if v.startswith(prefix) and v[len(prefix):] in done:
-            setattr(new, attr, prefix + done[v[len(prefix):]])
+        if v.startswith(prefix) and v[len(prefix):] in moves:
+            setattr(new, attr, prefix + moves[v[len(prefix):]])
     for e in new.exercises:
-        if e.path in done:
-            e.path = done[e.path]
+        if e.path in moves:
+            e.path = moves[e.path]
     return new

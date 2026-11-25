@@ -89,8 +89,9 @@ class App(QObject):
         self.update_progress: dict | None = None   # лист «Доступно обновление»: этап и сколько скачано
         self.update_error = ""
         self._update_restart = False        # «Обновить и перезапустить»: перезапуск, как только скачается
-        self.sheet_req = {"seq": 0, "name": "", "text": "", "t": 0}   # просьба странице открыть лист
+        self.sheet_req = {"seq": 0, "name": "", "text": "", "t": 0, "data": {}}   # просьба странице открыть лист
         self.record = None                  # RecordFlow, пока открыт лист «Записать звук клавиатуры»
+        self.media_moves: dict[str, str] = {}   # файлы оформлений, скопированные в программу: прежний путь → копия
         from .jobs import Jobs
         self.jobs = Jobs(self)              # фоновые работы: нейросеть составляет урок, качаются картинки
         self.jobs.changed.connect(lambda: self.changed.emit("jobs"))
@@ -337,11 +338,9 @@ class App(QObject):
             return False
         live = self.efir.live_lesson_id()
         if live and live != tid:
-            if ask:
+            if ask:                         # завершить идущий урок — только явным ответом в листе, не тостом
                 cur = self.store.get(live)
-                name = cur.title if cur else "урок"
-                self._notify(f"Идёт урок «{name}». Завершить его и открыть «{t.title}»?",
-                             action={"label": "Завершить и открыть", "cmd": {"cmd": "open", "lesson": tid, "force": True}})
+                self.open_sheet("open_live", lesson=tid, title=t.title, live_title=cur.title if cur else "урок")
                 return False
             self.efir.stop_live()
         self.printer.set_focus(tid)
@@ -711,9 +710,10 @@ class App(QObject):
     _restart_app = restart_app
 
     # ================================================================ листы окна
-    def open_sheet(self, name: str, text: str = "") -> None:
-        """Попросить страницу открыть лист (update | report | record | crash) и показать окно."""
-        self.sheet_req = {"seq": self.sheet_req["seq"] + 1, "name": name, "text": text, "t": int(time.time() * 1000)}
+    def open_sheet(self, name: str, text: str = "", **data) -> None:
+        """Попросить страницу открыть лист (update | report | record | crash | open_live) и показать окно."""
+        self.sheet_req = {"seq": self.sheet_req["seq"] + 1, "name": name, "text": text, "t": int(time.time() * 1000),
+                          "data": dict(data)}
         self.show_window()
         self.publish_now()
 
@@ -800,6 +800,8 @@ class App(QObject):
             self._save_settings()
         if s.window_geometry:
             self.window.restoreGeometry(QByteArray.fromBase64(s.window_geometry.encode()))
+        else:
+            self.window.place_default()
         # по умолчанию — первый урок, а не план (планы стоят над уроками)
         first = next((t for t in self.store.templates if t.kind != KIND_PLAN), None) or \
             (self.store.templates[0] if self.store.templates else None)
@@ -844,6 +846,8 @@ class App(QObject):
         s = self.settings
         if not self.window.compact:
             s.window_geometry = bytes(self.window.saveGeometry().toBase64()).decode()
+        else:                                 # вышли в маленьком режиме — маленькое окно там же в следующий раз
+            s.compact_geometry = bytes(self.window.saveGeometry().toBase64()).decode()
         s.current_tab = s.page_lesson = self.printer.focus_id
         s.save()
 

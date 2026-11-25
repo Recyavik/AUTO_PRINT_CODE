@@ -427,6 +427,25 @@ class WindowSheetsTest(AppPage):
         self.app.on_setting_changed("sound_style")
         sounds.delete_custom(key)
 
+    # ---------------------------------------------------------------- урок в эфире
+    def test_open_other_while_live_sheet(self):
+        """Идёт урок — открыть другой: лист с вопросом; «Отмена» ничего не трогает, «Завершить и открыть» — да."""
+        a = self.app
+        a.printer.set_focus("A")
+        self.assertTrue(a.efir.launch_lesson(a.store.get("A"), start="", show=False))
+        try:
+            self.assertFalse(a.open_lesson("E"))
+            self.assertTrue(self.sheet_has("Идёт урок «Циклы»"))
+            self.sheet_click("Отмена")
+            self.assertTrue(self.no_sheet())
+            self.assertEqual(a.efir.live_lesson_id(), "A")
+            self.assertFalse(a.open_lesson("E"))
+            self.assertTrue(self.sheet_has("Завершить и открыть"))
+            self.sheet_click("Завершить и открыть")
+            self.assertTrue(self.wait_py(lambda: a.efir.live_lesson_id() == "" and a.printer.focus_id == "E"))
+        finally:
+            a.efir.stop_live()
+
     # ---------------------------------------------------------------- внутренняя ошибка
     def test_crash_sheet(self):
         self.app.show_crash("ValueError: boom")

@@ -96,6 +96,16 @@ class MediaCopyTest(unittest.TestCase):
         self.assertEqual(Path(p).read_bytes(), b"N" * 10)
         self.assertEqual(media_copy.take_file(p), p)                               # уже в программе — тот же
 
+    def test_take_same_file_twice_no_duplicate(self):
+        """Тот же файл выбрали ещё раз — та же копия, а не «-2», «-3»."""
+        (OUT / "twice.png").write_bytes(b"T" * 50)
+        a = media_copy.take_file(str(OUT / "twice.png"))
+        b = media_copy.take_file(str(OUT / "twice.png"))
+        self.assertEqual(a, b)
+        (OUT / "twice.png").write_bytes(b"U" * 60)                               # другой файл с тем же именем — новая копия
+        c = media_copy.take_file(str(OUT / "twice.png"))
+        self.assertNotEqual(c, a)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

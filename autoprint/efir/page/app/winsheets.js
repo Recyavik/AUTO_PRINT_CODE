@@ -392,8 +392,16 @@ export function recordSheet() {
   });
 }
 
+// ---------------------------------------------------------------- идёт другой урок
+export function openLiveSheet(d) {
+  return once("open_live", () => ask(`Идёт урок «${d.live_title || "урок"}». Завершить его и открыть «${d.title || ""}»?`,
+    { title: "Идёт урок", ok: "Завершить и открыть", cancel: "Отмена", danger: true })
+    .then((yes) => { if (yes) send({ cmd: "open", lesson: d.lesson, force: true }).catch(fail); }));
+}
+
 on("sheet", (r) => {
-  if (r.name === "update") updateSheet();
+  if (r.name === "open_live") openLiveSheet(r.data || {});
+  else if (r.name === "update") updateSheet();
   else if (r.name === "report") reportSheet();
   else if (r.name === "record") recordSheet();
   else if (r.name === "crash") crashSheet(r.text);

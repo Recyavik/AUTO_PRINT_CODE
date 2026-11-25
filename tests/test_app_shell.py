@@ -135,6 +135,33 @@ class FailTest(unittest.TestCase):
         w.close()
 
 
+    def test_renderer_gone_shows_message_and_reloads(self):
+        """Страница упала после загрузки (сбой отрисовки) — не белое окно: сообщение и перезагрузка."""
+        fake = FakeApp()
+        w = AppWindow(fake, web=False)
+        reloads = []
+        w.retry = lambda: reloads.append(1)
+        w.on_render_gone(2, 1)
+        self.assertTrue(w.message_text().startswith("Не удалось запустить окно программы"))
+        self.assertFalse(w.fail.isHidden())
+        end = time.time() + 4
+        while not reloads and time.time() < end:
+            app.processEvents()
+            time.sleep(0.02)
+        self.assertEqual(reloads, [1])
+        w.close()
+
+    def test_page_not_ready_shows_message(self):
+        """Страница загрузилась, но её скрипты не запустились (нет __ready) — сообщение, а не пустой фон."""
+        fake = FakeApp()
+        w = AppWindow(fake, web=False)
+        w.on_ready_checked(True)
+        self.assertTrue(w.fail.isHidden())
+        w.on_ready_checked(False)
+        self.assertFalse(w.fail.isHidden())
+        w.close()
+
+
 class WebEngineTest(unittest.TestCase):
     def test_webengine_offscreen_ready(self):
         try:

@@ -152,6 +152,24 @@ class RecordFlowTest(unittest.TestCase):
         self.assertEqual(self.f.recording, "")
         self.assertEqual(self.f.hits("key"), 4)
 
+    def test_state_is_cheap_with_long_recordings(self):
+        """Лист обновляется ~10 раз в секунду: состояние с длинными записями — без пересчёта волны каждый раз."""
+        import time
+        FakeRecorder.next_samples = clicks(80, seed=3)                     # ~36 с записи
+        self.f.start("key")
+        self.f.stop()
+        FakeRecorder.next_samples = clicks(30, seed=4)
+        self.f.start("space")
+        self.f.stop()
+        self.f.start("enter")                                              # идёт запись третьей
+        self.f.state()
+        t0 = time.perf_counter()
+        for _ in range(5):
+            self.f.state()
+        per = (time.perf_counter() - t0) / 5
+        self.f.stop()
+        self.assertLess(per, 0.015, f"{per * 1000:.0f} мс на состояние")
+
     def test_preview_uses_player(self):
         played = []
         self.f.player.play = lambda clips, gap: played.append((len(clips), gap))

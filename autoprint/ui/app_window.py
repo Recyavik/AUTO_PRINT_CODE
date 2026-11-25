@@ -94,6 +94,7 @@ class AppWindow(FramelessWindow):
             self.view.setPage(page)
             self.view.setContextMenuPolicy(Qt.ContextMenuPolicy.NoContextMenu)
             self.view.loadFinished.connect(self._on_loaded)
+            page.renderProcessTerminated.connect(self.on_render_gone)   # сбой отрисовки — не белое окно
             self.stack.addWidget(self.view)
         self.splash = self._make_splash()
         self.stack.addWidget(self.splash)
@@ -197,6 +198,24 @@ class AppWindow(FramelessWindow):
         self.splash.hide()
         self._watch_drops()
         self.ready.emit()
+        # загрузилась, но скрипты страницы могли не запуститься (ошибка в модуле) — проверить через несколько секунд
+        if self.view is not None:
+            QTimer.singleShot(6000, lambda: self.view is not None and self.view.page().runJavaScript(
+                "window.__ready === true", 0, lambda ok: self.on_ready_checked(bool(ok))))
+
+    def on_ready_checked(self, ok: bool) -> None:
+        if not ok and not self._failure_shown():
+            self.show_failure("страница окна не запустилась.")
+
+    def _failure_shown(self) -> bool:
+        return not self.fail.isHidden()          # сообщение уже показано — второе не нужно
+
+    def on_render_gone(self, status, code) -> None:
+        """Процесс отрисовки страницы упал (видеодрайвер, нехватка памяти): сообщение и перезагрузка сама."""
+        log.warning("Страница окна: процесс отрисовки завершился (%s, код %s)", status, code)
+        self._loaded = False
+        self.show_failure("страница окна перестала отвечать — перезагружаю.")
+        QTimer.singleShot(1500, self.retry)
 
     # ------------------------------------------------------------ файлы, перетащенные в окно
     def _watch_drops(self) -> None:
@@ -369,6 +388,24 @@ class AppWindow(FramelessWindow):
         return super().event(e)
 
     # ------------------------------------------------------------ маленький режим
+    def _set_maximized(self, on: bool) -> None:
+        """Развернуть или вернуть; скрытое окно (запуск в трей) при этом не показывается."""
+        if self.isVisible():
+            self.showMaximized() if on else self.showNormal()
+            return
+        st = self.windowState()
+        self.setWindowState(st | Qt.WindowState.WindowMaximized if on else st & ~Qt.WindowState.WindowMaximized)
+
+    def place_default(self) -> None:
+        """Первый запуск (размера ещё нет): большое окно — не больше рабочей области экрана и по центру."""
+        scr = self.screen() or QGuiApplication.primaryScreen()
+        if scr is None:
+            return
+        av = scr.availableGeometry()
+        w = max(min(BIG_SIZE.width(), av.width() - 40), min(BIG_MIN.width(), av.width()))
+        h = max(min(BIG_SIZE.height(), av.height() - 40), min(BIG_MIN.height(), av.height()))
+        self.setGeometry(av.x() + (av.width() - w) // 2, av.y() + (av.height() - h) // 2, w, h)
+
     def compact_rect(self) -> QRect:
         """Где стоит маленькое окно: запомненное место, иначе 360×600 у правого края экрана по середине."""
         scr = self.screen() or QGuiApplication.primaryScreen()
@@ -386,7 +423,7 @@ class AppWindow(FramelessWindow):
             self._big_geometry = self.saveGeometry()
             self._big_maximized = self.isMaximized()
             if self._big_maximized:
-                self.showNormal()
+                self._set_maximized(False)
             self.compact = True
             self.setMinimumSize(COMPACT_MIN)
             if s.compact_geometry:
@@ -400,7 +437,7 @@ class AppWindow(FramelessWindow):
             if self._big_geometry is not None:
                 self.restoreGeometry(self._big_geometry)
             if self._big_maximized:
-                self.showMaximized()
+                self._set_maximized(True)
         s.compact = self.compact
         self.apply_pin()
 
