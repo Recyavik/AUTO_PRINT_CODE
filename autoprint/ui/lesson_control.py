@@ -25,7 +25,7 @@ log = logging.getLogger(__name__)
 
 # «Мои настройки» экрана урока: поле Settings → допустимые значения
 PREFS = {"page_zoom": "zoom", "page_plan": ("side", "top", "hidden"),
-         "page_width": ("narrow", "normal", "wide", "full"), "exercise_pick": ("ask", "random"), "page_past": ("dim", "collapse"),
+         "page_width": "width", "exercise_pick": ("ask", "random"), "page_past": ("dim", "collapse"),
          "page_stage_timer": "bool", "start_compact": "bool", "start_screen": "bool"}
 ANSWER_FETCH_LIMIT = 90     # «Вставить ответ нейросети»: фото качаются не дольше, потом урок добавляется со ссылками
 
@@ -345,6 +345,12 @@ class LessonController(QObject):
                 return
         elif kind == "bool":
             v = bool(value)
+        elif kind == "width":
+            from ..settings_spec import clean_width
+            try:
+                v = clean_width(value)
+            except ValueError:
+                return
         elif value in kind:
             v = value
         else:

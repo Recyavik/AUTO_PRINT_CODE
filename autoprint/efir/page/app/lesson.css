@@ -23,6 +23,18 @@
 body[data-lw="narrow"] .lcol { max-width: 720px; }
 body[data-lw="wide"] .lcol { max-width: 1160px; }
 body[data-lw="full"] .lcol { max-width: none; }
+body[data-lw="custom"] .lcol { max-width: var(--lw-px, 880px); }
+/* ручки по краям текста: тянуть — шире / уже; полоска-ручка видна посередине экрана, линия — при наведении */
+.lcol { position: relative; }
+.lgrip { position: absolute; top: 0; bottom: 0; width: 12px; cursor: col-resize; z-index: 3; touch-action: none; }
+.lgrip.l { left: -16px; } .lgrip.r { right: -16px; }
+.lgrip::before { content: ""; position: absolute; top: 0; bottom: 0; left: 50%; width: 2px; margin-left: -1px;
+  background: var(--accent-line); opacity: 0; transition: opacity .12s; }
+.lgrip i { position: sticky; top: calc(var(--vh) * 40); display: block; width: 4px; height: 44px; margin: 0 auto; border-radius: 2px;
+  background: var(--line2); transition: background .12s; }
+.lgrip:hover::before, .lgrip.on::before { opacity: 1; }
+.lgrip:hover i, .lgrip.on i { background: var(--accent); }
+body.lw-drag, body.lw-drag * { cursor: col-resize !important; user-select: none !important; }
 #main { display: flex; flex-direction: column; gap: 14px; }
 
 /* ---------------------------------------------------------------- эфирная полоса */
@@ -493,7 +505,7 @@ body > .menu.wide { width: 340px; } body > .menu.roles { width: 330px; }
   html { zoom: 1 !important; background: #fff; }
   body { overflow: visible; font-size: 12px; }
   #shell { height: auto; display: block; }
-  #titlebar, #rail, #onair, #lessonLine, #planRibbon, #nowbar, #toasts, .toast, .rtb, .toscreen, .armbtn, .efirbtn, nav#plan .phint,
+  #titlebar, #rail, #onair, #lessonLine, #planRibbon, #nowbar, #toasts, .toast, .rtb, .toscreen, .armbtn, .efirbtn, nav#plan .phint, .lgrip,
   .ins, .blk > .tools, .sedit, .pmin, #planbanner, .blk.place, .nextcard, .scrim, .pop, .tip { display: none !important; }
   #frame, #view, .lview, .lbody { display: block; height: auto; overflow: visible; }
   .lcontent { overflow: visible; padding: 0; }

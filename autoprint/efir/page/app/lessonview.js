@@ -3,9 +3,9 @@
 // Подготовка и урок — один экран: правка включается переключателем «Правка» (по умолчанию — пока урок не идёт).
 "use strict";
 import { S, L as LC, on, send } from "./core.js";
-import { h, btn, iconBtn, seg, popover, menu, ask, toast, clear, closePop } from "./ui.js";
+import { h, btn, iconBtn, seg, popover, menu, ask, toast, clear, closePop, tip } from "./ui.js";
 import { icon } from "./icons.js";
-import { setCrumbs } from "./shell.js";
+import { setCrumbs, setWidth } from "./shell.js";
 import { lessonMenuItems } from "./lessonmenu.js";
 import { slidesFill } from "./sheets.js";
 import { A, cmd, now, mmss, hm, hhmm, clockAt, nextHalfHour, durText, plural } from "../lesson/state.js";
@@ -580,6 +580,46 @@ Q.Q.onResult = (res) => {
 };
 Q.Q.onError = (text) => toast(text, { warn: true });
 
+// ---------------------------------------------------------------- ширина текста: ручки по краям
+// Текст по центру: тянете край — колонка шире или уже на двойное смещение (обе стороны сразу), текст переносится.
+// Ширина — своя, в пикселях страницы; запоминается (page_width); двойной щелчок — снова «обычно».
+const MIN_TEXT = 480;
+function textGrip(side) {
+  const g = h("div", { class: "lgrip " + side, role: "separator", "aria-orientation": "vertical", "aria-label": "Ширина текста урока" },
+    h("i"));
+  tip(g, "Тяните — текст шире или уже · двойной щелчок — обычная ширина");
+  g.addEventListener("pointerdown", (e) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    const col = g.parentElement;
+    const r = col.getBoundingClientRect();
+    const k = r.width / (col.offsetWidth || r.width) || 1;     // пиксели события на пиксель страницы (масштаб «Аа»)
+    const x0 = e.clientX, w0 = col.offsetWidth;
+    let w = w0;
+    g.classList.add("on");
+    document.body.classList.add("lw-drag");
+    const move = (ev) => {
+      const dx = (ev.clientX - x0) / k * (side === "r" ? 1 : -1);
+      w = Math.max(MIN_TEXT, Math.round(w0 + 2 * dx));
+      document.body.dataset.lw = "custom";
+      document.body.style.setProperty("--lw-px", w + "px");
+    };
+    const up = () => {
+      document.removeEventListener("pointermove", move);
+      document.removeEventListener("pointerup", up);
+      document.removeEventListener("pointercancel", up);
+      g.classList.remove("on");
+      document.body.classList.remove("lw-drag");
+      if (w !== w0) setWidth(w);
+    };
+    document.addEventListener("pointermove", move);
+    document.addEventListener("pointerup", up);
+    document.addEventListener("pointercancel", up);
+  });
+  g.addEventListener("dblclick", () => setWidth("normal"));
+  return g;
+}
+
 // ---------------------------------------------------------------- экран
 function renameLesson() {
   const L = A.S && A.S.lesson;
@@ -602,7 +642,8 @@ export function lessonView(root, r) {
   const plan = h("nav", { id: "plan", "aria-label": "План урока" });
   const banner = h("section", { id: "planbanner", hidden: true });
   const main = h("div", { id: "main" });
-  const content = h("div", { id: "content", class: "lcontent" }, h("div", { class: "lcol" }, banner, main));
+  const grips = ["l", "r"].map(textGrip);
+  const content = h("div", { id: "content", class: "lcontent" }, h("div", { class: "lcol" }, ...grips, banner, main));
   const nowbar = h("button", { id: "nowbar", type: "button", hidden: true });
   const viewer = h("div", { id: "viewer", hidden: true, role: "dialog", "aria-label": "Картинка" },
     h("button", { class: "vclose", type: "button", "aria-label": "Закрыть (Esc)" }, "×"), h("img", { alt: "" }),

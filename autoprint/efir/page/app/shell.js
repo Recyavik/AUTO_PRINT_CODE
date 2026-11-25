@@ -94,9 +94,21 @@ function update() {
 
 // ---------------------------------------------------------------- «Аа»: масштаб, ширина текста и где план урока
 const WIDTHS = ["narrow", "normal", "wide", "full"];
-function applyWidth() {
-  const w = (S.prefs || {}).page_width;
-  document.body.dataset.lw = WIDTHS.includes(w) ? w : "normal";
+/** Ширина текста урока: вариант (body[data-lw]) или своя, в пикселях — её задают ручками по краям текста. */
+export function applyWidth() {
+  const w = String((S.prefs || {}).page_width || "");
+  if (/^\d+$/.test(w)) {
+    document.body.dataset.lw = "custom";
+    document.body.style.setProperty("--lw-px", w + "px");
+  } else {
+    document.body.dataset.lw = WIDTHS.includes(w) ? w : "normal";
+    document.body.style.removeProperty("--lw-px");
+  }
+}
+export function setWidth(v) {
+  S.prefs = Object.assign({}, S.prefs, { page_width: String(v) });
+  applyWidth();                                   // сразу, не дожидаясь ответа программы
+  send({ cmd: "prefs", key: "page_width", value: String(v) });
 }
 
 function zoomPanel(anchor) {
@@ -110,6 +122,7 @@ function zoomPanel(anchor) {
       btn("Обычный", { kind: "ghost", size: "sm", onClick: () => { zoomBy(0); upd(); } })),
     h("div", { class: "phead" }, "Ширина текста урока"),
     widthSeg(),
+    h("p", { class: "meta" }, "Или тяните край текста урока мышью — шире или уже."),
     h("div", { class: "phead" }, "План урока"),
     seg([{ value: "side", icon: "side", label: "Сбоку" }, { value: "top", icon: "top", label: "Сверху" },
       { value: "hidden", icon: "hidden", label: "Скрыть" }], (S.prefs || {}).page_plan || "side",
@@ -120,11 +133,7 @@ function zoomPanel(anchor) {
 
 function widthSeg() {
   const s = seg([{ value: "narrow", label: "Узко" }, { value: "normal", label: "Обычно" }, { value: "wide", label: "Широко" },
-    { value: "full", label: "Во всё окно" }], document.body.dataset.lw || "normal", (v) => {
-    S.prefs = Object.assign({}, S.prefs, { page_width: v });
-    applyWidth();                                   // сразу, не дожидаясь ответа программы
-    send({ cmd: "prefs", key: "page_width", value: v });
-  }, { size: "sm", label: "Ширина текста урока" });
+    { value: "full", label: "Во всё окно" }], document.body.dataset.lw || "normal", setWidth, { size: "sm", label: "Ширина текста урока" });
   s.id = "lessonWidth";
   return s;
 }

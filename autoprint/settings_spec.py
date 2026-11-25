@@ -23,7 +23,7 @@ FIELDS: dict[str, tuple] = {
     "theme": ("choice", ("system", "dark", "light")),
     "page_zoom": ("int", 80, 200),
     "page_plan": ("choice", ("side", "top", "hidden")),
-    "page_width": ("choice", ("narrow", "normal", "wide", "full")),
+    "page_width": ("width",),               # вариант или своя ширина в пикселях (ручки по краям текста урока)
     "page_past": ("choice", ("dim", "collapse")),
     "page_stage_timer": B,
     # урок
@@ -49,12 +49,28 @@ FIELDS: dict[str, tuple] = {
 }
 
 
+WIDTHS = ("narrow", "normal", "wide", "full")
+WIDTH_PX = (480, 4000)
+
+
+def clean_width(value) -> str:
+    """Ширина текста урока: вариант из WIDTHS или число пикселей в пределах WIDTH_PX (строкой)."""
+    v = str(value if value is not None else "").strip()
+    if v in WIDTHS:
+        return v
+    if v.isdigit() and WIDTH_PX[0] <= int(v) <= WIDTH_PX[1]:
+        return str(int(v))
+    raise ValueError("нет такой ширины")
+
+
 def clean(key: str, value):
     """Значение поля key после проверки. ValueError — такого поля нет или значение не подходит."""
     spec = FIELDS.get(key)
     if spec is None:
         raise ValueError(f"нет такой настройки: {key}")
     kind = spec[0]
+    if kind == "width":
+        return clean_width(value)
     if kind == "bool":
         return bool(value)
     if kind in ("int", "float"):

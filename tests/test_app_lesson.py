@@ -122,7 +122,7 @@ class LessonViewTest(AppPage):
         self.app.lesson.publish()
         self.assertTrue(self.wait_js("!document.querySelector('#shiftBack').hidden", 6))
         self.assertIn("Вернуть время", self.js("document.querySelector('#shiftBack').textContent"))
-        self.assertIn(plan.strftime("%H:%M"), self.js("document.querySelector('#shiftBack').dataset.tip"))
+        self.assertIn(f"{plan.hour}:{plan.minute:02d}", self.js("document.querySelector('#shiftBack').dataset.tip"))   # «0:58» — часы как в окне
         raw = json.loads((efir_dir() / "schedules.json").read_text(encoding="utf-8"))
         self.assertEqual(raw["live"]["plan"], plan.isoformat(timespec="seconds"))     # переживёт перезапуск
         self.click("#shiftBack")
@@ -132,6 +132,52 @@ class LessonViewTest(AppPage):
 
     def lcol_width(self):
         return self.js("getComputedStyle(document.querySelector('.lcol')).maxWidth")
+
+    def drag_grip(self, side: str, dx: float) -> None:
+        """Тянуть ручку колонки текста (side: l / r) на dx пикселей окна — события мыши, как от человека."""
+        self.js(f"""(() => {{
+          const g = document.querySelector('.lgrip.{side}'); const r = g.getBoundingClientRect();
+          const x = r.left + r.width / 2, y = r.top + 40;
+          const ev = (t, cx) => new PointerEvent(t, {{bubbles: true, clientX: cx, clientY: y, pointerId: 1, button: 0, buttons: 1}});
+          g.dispatchEvent(ev('pointerdown', x));
+          document.dispatchEvent(ev('pointermove', x + {dx} / 2));
+          document.dispatchEvent(ev('pointermove', x + {dx}));
+          document.dispatchEvent(ev('pointerup', x + {dx}));
+        }})()""")
+
+    def test_text_column_drag_resize(self):
+        """Колонку текста тянут за край мышью — шире или уже (по центру, обе стороны), ширина запоминается;
+        двойной щелчок по ручке — снова обычная."""
+        self.app.settings.page_width = "normal"
+        self.app.publish_now()
+        self.assertTrue(self.wait_js("getComputedStyle(document.querySelector('.lcol')).maxWidth === '880px'"))
+        self.assertTrue(self.js("!!document.querySelector('.lgrip.l') && !!document.querySelector('.lgrip.r')"))
+        self.assertIn("Тяните", self.js("document.querySelector('.lgrip.r').dataset.tip"))
+        self.app.settings.page_plan = "hidden"                    # места вширь — больше
+        self.app.publish_now()
+        self.assertTrue(self.wait_js("document.body.classList.contains('plan-hidden')"))
+        seen = lambda: self.js("document.querySelector('.lcol').offsetWidth")          # noqa: E731 — видимая ширина
+        w0 = seen()
+        self.drag_grip("l", -60)                                  # левый край наружу на 60 — колонка шире на 120
+        self.assertTrue(self.wait_py(lambda: self.app.settings.page_width.isdigit()), self.app.settings.page_width)
+        self.assertAlmostEqual(int(self.app.settings.page_width), w0 + 120, delta=4)
+        self.assertTrue(self.wait_js("Math.abs(parseFloat(getComputedStyle(document.querySelector('.lcol')).maxWidth) - "
+                                     f"{self.app.settings.page_width}) < 1"))
+        w1 = seen()
+        self.drag_grip("r", -100)                                 # правый край внутрь на 100 — уже на 200
+        self.assertTrue(self.wait_py(lambda: abs(int(self.app.settings.page_width) - (w1 - 200)) <= 4),
+                        (w1, self.app.settings.page_width))
+        self.assertAlmostEqual(seen(), w1 - 200, delta=4)
+        self.drag_grip("r", -1000)                                # слишком узко — не уже 480
+        self.assertTrue(self.wait_py(lambda: self.app.settings.page_width == "480"), self.app.settings.page_width)
+        self.js("document.querySelector('.lgrip.r').dispatchEvent(new MouseEvent('dblclick', {bubbles: true}))")
+        self.assertTrue(self.wait_py(lambda: self.app.settings.page_width == "normal"))
+        self.assertTrue(self.wait_js("getComputedStyle(document.querySelector('.lcol')).maxWidth === '880px'"))
+        for bad in ("100", "99999", "abc"):                       # чужое — мимо
+            self.app.lesson.command({"cmd": "prefs", "key": "page_width", "value": bad})
+        self.assertEqual(self.app.settings.page_width, "normal")
+        self.app.settings.page_plan = "side"
+        self.app.publish_now()
 
     def test_text_width_choice(self):
         """Ширина текста урока: узко / обычно / широко / во всё окно — из «Аа» в шапке, запоминается."""
