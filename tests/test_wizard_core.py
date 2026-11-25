@@ -139,7 +139,7 @@ class PromptTest(unittest.TestCase):
     def test_topic_only_prompt_has_topic_plan_class(self):
         opt = L.Options(style=L.STYLE_SCENARIO, cls="5 класс", topic="Циклы for")
         text = wizard.copy_prompt("lesson", opt, plan=plan90(), exercises=["Глаза"])
-        for part in ("Циклы for", "5 класс", "## Теория · 20 мин", "«Глаза»", "~~~markdown"):
+        for part in ("Циклы for", "5 класс", "## Теория · 20 мин", "зарядка: Глаза", "видео учитель выберет на уроке", "~~~markdown"):
             self.assertIn(part, text)
         self.assertIn("составь урок по теме", text.lower())                   # без материала — по теме
         no_plan = wizard.copy_prompt("lesson", L.Options(style=L.STYLE_SCENARIO, minutes=45, break_min=5, topic="Дроби"))

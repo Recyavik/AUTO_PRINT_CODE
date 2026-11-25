@@ -351,7 +351,7 @@ def _stage_use(plan: Template, topics) -> dict[str, int]:
 
 
 def lesson_state(t: Template | None, *, live_anchor_ms: int | None, media_url, presets, preset: str, dark: bool,
-                 live_shift: int = 0, efir_extra: dict | None = None,
+                 live_shift: int = 0, live_plan_ms: int = 0, efir_extra: dict | None = None,
                  efir_mode: str, tab: str, hotkey: str, armed: str = "", printer: dict | None = None,
                  lessons: list | None = None, exercises=False, edits: int = 0,
                  other_live: str = "", prefs: dict | None = None, structures: list | None = None,
@@ -362,7 +362,7 @@ def lesson_state(t: Template | None, *, live_anchor_ms: int | None, media_url, p
     printer = dict(printer or {})
     if printer.get("block"):
         armed = printer["block"]
-    base = {"live": {"anchor": live_anchor_ms, "shift": live_shift} if live_anchor_ms else None, "armed": armed, "dark": dark,
+    base = {"live": {"anchor": live_anchor_ms, "shift": live_shift, "plan": live_plan_ms} if live_anchor_ms else None, "armed": armed, "dark": dark,
             "efir": {"mode": efir_mode, "tab": tab, **(efir_extra or {})}, "hotkey": hotkey, "print": printer,
             "lessons": lessons or [], "roles": roles_state(), "role_groups": role_groups_state(), "exercises": exercises, "edits": edits,
             "other_live": other_live, "prefs": prefs or {}, "structures": structures or [],

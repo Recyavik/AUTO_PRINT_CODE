@@ -19,6 +19,10 @@
 .lbody { flex: 1; display: flex; min-height: 0; }
 .lcontent { flex: 1; min-width: 0; overflow: auto; padding: 22px clamp(16px, 3vw, 32px) 120px; position: relative; }
 .lcol { max-width: 880px; margin: 0 auto; display: flex; flex-direction: column; gap: 14px; }
+/* ширина текста урока — «Аа» в шапке: текст переносится по ширине, на широком экране листать меньше */
+body[data-lw="narrow"] .lcol { max-width: 720px; }
+body[data-lw="wide"] .lcol { max-width: 1160px; }
+body[data-lw="full"] .lcol { max-width: none; }
 #main { display: flex; flex-direction: column; gap: 14px; }
 
 /* ---------------------------------------------------------------- эфирная полоса */
@@ -47,11 +51,15 @@
 #onair .clocks { display: flex; gap: 18px; }
 #onair .clock { display: flex; flex-direction: column; gap: 1px; font-size: 12.5px; color: var(--dim); }
 #onair .clock b { font-size: 16px; color: var(--text); font-weight: 600; }
+#onair .clocks { align-items: center; }
+#onair .shiftback { color: var(--accent); border-color: var(--accent-line); background: var(--accent-soft); }
+#onair .shiftback[hidden] { display: none; }
 #onair .sright { display: flex; align-items: center; gap: 10px 22px; margin-left: auto; flex-wrap: wrap; justify-content: flex-end; }
 #onair .screenctl { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 #onair .screenctl:empty { display: none; }
 #onair .stools { display: flex; align-items: center; gap: 8px; }
-#onair .sact { display: flex; align-items: center; gap: 8px; }
+/* «Начать урок» / «Завершить» / «Отменить начало» — разной длины; место — под самую длинную, кнопка у правого края */
+#onair .sact { display: flex; align-items: center; justify-content: flex-end; gap: 8px; min-width: 168px; }
 
 /* экран учеников: миниатюра (что у учеников, точка вкладки) и значки «Фон / Зарядка / Перерыв / Слайд» */
 .screenctl .thumb { position: relative; width: 58px; height: 36px; padding: 0; border-radius: 7px; cursor: pointer; flex: none;
@@ -72,20 +80,26 @@
 .scricons .scrbtn[aria-pressed="true"] { color: var(--on-accent); background: var(--accent); border-color: var(--accent); }
 .scricons .scrbtn.warn[aria-pressed="true"] { background: var(--live); border-color: var(--live); color: #fff; }
 .scricons .scrbtn:disabled { opacity: .35; cursor: default; }
-.scricons .scrbtn.timed { width: auto; padding: 0 9px 0 7px; gap: 5px; }
-.scricons .badge { font-size: 12.5px; font-weight: 600; }
-.scricons .badge:empty { display: none; }
 .scricons .scrbtn.pulse::after { content: ""; position: absolute; inset: -3px; border-radius: inherit; pointer-events: none;
   box-shadow: 0 0 0 2px var(--accent); animation: scrpulse 1.4s ease-out 4; }
 .scricons .scrbtn.pulse { color: var(--accent); }
 @keyframes scrpulse { 0% { opacity: 1; transform: scale(1); } 100% { opacity: 0; transform: scale(1.35); } }
 @media (prefers-reduced-motion: reduce) { .scricons .scrbtn.pulse::after { animation: none; opacity: 1; } }
-.slidenav { display: inline-flex; align-items: center; gap: 2px; margin-left: 2px; }
-.slidenav[hidden] { display: none; }
+/* место справа от значков — оставлено заранее: стрелки слайдов с номером или отсчёт перерыва выезжают в него */
+.scrinfo { position: relative; flex: none; width: 88px; height: 30px; margin-left: 2px; }
+.scrinfo > * { position: absolute; inset: 0; transition: opacity .18s ease, transform .18s ease, visibility 0s linear 0s; }
+.scrinfo > [hidden] { display: flex; visibility: hidden; opacity: 0; transform: translateX(-10px); pointer-events: none;
+  transition: opacity .14s ease, transform .14s ease, visibility 0s linear .14s; }
+.slidenav { display: flex; align-items: center; justify-content: space-between; gap: 2px; }
 .slidenav button { width: 26px; height: 30px; border: 0; border-radius: 7px; background: transparent; color: var(--text); font-size: 20px;
-  line-height: 1; cursor: pointer; }
+  line-height: 1; cursor: pointer; flex: none; }
 .slidenav button:hover { background: var(--raised); }
-.slidenav .n { min-width: 1.6em; text-align: center; font-weight: 600; font-size: 13.5px; }
+.slidenav .n { flex: 1; text-align: center; font-weight: 600; font-size: 13.5px; font-variant-numeric: tabular-nums; }
+.brkleft { display: flex; align-items: center; justify-content: center; border: 0; border-radius: 8px; background: var(--accent-soft);
+  color: var(--accent); font-size: 14px; font-weight: 650; font-variant-numeric: tabular-nums; cursor: pointer; }
+.brkleft:hover { background: color-mix(in srgb, var(--accent) 22%, transparent); }
+.brkleft.paused { color: var(--dim); background: var(--raised); }
+@media (prefers-reduced-motion: reduce) { .scrinfo > *, .scrinfo > [hidden] { transition: none; transform: none; } }
 
 /* полоса набора кода — внизу урока, пока идёт набор */
 #typingBar { flex: none; border-top: 1px solid var(--line); background: var(--panel); padding: 8px 18px 10px; }
@@ -246,7 +260,8 @@ body.typing .blk.busy .say { display: none; }      /* «Скажи: …» во �
 #planbanner .pbtext { flex: 1 1 320px; min-width: 0; }
 /* «Правка» и «Сохранено» в полосе урока */
 #onair .edittoggle[aria-pressed="true"] { color: var(--accent); background: var(--accent-soft); border-color: var(--accent-line); }
-#onair .savechip { font-size: 12.5px; color: var(--dim); white-space: nowrap; }
+#onair .savechip { font-size: 12.5px; color: var(--dim); white-space: nowrap; width: 8.2em; overflow: hidden; text-overflow: ellipsis;
+  text-align: right; }
 #onair .savechip.warn { color: var(--live); font-weight: 600; }
 #onair .savechip[hidden] { display: none; }
 #planbanner b { font-weight: 600; }
@@ -444,10 +459,19 @@ body > .menu .msep { height: 1px; background: var(--line); margin: 5px 4px; }
 body > .menu.wide { width: 340px; } body > .menu.roles { width: 330px; }
 .askbox { padding: 4px; } .askbox input { width: 100%; margin-top: 4px; padding: 6px 8px; }
 
-#viewer { position: fixed; inset: 0; z-index: 90; background: rgba(0, 0, 0, .86); display: flex; flex-direction: column;
+/* под шапкой окна (44 px): кнопки окна, «Аа» и перетаскивание остаются доступны */
+#viewer { position: fixed; inset: 44px 0 0 0; z-index: 90; background: rgba(0, 0, 0, .86); display: flex; flex-direction: column;
   align-items: center; justify-content: center; gap: 10px; padding: 24px; cursor: zoom-out; }
 #viewer[hidden] { display: none; }
-#viewer img { max-width: 100%; max-height: calc(var(--vh) * 100 - 90px); border-radius: var(--r-sm); }
+#viewer img { max-width: 100%; max-height: calc(var(--vh) * 100 - 134px); border-radius: var(--r-sm); }
+#viewer.loading img, #viewer.failed img { display: none; }
+#viewer .vmsg { display: none; color: #DDD; font-size: 15px; }
+#viewer.loading .vmsg, #viewer.failed .vmsg { display: block; }
+#viewer.loading .vmsg::before { content: "Открываю картинку…"; }
+#viewer.failed .vmsg::before { content: "Картинка не открылась — щёлкните, чтобы закрыть"; }
+#viewer .vclose { position: absolute; top: 12px; right: 14px; width: 40px; height: 40px; border-radius: 50%; border: 0;
+  background: rgba(255, 255, 255, .12); color: #FFF; font-size: 26px; line-height: 1; cursor: pointer; }
+#viewer .vclose:hover { background: rgba(255, 255, 255, .22); }
 #viewer .cap { color: #EEE; font-size: 15px; }
 
 @media (max-width: 760px) {

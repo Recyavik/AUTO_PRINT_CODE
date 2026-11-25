@@ -137,7 +137,7 @@ class EfirPageTest(Base):
     def test_look_new_and_edit(self):
         ef = self.win.efir
         edited = []
-        self.win.navigate.connect(lambda h: edited.append(h.rsplit("/", 1)[-1]) if h.startswith("#/efir/looks/") else None)
+        self.win.navigate.connect(lambda h: edited.append(h.rsplit("/", 1)[-1].split("?")[0]) if h.startswith("#/efir/looks/") else None)
         n0 = len(ef.store.looks)
         self.win.lesson.command({"cmd": "look_new"})
         self.assertEqual(len(ef.store.looks), n0 + 1)

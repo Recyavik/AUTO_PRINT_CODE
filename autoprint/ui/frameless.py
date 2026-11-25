@@ -32,6 +32,9 @@ WS_CAPTION, WS_THICKFRAME, WS_SYSMENU = 0x00C00000, 0x00040000, 0x00080000
 WS_MINIMIZEBOX, WS_MAXIMIZEBOX = 0x00020000, 0x00010000
 SWP_FLAGS = 0x0001 | 0x0002 | 0x0004 | 0x0010 | 0x0020 | 0x0200   # без размера/места/порядка, рамка изменилась
 WM_NCCALCSIZE, WM_NCHITTEST = 0x0083, 0x0084
+WM_NCLBUTTONDOWN, WM_ENTERSIZEMOVE, WM_EXITSIZEMOVE = 0x00A1, 0x0231, 0x0232
+HIT_NAMES = {1: "содержимое", 2: "заголовок", 10: "левый край", 11: "правый край", 12: "верхний край", 13: "левый верхний угол",
+             14: "правый верхний угол", 15: "нижний край", 16: "левый нижний угол", 17: "правый нижний угол"}
 HTCLIENT, HTCAPTION = 1, 2
 HTLEFT, HTRIGHT, HTTOP, HTTOPLEFT, HTTOPRIGHT, HTBOTTOM, HTBOTTOMLEFT, HTBOTTOMRIGHT = 10, 11, 12, 13, 14, 15, 16, 17
 SM_CXSIZEFRAME, SM_CYSIZEFRAME, SM_CXPADDEDBORDER = 32, 33, 92
@@ -243,7 +246,22 @@ class FramelessWindow(QWidget):
             return True, 0
         if msg.message == WM_NCHITTEST:
             return True, self._hit_test(msg)
+        if msg.message in (WM_NCLBUTTONDOWN, WM_ENTERSIZEMOVE, WM_EXITSIZEMOVE):
+            self._log_frame(msg)                 # только запись в журнал: Windows делает своё как обычно
         return super().nativeEvent(event_type, message)
+
+    def _log_frame(self, msg) -> None:
+        """Перетаскивание и растягивание окна — в журнал (редкие события): по нему видно, что Windows поняла
+        из нажатия — заголовок, край или содержимое, — было ли окно развёрнуто и каким оно стало."""
+        rect = wintypes.RECT()
+        user32.GetWindowRect(msg.hWnd, ctypes.byref(rect))
+        where = f"{rect.left},{rect.top} {rect.right - rect.left}×{rect.bottom - rect.top}"
+        zoomed = "развёрнуто" if user32.IsZoomed(msg.hWnd) else "обычное"
+        if msg.message == WM_NCLBUTTONDOWN:
+            log.info("Окно: нажатие — %s (окно %s, %s)", HIT_NAMES.get(int(msg.wParam), str(msg.wParam)), zoomed, where)
+        else:
+            log.info("Окно: %s (окно %s, %s)", "начали тянуть" if msg.message == WM_ENTERSIZEMOVE else "отпустили",
+                     zoomed, where)
 
     def _hit_test(self, msg) -> int:
         x = ctypes.c_short(msg.lParam & 0xFFFF).value

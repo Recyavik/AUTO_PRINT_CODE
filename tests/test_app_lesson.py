@@ -8,6 +8,7 @@ from __future__ import annotations
 import time
 import unittest
 from datetime import datetime, timedelta
+from pathlib import Path
 
 from apphelp import AppPage, code, note, pump, stage  # noqa: F401
 
@@ -108,6 +109,52 @@ class LessonViewTest(AppPage):
         self.app.settings.page_plan = "side"
         self.app.publish_now()
 
+    def test_shift_back_stays_visible(self):
+        """Время этапов сдвинули («Следующий этап — сейчас») — «Вернуть время» видно, пока сдвиг есть, а не 10 с."""
+        import json
+        from autoprint.efir.store import efir_dir
+        self.app.lesson.command({"cmd": "start", "force": True})
+        self.assertTrue(self.wait_js("!document.querySelector('#endBtn').hidden", 6))
+        plan = self.app.efir.store.live.plan
+        self.assertIsNotNone(plan)
+        self.assertTrue(self.js("document.querySelector('#shiftBack').hidden"))
+        self.app.lesson.command({"cmd": "start_at", "index": 1})      # закончили раньше — дальше по плану
+        self.app.lesson.publish()
+        self.assertTrue(self.wait_js("!document.querySelector('#shiftBack').hidden", 6))
+        self.assertIn("Вернуть время", self.js("document.querySelector('#shiftBack').textContent"))
+        self.assertIn(plan.strftime("%H:%M"), self.js("document.querySelector('#shiftBack').dataset.tip"))
+        raw = json.loads((efir_dir() / "schedules.json").read_text(encoding="utf-8"))
+        self.assertEqual(raw["live"]["plan"], plan.isoformat(timespec="seconds"))     # переживёт перезапуск
+        self.click("#shiftBack")
+        self.assertTrue(self.wait_py(lambda: self.app.efir.store.live.anchor == plan))
+        self.assertTrue(self.wait_js("document.querySelector('#shiftBack').hidden", 6))
+        self.stop_live()
+
+    def lcol_width(self):
+        return self.js("getComputedStyle(document.querySelector('.lcol')).maxWidth")
+
+    def test_text_width_choice(self):
+        """Ширина текста урока: узко / обычно / широко / во всё окно — из «Аа» в шапке, запоминается."""
+        self.app.settings.page_width = "normal"
+        self.app.publish_now()
+        self.assertTrue(self.wait_js("getComputedStyle(document.querySelector('.lcol')).maxWidth === '880px'"))
+        self.click("#zoomBtn")
+        self.assertTrue(self.wait_js("!!document.querySelector('.pop #lessonWidth')"))
+        self.js("document.querySelector('#lessonWidth button[data-value=wide]').click()")
+        self.assertTrue(self.wait_py(lambda: self.app.settings.page_width == "wide"))
+        self.assertTrue(self.wait_js("getComputedStyle(document.querySelector('.lcol')).maxWidth === '1160px'"))
+        self.js("document.querySelector('#lessonWidth button[data-value=full]').click()")
+        self.assertTrue(self.wait_py(lambda: self.app.settings.page_width == "full"))
+        self.assertTrue(self.wait_js("getComputedStyle(document.querySelector('.lcol')).maxWidth === 'none'"))
+        self.js("document.querySelector('#lessonWidth button[data-value=narrow]').click()")
+        self.assertTrue(self.wait_js("getComputedStyle(document.querySelector('.lcol')).maxWidth === '720px'"))
+        self.assertTrue(self.wait_py(lambda: self.app.settings.page_width == "narrow"))
+        self.js("window.appUI.closePop()")
+        self.app.lesson.command({"cmd": "prefs", "key": "page_width", "value": "huge"})    # чужое значение — мимо
+        self.assertEqual(self.app.settings.page_width, "narrow")
+        self.app.settings.page_width = "normal"
+        self.app.publish_now()
+
     def test_ribbon_widths_follow_minutes(self):
         self.app.settings.page_plan = "top"
         self.app.publish_now()
@@ -184,6 +231,7 @@ def screen_lessons() -> list[Template]:
         stage("Перерыв", 5, id="a2", stage_kind="break"),
         stage("Зарядка", 5, id="a3", stage_kind="exercise", exercise="Спина"), imgs[1],
         stage("Итоги", 5, id="a4"), note("Пока", id="an4"),
+        stage("Ещё зарядка", 3, id="a5", stage_kind="exercise"),          # видео не указано — выбрать на уроке
     ], id="SC")]
 
 
@@ -211,6 +259,7 @@ class ScreenCtlTest(AppPage):
             self.stop_live()
         ef.show_background()
         ef.clients = 1
+        self.app.lesson._last_slide = ""             # «Слайд» после другого теста — снова с первого
         self.app.printer.set_focus("SC")
         self.app.lesson.publish()
         self.app.publish_now()
@@ -248,7 +297,7 @@ class ScreenCtlTest(AppPage):
         self.app.lesson.command({"cmd": "break", "minutes": 10})
         self.app.lesson.publish()
         self.assertTrue(self.wait_js("document.querySelector('#scrBreak').getAttribute('aria-pressed') === 'true'"))
-        self.assertTrue(self.wait_js("/\\d+:\\d\\d/.test(document.querySelector('#scrBreak .badge').textContent)"))
+        self.assertTrue(self.wait_js("/\\d+:\\d\\d/.test(document.querySelector('#scrInfo .brkleft').textContent)"))
         self.click("#scrBreak")
         items = self.menu_items()
         for x in ("+5 мин", "+1 мин", "−1 мин", "Пауза отсчёта", "Заново", "Убрать — снова фон"):
@@ -278,6 +327,147 @@ class ScreenCtlTest(AppPage):
         self.assertTrue(self.wait_js("document.querySelector('#scrEx').classList.contains('warn')"))
         self.assertIn("без звука", self.js("document.querySelector('#scrEx').dataset.tip"))
         self.app.efir.video_muted = False
+
+    ICONS = ("#scrBg", "#scrEx", "#scrBreak", "#scrSlide")
+
+    def icon_x(self):
+        sels = ",".join(repr(s) for s in self.ICONS)
+        return self.js(f"[{sels}].map(s => Math.round(document.querySelector(s).getBoundingClientRect().left * 10) / 10)")
+
+    def assertIconsStay(self, before):
+        pump(400)                                    # выезд стрелок и цифры — 0,2 с
+        after = self.icon_x()
+        for a, b in zip(before, after):
+            self.assertAlmostEqual(a, b, delta=0.5, msg=f"значки сдвинулись: {before} → {after}")
+
+    def test_icons_stay_when_slide_nav_rolls_out(self):
+        """Включили слайд — стрелки и номер выезжают в заранее оставленное место; значки на месте."""
+        before = self.icon_x()
+        self.click("#scrSlide")
+        self.assertTrue(self.wait_js("!document.querySelector('#slideNav').hidden"))
+        self.assertIconsStay(before)
+        nav = self.js("(() => { const r = document.querySelector('#slideNav').getBoundingClientRect(),"
+                      " s = document.querySelector('#scrInfo').getBoundingClientRect();"
+                      " return [r.left >= s.left - 0.5, r.right <= s.right + 0.5, r.width > 40]; })()")
+        self.assertEqual(nav, [True, True, True])
+        self.click("#slideNav .next")
+        self.assertTrue(self.wait_js("document.querySelector('#slideNav .n').textContent === '2'"))
+        self.assertIconsStay(before)
+
+    def test_icons_stay_with_break_countdown(self):
+        """Перерыв идёт — отсчёт рядом со значками, в том же месте; значки не раздвигаются."""
+        before = self.icon_x()
+        self.app.lesson.command({"cmd": "break", "minutes": 10})
+        self.app.lesson.publish()
+        self.assertTrue(self.wait_js("/\\d+:\\d\\d/.test(document.querySelector('#scrInfo .brkleft').textContent)"))
+        self.assertIconsStay(before)
+        self.click("#scrInfo .brkleft")              # отсчёт — та же кнопка, что и «Перерыв»: меню перерыва
+        self.assertIn("+5 мин", self.menu_items())
+
+    def test_icons_stay_when_lesson_starts_and_edit_toggles(self):
+        before = self.icon_x()
+        self.go_live(1)
+        self.assertTrue(self.wait_js("!document.querySelector('#endBtn').hidden", 6))
+        self.assertIconsStay(before)
+        self.click("#editToggle")                    # правка во время урока: «✓ Сохранено» появилось
+        self.assertTrue(self.wait_js("!document.querySelector('#saveChip').hidden"))
+        self.assertIconsStay(before)
+        self.click("#editToggle")
+
+    def test_lesson_pictures_are_light_copies(self):
+        """В тексте урока — копия под ширину колонки (прокрутка без рывков); в просмотре и ученикам — оригинал."""
+        src = self.js("document.querySelector('[data-id=im1] figure img').getAttribute('src')")
+        full = self.js("document.querySelector('[data-id=im1] figure img').dataset.full")
+        self.assertRegex(src, r"^/media/[0-9a-f]{16}/[^?]+\?w=(640|960|1280|1600|1920)$")
+        self.assertEqual(src.split("?")[0], full)
+        self.assertEqual(self.js("document.querySelector('[data-id=im1] figure img').decoding"), "async")
+        self.go_live(1)
+        self.assertTrue(self.wait_js("document.body.classList.contains('mode-lesson')", 6))
+        self.click("[data-id=im1] figure img")
+        self.assertTrue(self.wait_js("!document.querySelector('#viewer').hidden"))
+        self.assertEqual(self.js("new URL(document.querySelector('#viewer img').src).pathname"), full)
+        # шапка окна (кнопки, перетаскивание) — над просмотром; Esc и «×» закрывают
+        self.assertTrue(self.js("document.querySelector('#viewer').getBoundingClientRect().top >= "
+                                "document.querySelector('#titlebar').getBoundingClientRect().bottom - 0.5"))
+        self.js("document.dispatchEvent(new KeyboardEvent('keydown', {key: 'Escape', bubbles: true}))")
+        self.assertTrue(self.wait_js("document.querySelector('#viewer').hidden"))
+        self.click("[data-id=im1] figure img")
+        self.assertTrue(self.wait_js("!document.querySelector('#viewer').hidden"))
+        self.click("#viewer .vclose")
+        self.assertTrue(self.wait_js("document.querySelector('#viewer').hidden"))
+        self.click("#scrSlide")
+        self.assertTrue(self.wait_js("document.querySelector('#screenThumb .scr').style.backgroundImage.includes('?w=320')"))
+
+    def test_look_from_lesson_saves_and_returns(self):
+        """Оформление открыли из урока — «Сохранить и вернуться к уроку» и «К уроку»; сохранили — снова урок."""
+        self.app.lesson.command({"cmd": "look_edit"})
+        self.assertTrue(self.wait_js(f"location.hash === '#/efir/looks/{self.look.id}?from=SC'", 6))
+        self.assertTrue(self.wait_js("!!document.querySelector('#lkBack')", 6))
+        self.assertIn("Экран учеников", self.js("document.querySelector('#crumbs').textContent"))      # урок — в крошках
+        self.assertEqual(self.js("document.querySelector('#lksave').textContent"), "Сохранить и вернуться к уроку")
+        old = self.look.title
+        try:
+            self.js("const t = document.querySelector('#lktitle'); t.value = '1Т новый'; t.dispatchEvent(new Event('input'))")
+            self.click("#lksave")
+            self.assertTrue(self.wait_js("location.hash === '#/lesson/SC'", 6))
+            self.assertTrue(self.wait_py(lambda: self.app.efir.store.look(self.look.id).title == "1Т новый"))
+            # без правок «К уроку» — сразу назад
+            self.app.lesson.command({"cmd": "look_edit"})
+            self.assertTrue(self.wait_js("!!document.querySelector('#lkBack')", 6))
+            self.click("#lkBack")
+            self.assertTrue(self.wait_js("location.hash === '#/lesson/SC'", 6))
+        finally:
+            lk = self.app.efir.store.look(self.look.id)
+            lk.title = old
+            self.app.efir.save_look(lk)
+
+    def stage_ex_btn(self, sid):
+        return f"#main [data-act=exercise][data-stage={sid}]"
+
+    def test_exercise_stage_with_video_starts_it(self):
+        self.assertTrue(self.wait_js(f"!!document.querySelector('{self.stage_ex_btn('a3')}')"))
+        self.assertIn("· Спина", self.js(f"document.querySelector('{self.stage_ex_btn('a3')}').textContent"))
+        back = Path(self.look.exercises[1].path)
+        back.write_bytes(b"x")
+        try:
+            self.click(self.stage_ex_btn("a3"))
+            self.assertTrue(self.wait_py(lambda: self.app.efir.mode == "exercise" and self.app.efir.ex_index == 1))
+            self.assertFalse(self.js("!!document.querySelector('.pop')"))            # без вопроса
+        finally:
+            back.unlink()
+
+    def test_exercise_stage_without_video_asks(self):
+        """Этап «зарядка» без видео (так его пишет нейросеть) — на уроке то же меню видео, что у «Зарядки» наверху."""
+        self.app.settings.exercise_pick = "ask"
+        self.app.lesson.publish()
+        sel = self.stage_ex_btn("a5")
+        self.assertTrue(self.wait_js(f"document.querySelector('{sel}')?.textContent === 'Выбрать зарядку ученикам…'"))
+        self.click(sel)
+        self.assertEqual(self.menu_items()[:2], ["Глаза", "Спина"])
+        self.assertEqual(self.app.efir.mode, "idle")
+        self.js("[...document.querySelectorAll('.pop .mi')].find(b => b.textContent.includes('Глаза')).click()")
+        self.assertTrue(self.wait_py(lambda: self.app.efir.mode == "exercise" and self.app.efir.ex_index == 0))
+
+    def test_exercise_stage_random_not_twice_in_a_row(self):
+        self.app.settings.exercise_pick = "random"
+        self.app.lesson.publish()
+        sel = self.stage_ex_btn("a5")
+        self.assertTrue(self.wait_js(f"document.querySelector('{sel}')?.textContent === 'Включить случайную зарядку'"))
+        back = Path(self.look.exercises[1].path)
+        back.write_bytes(b"x")
+        try:
+            seen = []
+            for _ in range(4):
+                self.app.efir.show_background()
+                self.click(sel)
+                self.assertTrue(self.wait_py(lambda: self.app.efir.mode == "exercise"))
+                self.assertFalse(self.js("!!document.querySelector('.pop')"))
+                seen.append(self.app.efir.ex_index)
+            self.assertTrue(all(a != b for a, b in zip(seen, seen[1:])), seen)     # не то же видео подряд
+        finally:
+            back.unlink()
+            self.app.settings.exercise_pick = "ask"
+            self.app.lesson.publish()
 
     def test_slide_arrows(self):
         self.click("#scrSlide")

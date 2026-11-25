@@ -14,7 +14,7 @@ import { renderMain, renderPlan, stagesOf, nodeOf, stageOfBlock, markOnScreen } 
 import * as E from "../lesson/edit.js";
 import { released } from "../lesson/code.js";
 
-export const hooks = { strip: [], tick: [], apply: [], mount: [] };   // экран учеников, набор, правка — свои части
+export const hooks = { strip: [], tick: [], apply: [], mount: [], exercise: [] };   // экран учеников, набор, правка — свои части
 
 let V = null;                       // смонтированный экран (элементы) или null
 
@@ -166,6 +166,21 @@ function shiftWithUndo(c) {
   if (prev) toast("Время этапов сдвинуто на сейчас", { action: "Вернуть", onAction: () => cmd({ cmd: "restore_anchor", ms: prev }), ms: 10000 });
 }
 
+// время этапов сдвинуто относительно плана («Следующий этап — сейчас», «Начать этот этап сейчас») — вернуть можно,
+// пока сдвиг есть: кнопка у часов и пункт в меню таймера урока (всплывашка «Вернуть» — только 10 с)
+function planShift() {
+  const lv = A.S && A.S.live;
+  return lv && lv.plan && lv.shift ? { plan: lv.plan, shift: lv.shift } : null;
+}
+function shiftText(sh) { return (sh.shift > 0 ? "+" : "−") + Math.abs(sh.shift) + " мин"; }
+function restorePlan() {
+  const sh = planShift();
+  if (!sh) return;
+  const prev = A.S.live.anchor;
+  cmd({ cmd: "restore_anchor", ms: sh.plan });
+  toast("Время этапов — снова по плану: начало " + clockAt(sh.plan), { action: "Отменить", onAction: () => cmd({ cmd: "restore_anchor", ms: prev }), ms: 10000 });
+}
+
 async function mayReplace() {
   const other = A.S && A.S.other_live;
   if (!other) return true;
@@ -214,8 +229,10 @@ function statusPanel(anchor) {
   tm.addEventListener("blur", commit);
   const { next, elapsed } = computeCurrent();
   const waiting = elapsed !== null && elapsed < 0;
+  const sh = planShift();
   const items = [
     { node: h("div", { class: "zrow" }, h("span", { class: "dim" }, "Начало"), tm) },
+    sh ? { label: "Вернуть время по плану", hint: "сдвинуто на " + shiftText(sh) + " · начало " + clockAt(sh.plan), on: restorePlan } : null,
     waiting ? { label: "Начать урок сейчас", hint: "не ждать назначенного времени", on: () => shiftWithUndo({ cmd: "shift_now" }) }
       : { label: "Начать этот этап сейчас", hint: "текущий этап — с этой минуты", on: () => shiftWithUndo({ cmd: "shift_now" }) },
     !waiting && next >= 0 ? { label: "Следующий этап — сейчас", hint: "закончили раньше — дальше по плану",
@@ -260,6 +277,9 @@ function buildStrip() {
   minutesBtn.id = "minutesBtn";
   const clockNow = h("span", { class: "clock", id: "clockNow" }, h("span", null, "сейчас"), h("b", { class: "mono" }));
   const clockEnd = h("span", { class: "clock", id: "clockEnd" }, h("span", null, "конец"), h("b", { class: "mono" }));
+  const shiftBack = btn("Вернуть время", { icon: "undo", size: "sm", cls: "shiftback", onClick: restorePlan });
+  shiftBack.id = "shiftBack";
+  shiftBack.hidden = true;
   const screen = h("div", { id: "screen", class: "screenctl" });
   const planPosSeg = seg([{ value: "side", icon: "side", label: "План сбоку" }, { value: "top", icon: "top", label: "План сверху" },
     { value: "hidden", icon: "hidden", label: "Скрыть план" }], planPos(), (v) => {
@@ -275,10 +295,12 @@ function buildStrip() {
   endBtn.id = "endBtn";
   const strip = h("section", { id: "onair", "aria-label": "Урок и экран учеников" },
     h("div", { class: "sleft" }, status, startAt, meta, nowBtn, minutesBtn),
-    h("div", { class: "clocks" }, clockNow, clockEnd),
-    // справа одной группой: перенеслась строка — главная кнопка всё равно в правом краю
-    h("div", { class: "sright" }, screen, tools, h("div", { class: "sact" }, startBtn, endBtn)));
-  return { strip, status, tally, big, l1, l2, startAt, meta, nowBtn, minutesBtn, clockNow, clockEnd, screen, tools, planPosSeg, startBtn, endBtn };
+    h("div", { class: "clocks" }, clockNow, clockEnd, shiftBack),
+    // справа одной группой: перенеслась строка — главная кнопка всё равно в правом краю. Группа прижата вправо,
+    // поэтому всё, что меняет ширину (правка, «Сохранено»), — левее значков экрана учеников; правее только кнопка
+    // «Начать / Завершить», а у неё постоянная ширина: значки не дёргаются
+    h("div", { class: "sright" }, tools, screen, h("div", { class: "sact" }, startBtn, endBtn)));
+  return { strip, status, tally, big, l1, l2, startAt, meta, nowBtn, minutesBtn, clockNow, clockEnd, shiftBack, screen, tools, planPosSeg, startBtn, endBtn };
 }
 
 function applyPlanPos() {
@@ -352,6 +374,9 @@ function tick() {
   st.endBtn.classList.toggle("stop", !over);
   // --- часы
   set(st.clockNow.querySelector("b"), clockAt(now()));
+  const sh = live ? planShift() : null;
+  st.shiftBack.hidden = !sh;
+  if (sh) st.shiftBack.dataset.tip = "Время этапов сдвинуто на " + shiftText(sh) + " — вернуть как по плану: начало " + clockAt(sh.plan);
   st.clockEnd.hidden = base === null || !stages.length;
   if (base !== null) {
     let t = clockAt(base + total * 60000);
@@ -487,23 +512,33 @@ function apply(state) {
 }
 
 // ---------------------------------------------------------------- щелчки по ленте (чтение; правка — lessonedit.js)
+// просмотр картинки: оригинал на всё окно под шапкой (кнопки окна и перетаскивание работают); пока грузится —
+// «Открываю картинку…», а не просто тёмный экран; закрыть — щелчок, Esc или «×»
 function openViewer(url, caption) {
-  V.viewer.querySelector("img").src = url;
-  V.viewer.querySelector(".cap").textContent = caption || "";
-  V.viewer.hidden = false;
+  const v = V.viewer, img = v.querySelector("img");
+  v.classList.add("loading");
+  v.classList.remove("failed");
+  img.onload = () => v.classList.remove("loading");
+  img.onerror = () => { v.classList.remove("loading"); v.classList.add("failed"); };
+  img.src = url;
+  v.querySelector(".cap").textContent = caption || "";
+  v.hidden = false;
 }
+function closeViewer() { if (V && !V.viewer.hidden) { V.viewer.hidden = true; return true; } return false; }
 
 export const mainClick = [];        // обработчики правки: fn(e) → true, если взяли щелчок
 function onMainClick(e) {
   const t = e.target;
   if (t.closest("a")) return;
   const img = t.closest("figure img");
-  if (img && A.mode === "lesson") { const it = A.byId.get(img.closest(".blk").dataset.id); openViewer(img.src, it && it.title); return; }
+  if (img && A.mode === "lesson") { const it = A.byId.get(img.closest(".blk").dataset.id); openViewer(img.dataset.full || img.src, it && it.title); return; }
   const actBtn = t.closest("[data-act]");
   if (actBtn) {
     const a = actBtn.dataset.act;
     if (a === "break") { const it = A.byId.get(actBtn.dataset.stage); cmd({ cmd: "break", stage: actBtn.dataset.stage, minutes: it ? it.minutes : 10 }); }
-    else if (a === "exercise") cmd({ cmd: "exercise", stage: actBtn.dataset.stage || "", index: 0 });
+    else if (a === "exercise") {                 // своё видео этапа — сразу; нет — меню видео или случайное (screenctl.js)
+      if (!hooks.exercise.some((f) => f(actBtn))) cmd({ cmd: "exercise", stage: actBtn.dataset.stage || "" });
+    }
     else if (a === "slide") cmd({ cmd: "slide", block: actBtn.closest(".blk").dataset.id });
     else if (a === "clear-sel") E.setFields(actBtn.closest(".blk").dataset.id, { sel: [] });
     else if (a === "place-insert") E.pickImage(actBtn.closest(".blk").dataset.id, true);
@@ -527,6 +562,7 @@ function onMainClick(e) {
 
 const NEXT_KEYS = new Set(["ArrowRight", "PageDown"]), PREV_KEYS = new Set(["ArrowLeft", "PageUp"]);
 function onKey(e) {
+  if (e.key === "Escape" && closeViewer()) { e.preventDefault(); return; }
   if (!V || A.mode !== "lesson" || e.ctrlKey || e.altKey || e.metaKey) return;
   const tg = e.target;
   if (tg && (tg.tagName === "INPUT" || tg.tagName === "TEXTAREA" || tg.isContentEditable)) return;
@@ -568,7 +604,9 @@ export function lessonView(root, r) {
   const main = h("div", { id: "main" });
   const content = h("div", { id: "content", class: "lcontent" }, h("div", { class: "lcol" }, banner, main));
   const nowbar = h("button", { id: "nowbar", type: "button", hidden: true });
-  const viewer = h("div", { id: "viewer", hidden: true }, h("img", { alt: "" }), h("div", { class: "cap" }));
+  const viewer = h("div", { id: "viewer", hidden: true, role: "dialog", "aria-label": "Картинка" },
+    h("button", { class: "vclose", type: "button", "aria-label": "Закрыть (Esc)" }, "×"), h("img", { alt: "" }),
+    h("div", { class: "vmsg" }), h("div", { class: "cap" }));
   const toastEl = h("div", { id: "toast", hidden: true });       // старый тост модулей урока (state.toast) — не нужен окну
   const menuBtn = iconBtn("chevron-down", "Меню урока", () => {
     const L = A.S && A.S.lesson;
@@ -586,9 +624,9 @@ export function lessonView(root, r) {
     if (!n) return;
     goStage(n.closest(".prow").dataset.id);
   });
-  viewer.addEventListener("click", () => { viewer.hidden = true; });
+  viewer.addEventListener("click", closeViewer);
   nowbar.addEventListener("click", () => { if (nowbar.dataset.id) goStage(nowbar.dataset.id); nowbar.hidden = true; });
-  content.addEventListener("scroll", () => { const c = computeCurrent(); updateNowbar(c.cur, c.stages); }, { passive: true });
+  content.addEventListener("scroll", () => { if (!V) return; const c = computeCurrent(); updateNowbar(c.cur, c.stages); }, { passive: true });
   applyPlanPos();
   for (const f of hooks.mount) f(V);
   const timer = setInterval(tick, 1000);

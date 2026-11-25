@@ -9,7 +9,7 @@ import { icon } from "./icons.js";
 import { go } from "./core.js";
 import { hooks, computeCurrent } from "./lessonview.js";
 import { A, cmd, now, mmss } from "../lesson/state.js";
-import { decor, exerciseList } from "../lesson/render.js";
+import { decor, exerciseList, lightUrl, stageVideo } from "../lesson/render.js";
 
 const BUSY = ["running", "countdown", "paused", "line_wait"];
 let W = null;                         // элементы экрана учеников и полосы набора
@@ -87,6 +87,19 @@ function exMenu(anchor) {
   menu(anchor, items, { cls: "scrmenu" });
 }
 
+// кнопка этапа-зарядки в тексте урока: своё видео — сразу; нет — меню видео (как «Зарядка» наверху) или случайное
+function stageExercise(b) {
+  const it = A.byId.get(b.dataset.stage);
+  if (!it) return false;
+  const pick = (A.S && A.S.prefs && A.S.prefs.exercise_pick) || "ask";
+  if (stageVideo(it) || exerciseList().length < 2) cmd({ cmd: "exercise", stage: it.id });
+  else if (pick === "random") cmd({ cmd: "exercise", stage: it.id, pick: "random" });
+  else exMenu(b);
+  pulseKind = "";
+  updateStrip();
+  return true;
+}
+
 // ---------------------------------------------------------------- миниатюра и вкладка
 function thumbMenu(anchor) {
   const e = ef();
@@ -131,9 +144,9 @@ function mount(V) {
   bg.id = "scrBg";
   const ex = iconBtn("activity", "Зарядка", () => { pulseKind = ""; exMenu(ex); updateStrip(); }, { size: "sm", cls: "scrbtn" });
   ex.id = "scrEx";
-  const brk = iconBtn("cup", "Перерыв", () => { pulseKind = ""; breakMenu(brk); updateStrip(); }, { size: "sm", cls: "scrbtn" });
+  const openBreak = () => { pulseKind = ""; breakMenu(brk); updateStrip(); };
+  const brk = iconBtn("cup", "Перерыв", openBreak, { size: "sm", cls: "scrbtn" });
   brk.id = "scrBreak";
-  brk.append(h("span", { class: "badge mono" }));
   const sl = iconBtn("slide", "Слайд", () => cmd(ef().mode === "slide" ? { cmd: "background" } : { cmd: "slide_step", d: 1 }),
     { size: "sm", cls: "scrbtn" });
   sl.id = "scrSlide";
@@ -144,11 +157,17 @@ function mount(V) {
   tip(prev, "Предыдущий слайд · ←");
   tip(next, "Следующий слайд · →");
   const nav = h("span", { id: "slideNav", class: "slidenav", hidden: true }, prev, h("span", { class: "n mono" }), next);
-  const icons = h("div", { class: "scricons", role: "group", "aria-label": "Что показать ученикам" }, bg, ex, brk, sl, nav);
+  // отсчёт перерыва — в том же месте, что и стрелки слайдов (режимы не бывают вместе); щелчок — меню перерыва
+  const left = h("button", { class: "brkleft mono", type: "button", hidden: true, "aria-label": "Перерыв: сколько осталось" });
+  left.addEventListener("click", openBreak);
+  tip(left, "Перерыв: сколько осталось · щёлкните — +5 мин, пауза, убрать");
+  // место под стрелки и отсчёт оставлено заранее: они выезжают, а значки и кнопки рядом не сдвигаются
+  const info = h("span", { id: "scrInfo", class: "scrinfo" }, nav, left);
+  const icons = h("div", { class: "scricons", role: "group", "aria-label": "Что показать ученикам" }, bg, ex, brk, sl, info);
   box.append(thumb, open, icons);
   const bar = buildTypingBar();
   V.content.closest(".lbody").after(bar);
-  W = { thumb, scr, dot, open, bg, ex, brk, sl, nav, bar };
+  W = { thumb, scr, dot, open, bg, ex, brk, sl, nav, left, bar };
   lastStage = null;
   pulseKind = "";
   updateStrip();
@@ -171,7 +190,8 @@ function updateStrip() {
     W.scr.dataset.k = want;
     clear(W.scr);
     // фон учеников: картинка, цвет или анимация (её — градиентом); слайд — сам слайд
-    const img = mode === "slide" ? (sb && sb.url) || "" : bgd.kind === "image" ? bgd.url || "" : "";
+    const raw = mode === "slide" ? (sb && sb.url) || "" : bgd.kind === "image" ? bgd.url || "" : "";
+    const img = raw ? lightUrl(raw, 160) : "";      // миниатюра 58×36 — копия, а не слайд 1920 px
     W.scr.style.backgroundImage = img ? `url("${img}")` : bgd.kind === "anim" ? "linear-gradient(135deg, #22335c, #4a2459)" : "";
     W.scr.style.backgroundColor = bgd.kind === "color" ? bgd.value : "";
     if (mode === "break") W.scr.append(icon("cup", "sm"));
@@ -209,8 +229,9 @@ function tickStrip(info) {
   W.brk.classList.toggle("pulse", pulseKind === "break" && mode !== "break");
   W.ex.classList.toggle("pulse", pulseKind === "exercise" && mode !== "exercise");
   const left = breakLeft();
-  set(W.brk.querySelector(".badge"), left === null ? "" : mmss(left));
-  W.brk.classList.toggle("timed", left !== null);
+  W.left.hidden = left === null;
+  if (left !== null) set(W.left, mmss(left));
+  W.left.classList.toggle("paused", !!ef().break_paused);
 }
 
 // ---------------------------------------------------------------- набор кода
@@ -327,3 +348,4 @@ function updateTyping() {
 hooks.mount.push(mount);
 hooks.strip.push(updateStrip);
 hooks.tick.push(tickStrip);
+hooks.exercise.push(stageExercise);

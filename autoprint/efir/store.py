@@ -33,9 +33,12 @@ def media_dir() -> Path:
 
 @dataclass
 class Live:
-    """Идущий эфир: какой шаблон и когда старт (с учётом «этап заново с этой минуты»)."""
+    """Идущий эфир: какой шаблон и когда старт (с учётом «этап заново с этой минуты»). plan — плановое начало
+    урока: от него «конец 19:30 · +5 мин» и «Вернуть время» после «Следующий этап — сейчас» (1.1: в файле — переживёт
+    перезапуск программы)."""
     webinar_id: str
     anchor: datetime
+    plan: datetime | None = None
 
 
 def _read_json(path: Path):
@@ -95,7 +98,8 @@ class WebinarStore:
         live = raw.get("live")
         if isinstance(live, dict) and self.get(str(live.get("id", ""))):
             try:
-                self.live = Live(str(live["id"]), datetime.fromisoformat(str(live["anchor"])))
+                plan = datetime.fromisoformat(str(live["plan"])) if live.get("plan") else None
+                self.live = Live(str(live["id"]), datetime.fromisoformat(str(live["anchor"])), plan)
             except (KeyError, ValueError):
                 self.live = None
         brk = raw.get("brk")
@@ -132,7 +136,8 @@ class WebinarStore:
     def save(self) -> None:
         data = {"version": 2, "imported_legacy": self.imported_legacy,
                 "schedules": [schedule_dict(w) for w in self.webinars],
-                "live": ({"id": self.live.webinar_id, "anchor": self.live.anchor.isoformat(timespec="seconds")}
+                "live": ({"id": self.live.webinar_id, "anchor": self.live.anchor.isoformat(timespec="seconds"),
+                          **({"plan": self.live.plan.isoformat(timespec="seconds")} if self.live.plan else {})}
                          if self.live else None),
                 "brk": self.brk if self.live and self.brk else None,
                 "slide": self.slide if self.live and self.slide else None}
@@ -244,10 +249,18 @@ class WebinarStore:
 
     # ------------------------------------------------------------ эфир
     def set_live(self, wid: str | None, anchor: datetime | None = None) -> None:
-        self.live = Live(wid, anchor or datetime.now()) if wid else None
+        """Эфир wid с началом anchor. Тот же эфир (сдвинули время) — плановое начало сохраняется."""
+        plan = self.live.plan if self.live and wid and self.live.webinar_id == wid else None
+        self.live = Live(wid, anchor or datetime.now(), plan) if wid else None
         if not self.live:
             self.brk = self.slide = None
         self.save()
+
+    def set_plan(self, plan: datetime | None) -> None:
+        """Плановое начало идущего эфира (урок начали; учитель поменял время начала)."""
+        if self.live is not None:
+            self.live.plan = plan
+            self.save()
 
     def set_break(self, brk: dict | None) -> None:
         self.brk = brk

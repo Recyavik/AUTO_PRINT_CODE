@@ -489,7 +489,10 @@ class PromptTest(unittest.TestCase):
         self.assertIn("ровно 68", s)                                  # минуты — из плана (65 + 3)
         self.assertNotIn("отдельным этапом в середине", s)
         self.assertIn("Класс / возраст учеников: 5 класс", s)
-        self.assertIn("«Глаза», «Шея»", s)
+        # 1.1: этап-зарядка — только пометка «зарядка», видео выбирают на уроке (свой выбор из плана — остаётся)
+        self.assertIn("«## Зарядка · 3 мин · зарядка»", s)
+        self.assertIn("видео учитель выберет на уроке", s)
+        self.assertNotIn("«Глаза», «Шея»", s)
         self.assertIn("![что должно быть на картинке](фото)", s)
         self.assertIn("приложен к сообщению", s)
         self.assertNotIn("Добавь зарядку", s)                         # с планом зарядку решает план
@@ -671,7 +674,7 @@ class ImportLessonTest(unittest.TestCase):
                                  exercises=["Глаза"])
         self.assertIn("## Теория · 20 мин", txt)
         self.assertIn("5 класс", txt)
-        self.assertIn("«Глаза»", txt)
+        self.assertIn("· зарядка» — видео учитель выберет на уроке", txt)     # 1.1: без названий видео
 
     def test_answer_preview_and_add_links_plan(self):
         from autoprint import wizard

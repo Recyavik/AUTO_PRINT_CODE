@@ -24,7 +24,8 @@ from .theme import theme
 log = logging.getLogger(__name__)
 
 # «Мои настройки» экрана урока: поле Settings → допустимые значения
-PREFS = {"page_zoom": "zoom", "page_plan": ("side", "top", "hidden"), "page_past": ("dim", "collapse"),
+PREFS = {"page_zoom": "zoom", "page_plan": ("side", "top", "hidden"),
+         "page_width": ("narrow", "normal", "wide", "full"), "exercise_pick": ("ask", "random"), "page_past": ("dim", "collapse"),
          "page_stage_timer": "bool", "start_compact": "bool", "start_screen": "bool"}
 ANSWER_FETCH_LIMIT = 90     # «Вставить ответ нейросети»: фото качаются не дольше, потом урок добавляется со ссылками
 
@@ -48,7 +49,6 @@ class LessonController(QObject):
         from .. import web_images
         self.fetch = web_images.fetch_images     # картинки по ссылкам из ответа нейросети (тесты подменяют)
         self.edits = 0           # сколько правок со страницы применено — страница знает, какие уже в состоянии
-        self._plan = None          # (урок, плановое начало) идущего урока — для «конец 19:30 · +5 мин»
         self._last_slide = ""      # последний слайд ученикам: после фона / перерыва кликер продолжает с него
         self._notice = {"seq": 0, "text": "", "warn": False}   # сообщение программы — тостом на экране урока
         self._timeline: dict[str, tuple[int, int]] = {}   # этапы идущего урока: id → (с минуты, по минуту)
@@ -99,6 +99,7 @@ class LessonController(QObject):
         other_live = other.title if other is not None and (t is None or self.efir.live_lesson_id() != t.id) else ""
         state = scenario.lesson_state(
             t, live_anchor_ms=anchor, live_shift=self._shift_min(t) if anchor else 0,
+            live_plan_ms=int(self._plan_of(t).timestamp() * 1000) if anchor and self._plan_of(t) else 0,
             efir_extra={"break_ends": int(self.efir.brk_ends * 1000) if self.efir.mode == "break" else 0,
                         "tab_open": bool(self.efir.server.running and self.efir.clients > 0),
                         "slide_n": (self.efir.slide or {}).get("n", 0) if self.efir.mode == "slide" else 0,
@@ -313,19 +314,23 @@ class LessonController(QObject):
         look.id, look.title = new_id(), "Новое оформление"
         self.efir.save_look(look)
         self._set_preset(t, look.id)
-        self.main.show_view(f"#/efir/looks/{look.id}")          # правка оформления — в разделе «Эфир» окна
+        self.main.show_view(f"#/efir/looks/{look.id}?from={t.id}")   # правка — в «Эфире»; from — назад к уроку
 
     def _remember_plan(self, t: Template) -> None:
         """Плановое начало идущего урока: от него — «конец 19:30» и сдвиг «+5 мин» после «Начать этот этап сейчас»."""
         live = self.efir.store.live
-        self._plan = (t.id, live.anchor) if live is not None else None
+        if live is not None and self.efir.live_lesson_id() == t.id:
+            self.efir.store.set_plan(live.anchor)
+
+    def _plan_of(self, t: Template | None) -> datetime | None:
+        live = self.efir.store.live
+        if t is None or live is None or live.plan is None or self.efir.live_lesson_id() != t.id:
+            return None
+        return live.plan
 
     def _shift_min(self, t: Template) -> int:
-        live = self.efir.store.live
-        plan = self._plan
-        if live is None or plan is None or plan[0] != t.id:
-            return 0
-        return round((live.anchor - plan[1]).total_seconds() / 60)
+        plan = self._plan_of(t)
+        return round((self.efir.store.live.anchor - plan).total_seconds() / 60) if plan is not None else 0
 
     def _set_pref(self, key: str, value) -> None:
         """«Мои настройки» со страницы: только поля из PREFS и только допустимые значения."""
@@ -548,7 +553,7 @@ class LessonController(QObject):
                 if look is None:
                     self._look_new(t)
                 else:
-                    self.main.show_view(f"#/efir/looks/{look.id}")
+                    self.main.show_view(f"#/efir/looks/{look.id}?from={t.id}")   # из урока — «вернуться к уроку»
             elif cmd == "prefs":
                 self._set_pref(str(d.get("key") or ""), d.get("value"))
             elif cmd == "settings":
@@ -557,7 +562,8 @@ class LessonController(QObject):
                 self.main.recognize_lesson(t)
             elif cmd == "exercise" and t is not None:
                 self._ensure_screen(t)
-                self.efir.start_exercise(self._exercise_index(t, str(d.get("stage") or ""), d.get("index")))
+                self.efir.start_exercise(self._exercise_index(t, str(d.get("stage") or ""), d.get("index"),
+                                                              str(d.get("pick") or "")))
             elif cmd == "background":
                 self.efir.show_background()
             elif cmd == "preset" and t is not None:
@@ -607,8 +613,10 @@ class LessonController(QObject):
         stages = scenario.stages(t)[1]
         if not 0 <= index < len(stages):
             return
-        if self.efir.live_lesson_id() != t.id and not self._launch(t):
-            return
+        if self.efir.live_lesson_id() != t.id:
+            if not self._launch(t):
+                return
+            self._remember_plan(t)               # начали сразу с этапа — план от начала урока
         anchor = datetime.now().replace(microsecond=0) - timedelta(minutes=stages[index].start_min)
         self.efir.store.set_live(self.efir.store.live.webinar_id, anchor)
         self.efir.live_changed.emit()
@@ -671,16 +679,27 @@ class LessonController(QObject):
         w = self.efir.webinar or self.efir.live_webinar()
         self.efir.start_break(int(minutes or 0) or (w.break_min if w else 10))
 
-    def _exercise_index(self, t: Template, stage_id: str, index) -> int:
-        """Какое видео зарядки включить: этапа — по названию видео (не нашлось — первое), иначе — index."""
-        st = t.find_block(stage_id) if stage_id else None
-        if st is None:
-            return int(index or 0)
+    def _exercise_index(self, t: Template, stage_id: str, index, pick: str = "") -> int:
+        """Какое видео зарядки включить: своё видео этапа (по названию); иначе выбранное в меню (index); иначе —
+        «Случайная зарядка» (pick или настройка): любое видео с файлом, но не то же, что в прошлый раз; иначе первое."""
         from ..lesson_md import video_key
         w = self.efir.webinar or self.efir.live_webinar()
-        titles = [video_key(e.title) for e in (w.exercises if w is not None else [])]
-        want = video_key(st.exercise)
-        return titles.index(want) if want and want in titles else 0
+        exs = w.exercises if w is not None else []
+        st = t.find_block(stage_id) if stage_id else None
+        if st is not None:
+            titles = [video_key(e.title) for e in exs]
+            want = video_key(st.exercise)
+            if want and want in titles:
+                return titles.index(want)
+        if index is not None and str(index).strip() != "":
+            return int(index)
+        if (pick or self.main.settings.exercise_pick) == "random" and exs:
+            import random
+            ok = [i for i, e in enumerate(exs) if Path(e.path).is_file()] or list(range(len(exs)))
+            if len(ok) > 1 and self.efir.ex_index in ok:
+                ok.remove(self.efir.ex_index)          # прошлое видео — не подряд
+            return random.choice(ok)
+        return 0
 
     def _ensure_screen(self, t: Template) -> None:
         """Перерыв или зарядка до «Начать урок»: оформление экрана — из пресета урока."""

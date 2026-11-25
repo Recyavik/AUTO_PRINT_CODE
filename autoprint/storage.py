@@ -232,6 +232,8 @@ class Settings:
     page_plan: str = "side"            # план в «Уроке»: side — сбоку, top — строкой сверху, hidden — скрыт
     page_past: str = "dim"             # пройденные этапы: dim — приглушать, collapse — сворачивать
     page_stage_timer: bool = True      # «осталось» на текущем этапе
+    page_width: str = "normal"         # ширина текста урока: narrow · normal · wide · full (во всё окно)
+    exercise_pick: str = "ask"         # этап-зарядка без своего видео: ask — меню видео, random — случайное
     start_timer: bool = False          # до 1.0: «Начать урок» открывал мини-таймер (migrations v1 → start_compact)
     start_compact: bool = False        # 1.0: «Начать урок» — окно в маленький режим поверх всех
     start_screen: bool = False         # «Начать урок» открывает экран учеников (вкладку)

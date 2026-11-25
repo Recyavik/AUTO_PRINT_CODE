@@ -5,10 +5,10 @@ body.compact #titlebar, body.compact #rail, body.compact #view, body.compact #to
 body.compact #compact { display: flex; position: fixed; inset: 0; z-index: 40; flex-direction: column; gap: 12px;
   padding: 10px 14px 14px; background: var(--ground); overflow: hidden auto; user-select: none; }
 
-#compact .ctop { position: absolute; top: 6px; right: 6px; z-index: 2; }
+#compact .ctop { position: absolute; top: 6px; right: 6px; z-index: 2; display: flex; gap: 2px; }
 #compact .ctop .btn { color: var(--dim); }
 #compact .cnow { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
-#compact .cb-label { font-size: 13px; font-weight: 600; color: var(--dim); letter-spacing: .02em; padding-right: 36px; }
+#compact .cb-label { font-size: 13px; font-weight: 600; color: var(--dim); letter-spacing: .02em; padding-right: 72px; }
 #compact[data-kind="live"] .cb-label { color: var(--accent); }
 #compact .cb-tline { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 8px; min-width: 0; }
 #compact .cb-time { font-size: clamp(30px, 15vw, 52px); line-height: 1; font-weight: 650; letter-spacing: -.02em; }
@@ -70,11 +70,16 @@ body[data-size="tiny"] #compact .cb-time { font-size: 28px; }
 body[data-size="tiny"] #compact .cb-name { font-size: 15px; -webkit-line-clamp: 1; }
 
 /* strip — «сейчас» слева, повестка ячейками */
-body[data-size="strip"] #compact { flex-direction: row; align-items: center; gap: 16px; padding: 8px 44px 8px 14px; }
+body[data-size="strip"] #compact { flex-direction: row; align-items: center; gap: 16px; padding: 8px 80px 8px 14px; }
 body[data-size="strip"] #compact .cnow { flex: 0 0 260px; }
 body[data-size="strip"] #compact .cb-time { font-size: 36px; }
-body[data-size="strip"] #compact .cb-next, body[data-size="strip"] #compact .cscr, body[data-size="strip"] #compact .cnext,
+body[data-size="strip"] #compact .cb-next, body[data-size="strip"] #compact .cnext,
 body[data-size="strip"] #compact .cb-clock { display: none; }
+/* полоса: экран учеников — четыре значка без подписей (подсказки — при наведении), справа от этапов */
+body[data-size="strip"] #compact .cscr { order: 3; flex: none; display: flex; gap: 4px; }
+body[data-size="strip"] #compact .cscr[hidden] { display: none; }
+body[data-size="strip"] #compact .cs { width: 38px; height: 38px; padding: 0; justify-content: center; }
+body[data-size="strip"] #compact .cs span { display: none; }
 body[data-size="strip"] #compact .cagenda { display: flex; flex: 1; gap: 8px; align-items: stretch; overflow: hidden; }
 
 /* side — «сейчас» слева, список этапов справа */
@@ -87,3 +92,8 @@ body[data-size="side"] #compact .ctype { grid-column: 1; }
 /* в маленьком режиме заголовка нет — лист на всё окно */
 body.compact .scrim { inset: 0; }
 body.compact .sheet { max-height: calc(var(--vh) * 100 - 48px); }
+/* меню «Вид»: окно узкое — подпись под названием, а не рядом */
+.pop.stackmenu { max-width: calc(100vw - 16px); }
+.pop.stackmenu .mi { flex-direction: column; align-items: flex-start; gap: 1px; padding: 7px 10px; }
+.pop.stackmenu .mi .ml { flex: none; font-weight: 600; }
+.pop.stackmenu .mi .mh { white-space: normal; text-align: left; }

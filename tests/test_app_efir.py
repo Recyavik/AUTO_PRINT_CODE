@@ -345,7 +345,8 @@ class LooksTest(EfirPage):
         self.app.printer.set_focus("U")
         self.store.get("U").look = self.look.id
         self.app.lesson.command({"cmd": "look_edit"})
-        self.assertTrue(self.wait_js(f"location.hash === '#/efir/looks/{self.look.id}'"))
+        self.assertTrue(self.wait_js(f"location.hash === '#/efir/looks/{self.look.id}?from=U'"))   # 1.1: назад к уроку
+        self.assertTrue(self.wait_js("!!document.querySelector('#lkBack')"))
 
 
 class LiveTest(EfirPage):

@@ -32,6 +32,19 @@ function groupsOf(items) {
 
 export function totalMinutes(items) { return stagesOf(items).reduce((a, s) => a + s.minutes, 0); }
 
+// картинка в тексте урока — копией под ширину колонки (сервер: /media/…?w=): слайды 1920–3840 px браузер
+// распаковывал целиком прямо при прокрутке. Ширина — с запасом на Hi-DPI и масштаб окна, из готового ряда размеров
+const LIGHT_SIZES = [320, 640, 960, 1280, 1600, 1920];
+export function lightUrl(url, cssWidth) {
+  if (!url || !/^\/media\/[0-9a-f]{16}\/[^?]+\.(png|jpe?g|webp|bmp)$/i.test(url)) return url;
+  const zoom = parseFloat(getComputedStyle(document.documentElement).zoom) || 1;
+  // ширина картинки в уроке: не шире колонки и не выше 520 px (16:9 — около 925 px)
+  const css = cssWidth || Math.min(960, window.innerWidth || 960);
+  const need = css * zoom * (window.devicePixelRatio || 1);
+  const w = LIGHT_SIZES.find((s) => s >= need) || LIGHT_SIZES[LIGHT_SIZES.length - 1];
+  return url + "?w=" + w;
+}
+
 // ---------------------------------------------------------------- блоки
 function label(it, kind) {
   const lbl = el("div", "lbl");
@@ -196,9 +209,11 @@ function buildBlock(it) {
     } else {
       const f = el("figure");
       const img = el("img");
-      img.src = it.url;
+      img.src = lightUrl(it.url);
+      img.dataset.full = it.url;                  // просмотр картинки — оригинал
       img.alt = it.title || "Картинка";
       img.loading = "lazy";
+      img.decoding = "async";
       f.appendChild(img);
       c.appendChild(f);
     }
@@ -383,10 +398,17 @@ export function exerciseList() {
   return Array.isArray(x) ? x : (x ? [""] : []);
 }
 
+/** Видео этапа-зарядки: своё (по названию) или единственное; "" — выбирают на уроке (меню или случайное). */
+export function stageVideo(it) {
+  const ex = exerciseList();
+  return ex.find((t) => t && it.exercise && videoKey(t) === videoKey(it.exercise)) || (ex.length === 1 ? ex[0] : "");
+}
+
 function efirRow(it) {
   const ex = exerciseList();
-  const video = ex.length ? (ex.find((t) => t && videoKey(t) === videoKey(it.exercise)) || ex[0]) : "";
-  const k = "efir:" + it.id + ":" + it.kind + ":" + ex.join("|") + ":" + (it.exercise || "") + ":" + it.minutes + ":" + ((A.S && A.S.efir && A.S.efir.tab) || "") + ":" + (A.S && A.S.efir && A.S.efir.tab_open ? 1 : 0) + ":" + ((A.S && A.S.exercises_missing) || []).join("|");
+  const video = stageVideo(it);
+  const pick = (A.S && A.S.prefs && A.S.prefs.exercise_pick) || "ask";
+  const k = "efir:" + it.id + ":" + it.kind + ":" + ex.join("|") + ":" + (it.exercise || "") + ":" + it.minutes + ":" + ((A.S && A.S.efir && A.S.efir.tab) || "") + ":" + (A.S && A.S.efir && A.S.efir.tab_open ? 1 : 0) + ":" + ((A.S && A.S.exercises_missing) || []).join("|") + ":" + pick;
   let n = nodes.get("efir:" + it.id);
   if (n && n.dataset.k === k) return n;
   const fresh = el("div", "blk efir");
@@ -403,7 +425,8 @@ function efirRow(it) {
     b.dataset.stage = it.id;
     c.appendChild(b);
   } else if (ex.length) {
-    const b = el("button", "efirbtn", "Включить зарядку ученикам" + (video ? " · " + video : ""));
+    const b = el("button", "efirbtn", video ? "Включить зарядку ученикам · " + video
+      : pick === "random" ? "Включить случайную зарядку" : "Выбрать зарядку ученикам…");
     b.dataset.act = "exercise";
     b.dataset.stage = it.id;
     c.appendChild(b);

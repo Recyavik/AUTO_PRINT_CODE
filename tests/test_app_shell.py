@@ -111,6 +111,48 @@ class WindowTest(unittest.TestCase):
         self.assertFalse(w.compact)
         self.assertEqual(w.size(), big)
 
+    def test_compact_layout_size(self):
+        """Вид маленького режима: размер в пикселях страницы × масштаб; правый верхний угол — на месте; в экран."""
+        w = self.w
+        w.window_cmd("compact", True)
+        pump()
+        try:
+            w.setGeometry(300, 50, 360, 500)          # offscreen: экран 800×600
+            right, top = w.geometry().right(), w.geometry().top()
+            w.window_cmd("compact_size", {"w": 640, "h": 440})
+            self.assertEqual((w.width(), w.height()), (640, 440))
+            self.assertEqual((w.geometry().right(), w.geometry().top()), (right, top))
+            self.fake.settings.page_zoom = 150
+            w.window_cmd("compact_size", {"w": 300, "h": 110})
+            self.assertEqual((w.width(), w.height()), (450, 165))
+            w.window_cmd("compact_size", {"w": 99999, "h": "x"})            # чужое — мимо
+            self.assertEqual((w.width(), w.height()), (450, 165))
+            avail = w.screen().availableGeometry()
+            w.window_cmd("compact_size", {"w": 4000, "h": 120})              # шире экрана — по ширине экрана
+            self.assertTrue(avail.contains(w.geometry()), (avail, w.geometry()))
+        finally:
+            self.fake.settings.page_zoom = 100
+            w.window_cmd("compact", False)
+            pump()
+
+    def test_frame_press_goes_to_log(self):
+        """Нажатие на заголовок / край и начало-конец перетаскивания — строкой в журнал (для разбора жалоб)."""
+        import ctypes
+        from ctypes import wintypes
+        from shiboken6 import VoidPtr
+        from autoprint.ui import frameless
+        msg = wintypes.MSG()
+        msg.hWnd, msg.message, msg.wParam = 0, frameless.WM_NCLBUTTONDOWN, 2
+        with self.assertLogs("autoprint.ui.frameless", "INFO") as cm:
+            self.w.nativeEvent(b"windows_generic_MSG", VoidPtr(ctypes.addressof(msg)))
+            msg.message, msg.wParam = frameless.WM_NCLBUTTONDOWN, 11
+            self.w.nativeEvent(b"windows_generic_MSG", VoidPtr(ctypes.addressof(msg)))
+            msg.message = frameless.WM_ENTERSIZEMOVE
+            self.w.nativeEvent(b"windows_generic_MSG", VoidPtr(ctypes.addressof(msg)))
+        text = "\n".join(cm.output)
+        for part in ("нажатие — заголовок", "нажатие — правый край", "начали тянуть"):
+            self.assertIn(part, text)
+
     def test_hit_test_uses_regions(self):
         w = self.w
         w.set_regions({"drag": [[0, 0, 300, 44]], "holes": [[250, 4, 40, 36]], "zoom": 1})

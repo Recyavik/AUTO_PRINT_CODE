@@ -355,6 +355,8 @@ class AppWindow(FramelessWindow):
             self.apply_pin()
         elif op == "compact":
             self.set_compact(not self.compact if arg is None else bool(arg))
+        elif op == "compact_size":
+            self.compact_size(arg)
         elif op == "move":
             h = self.windowHandle()
             if h is not None and QGuiApplication.mouseButtons() & Qt.MouseButton.LeftButton:
@@ -414,6 +416,27 @@ class AppWindow(FramelessWindow):
         x = avail.right() - size.width() - 16
         y = avail.top() + max(0, (avail.height() - size.height()) // 2)
         return QRect(max(avail.left(), x), y, size.width(), size.height())
+
+    def compact_size(self, arg) -> None:
+        """Вид маленького режима из меню страницы: {w, h} в пикселях страницы (× масштаб окна). Правый верхний угол
+        остаётся на месте (окно обычно у правого края), окно — в пределах экрана."""
+        if not self.compact or not isinstance(arg, dict):
+            return
+        try:
+            cw, ch = int(arg.get("w")), int(arg.get("h"))
+        except (TypeError, ValueError):
+            return
+        if not (100 <= cw <= 4000 and 50 <= ch <= 3000):
+            return
+        k = max(80, min(200, int(self.app.settings.page_zoom or 100))) / 100
+        g = self.geometry()
+        scr = self.screen() or QGuiApplication.primaryScreen()
+        av = scr.availableGeometry() if scr is not None else QRect(0, 0, 1280, 800)
+        w = max(COMPACT_MIN.width(), min(round(cw * k), av.width()))
+        h = max(COMPACT_MIN.height(), min(round(ch * k), av.height()))
+        x = max(av.left(), min(g.right() + 1 - w, av.right() + 1 - w))
+        y = max(av.top(), min(g.top(), av.bottom() + 1 - h))
+        self.setGeometry(x, y, w, h)
 
     def set_compact(self, on: bool) -> None:
         if on == self.compact:

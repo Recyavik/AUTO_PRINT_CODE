@@ -325,11 +325,20 @@ function bgOptions(cur, onPick, o = {}) {
   return box;
 }
 
+// оформление открыли из урока (#/efir/looks/<id>?from=<урок>) — «Сохранить и вернуться к уроку», «К уроку»
+function fromLesson() {
+  const id = E && E.from;
+  return id ? (S.lessons || []).find((x) => x.id === id) || null : null;
+}
+function lookHash(id) { return "#/efir/looks/" + id + (E && E.from ? "?from=" + encodeURIComponent(E.from) : ""); }
+
 function lookEditor(box, lk, reshow) {
   const isNew = !lk;
+  const back = fromLesson();
   const L0 = lk || { id: "", title: "Новое оформление", background: { value: "color:#000000" }, caption: "", exercises: [], break_countdown: true,
     break_background: { value: "" }, break_title: "ПЕРЕРЫВ", break_show_title: true, break_done: "ПРОДОЛЖАЕМ", font: "Montserrat", text_color: "#FFFFFF", users: [], outside: 0 };
-  crumbs(L0.title);
+  if (back) setCrumbs([{ label: "Уроки", href: "#/lessons" }, { label: back.title, href: "#/lesson/" + back.id }, { label: "Оформление «" + L0.title + "»" }]);
+  else crumbs(L0.title);
   const d = { id: L0.id, title: L0.title, background: L0.background.value, caption: L0.caption,
     exercises: L0.exercises.map((e) => ({ ...e })), break_countdown: L0.break_countdown, break_background: L0.break_background.value,
     break_title: L0.break_title, break_show_title: L0.break_show_title, break_done: L0.break_done, font: L0.font, text_color: L0.text_color };
@@ -422,16 +431,21 @@ function lookEditor(box, lk, reshow) {
   if (del.disabled && !isNew) del.title = "Оформление используется — сначала смените его там";
   const cancel = btn("Отмена", { kind: "ghost", onClick: () => { E.dirty = false; if (isNew) go("#/efir/looks"); else reshow(); } });
   cancel.id = "lkcancel";
-  const save = btn("Сохранить", { kind: "primary", onClick: async () => {
+  const save = btn(back ? "Сохранить и вернуться к уроку" : "Сохранить", { kind: "primary", onClick: async () => {
     try {
       const r = await call({ cmd: "efir_put_look", look: { ...d, exercises: d.exercises.map((e) => ({ title: e.title || "Зарядка", path: e.path })) } });
       setDirty(false);
-      if (isNew) go("#/efir/looks/" + r.id);
+      if (back) { toast("Оформление сохранено"); go("#/lesson/" + back.id); }
+      else if (isNew) go(lookHash(r.id));
     } catch (e) { fail(e); }
   } });
   save.id = "lksave";
+  // назад к уроку: есть несохранённые правки — «Уйти без сохранения?» (canLeave экрана)
+  const toLesson = back ? btn("К уроку", { icon: "chevron-left", kind: "ghost", size: "sm", tip: "Вернуться к уроку «" + back.title + "»",
+    onClick: () => go("#/lesson/" + back.id) }) : null;
+  if (toLesson) toLesson.id = "lkBack";
   box.append(h("div", { id: "lookedit", class: "wdetail lookedit" },
-    h("div", { class: "wdh" }, h("h2", null, isNew ? "Новое оформление" : "Оформление"), dirtyMark),
+    h("div", { class: "wdh" }, toLesson, h("h2", null, isNew ? "Новое оформление" : "Оформление"), dirtyMark),
     field("Название", title), users, outside,
     h("h3", { class: "efh3" }, "Фон (он же занавес)"), bg, h("div", { class: "wrow2" }, gallery), field("Надпись на фоне", caption),
     h("h3", { class: "efh3" }, "Зарядки"), exBox, h("div", { class: "wrow2" }, addVideo),
@@ -457,7 +471,7 @@ function lookList(selId) {
       h("div", { class: "wih" }, sw, h("b", null, lk.title), miss ? h("span", { class: "badmark", title: "Нет файла" }, icon("alert", "sm")) : null),
       h("span", { class: "meta" }, lk.exercises.length + " " + plural(lk.exercises.length, "зарядка", "зарядки", "зарядок") + " · перерыв «" + (lk.break_show_title ? lk.break_title : "без надписи") + "»"
         + (lk.users.length ? " · " + lk.users.length + " " + plural(lk.users.length, "использование", "использования", "использований") : "")));
-    it.addEventListener("click", () => go("#/efir/looks/" + lk.id));
+    it.addEventListener("click", () => go(lookHash(lk.id)));
     box.append(it);
   }
   if (!looks().length) box.append(h("p", { class: "dim empty" }, "Оформлений пока нет — «Новое оформление»."));
@@ -573,6 +587,7 @@ export function efirView(root, r) {
   function show(r2) {
     lastR = r2;
     E.hash = location.hash;
+    E.from = (r2.parts[1] === "looks" && r2.query && r2.query.from) || "";
     if (sub && sub.destroy) sub.destroy();
     sub = null;
     clear(left); clear(right); clear(liveBox);

@@ -23,10 +23,11 @@ FIELDS: dict[str, tuple] = {
     "theme": ("choice", ("system", "dark", "light")),
     "page_zoom": ("int", 80, 200),
     "page_plan": ("choice", ("side", "top", "hidden")),
+    "page_width": ("choice", ("narrow", "normal", "wide", "full")),
     "page_past": ("choice", ("dim", "collapse")),
     "page_stage_timer": B,
     # урок
-    "start_screen": B, "start_compact": B, "copy_media": B,
+    "start_screen": B, "start_compact": B, "copy_media": B, "exercise_pick": ("choice", ("ask", "random")),
     # набор кода
     "print_mode": ("choice", ("block", "lines", "steps")),
     "step_nav": ("choice", ("arrows", "home")),

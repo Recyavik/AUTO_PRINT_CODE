@@ -11,7 +11,7 @@ let crumbsEl, extraEl, railEl, viewEl;
 export function mountShell(root) {
   crumbsEl = h("nav", { class: "crumbs", id: "crumbs", "aria-label": "Где вы" });
   extraEl = h("div", { class: "tb-extra", id: "tbExtra" });
-  const zoomBtn = iconBtn("zoom", "Размер и план", () => zoomPanel(zoomBtn), { kind: "ghost", cls: "tbb" });
+  const zoomBtn = iconBtn("zoom", "Размер, ширина текста и план", () => zoomPanel(zoomBtn), { kind: "ghost", cls: "tbb" });
   zoomBtn.id = "zoomBtn";
   const pin = iconBtn("pin", "Поверх всех окон", () => send({ cmd: "window", op: "pin" }), { kind: "ghost", cls: "tbb" });
   pin.id = "pinBtn";
@@ -79,6 +79,7 @@ function update() {
   u.hidden = !S.update;
   if (S.update) u.querySelector(".bl") ? (u.querySelector(".bl").textContent = S.update.text) : u.append(h("span", { class: "bl" }, S.update.text));
   const w = S.window || {};
+  applyWidth();
   $("#pinBtn").setAttribute("aria-pressed", String(!!w.pinned));
   const max = $("#maxBtn");
   const want = w.maximized ? "restore" : "max";
@@ -91,7 +92,13 @@ function update() {
   document.body.classList.toggle("compact", !!w.compact);
 }
 
-// ---------------------------------------------------------------- «Аа»: масштаб и где план урока
+// ---------------------------------------------------------------- «Аа»: масштаб, ширина текста и где план урока
+const WIDTHS = ["narrow", "normal", "wide", "full"];
+function applyWidth() {
+  const w = (S.prefs || {}).page_width;
+  document.body.dataset.lw = WIDTHS.includes(w) ? w : "normal";
+}
+
 function zoomPanel(anchor) {
   const val = h("b", { class: "zval mono" }, (S.zoom || 100) + " %");
   const upd = () => { val.textContent = (S.zoom || 100) + " %"; };
@@ -101,12 +108,25 @@ function zoomPanel(anchor) {
       iconBtn("minus", "Мельче (Ctrl −)", () => { zoomBy(-10); upd(); }, { size: "sm" }), val,
       iconBtn("plus", "Крупнее (Ctrl +)", () => { zoomBy(10); upd(); }, { size: "sm" }),
       btn("Обычный", { kind: "ghost", size: "sm", onClick: () => { zoomBy(0); upd(); } })),
+    h("div", { class: "phead" }, "Ширина текста урока"),
+    widthSeg(),
     h("div", { class: "phead" }, "План урока"),
     seg([{ value: "side", icon: "side", label: "Сбоку" }, { value: "top", icon: "top", label: "Сверху" },
       { value: "hidden", icon: "hidden", label: "Скрыть" }], (S.prefs || {}).page_plan || "side",
     (v) => send({ cmd: "prefs", key: "page_plan", value: v }), { cls: "planpos" }),
     h("p", { class: "meta" }, "Ещё: Ctrl + колесо мыши, Ctrl+= и Ctrl+− (Ctrl+0 — обычный)."));
   popover(anchor, box, { align: "right", focus: false });
+}
+
+function widthSeg() {
+  const s = seg([{ value: "narrow", label: "Узко" }, { value: "normal", label: "Обычно" }, { value: "wide", label: "Широко" },
+    { value: "full", label: "Во всё окно" }], document.body.dataset.lw || "normal", (v) => {
+    S.prefs = Object.assign({}, S.prefs, { page_width: v });
+    applyWidth();                                   // сразу, не дожидаясь ответа программы
+    send({ cmd: "prefs", key: "page_width", value: v });
+  }, { size: "sm", label: "Ширина текста урока" });
+  s.id = "lessonWidth";
+  return s;
 }
 
 // ---------------------------------------------------------------- области окна (где тянуть)

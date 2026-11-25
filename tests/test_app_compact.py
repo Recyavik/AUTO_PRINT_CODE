@@ -56,6 +56,33 @@ class CompactTest(AppPage):
             self.size(w, h)
             self.assertTrue(self.wait_js(f"document.body.dataset.size === {want!r}"), (w, h, want, self.js("document.body.dataset.size")))
 
+    def test_layout_menu_resizes_window(self):
+        """Вид маленького режима — выбором, а не только растягиванием: табло, со списком, полоса, только время."""
+        self.size(360, 600)
+        self.assertTrue(self.wait_js("document.body.dataset.size === 'tall'"))
+        self.click("#compactLayout")
+        self.assertTrue(self.wait_js("!!document.querySelector('.pop')"))
+        items = self.js("[...document.querySelectorAll('.pop .mi .ml')].map(e => e.textContent)")
+        self.assertEqual(items, ["Табло", "Табло и этапы", "Полоса", "Только время"])
+        self.assertTrue(self.js("[...document.querySelectorAll('.pop .mi')][0].getAttribute('aria-checked') === 'true'"))
+        self.js("[...document.querySelectorAll('.pop .mi')].find(b => b.textContent.includes('Полоса')).click()")
+        want = (min(980, self.app.window.screen().availableGeometry().width()), 160)    # offscreen: экран 800 px
+        self.assertTrue(self.wait_py(lambda: (self.app.window.width(), self.app.window.height()) == want),
+                        (self.app.window.width(), self.app.window.height()))
+
+    def test_strip_has_screen_icons(self):
+        """Полоса урока — со значками экрана учеников (без подписей, с подсказками), как в большом окне."""
+        self.size(980, 160)
+        self.assertTrue(self.wait_js("document.body.dataset.size === 'strip'"))
+        vis = self.js("(() => { const g = document.querySelector('#compact .cscr'); const r = g.getBoundingClientRect();"
+                      " return [getComputedStyle(g).display !== 'none', r.bottom <= innerHeight + 1,"
+                      " [...g.querySelectorAll('button')].map(b => getComputedStyle(b.querySelector('span')).display),"
+                      " [...g.querySelectorAll('button')].map(b => b.dataset.tip)]; })()")
+        self.assertTrue(vis[0], vis)
+        self.assertTrue(vis[1], vis)
+        self.assertEqual(vis[2], ["none"] * 4)
+        self.assertEqual(vis[3], ["Фон", "Зарядка", "Перерыв", "Слайд"])
+
     def test_size_counts_zoom(self):
         """Раскладка — по размеру в пикселях страницы: при 150 % окно 720×420 — это 480×280, «сбоку» не влезает."""
         self.size(720, 420)

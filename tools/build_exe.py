@@ -88,6 +88,7 @@ REQUIRED = [
     f"{NAME}.exe", "_internal/PySide6/Qt6Multimedia.dll", "_internal/PySide6/Qt6Network.dll",
     "_internal/PySide6/Qt6Svg.dll", "_internal/PySide6/plugins/multimedia/windowsmediaplugin.dll",
     "_internal/PySide6/plugins/platforms/qwindows.dll", "_internal/PySide6/plugins/imageformats/qsvg.dll",
+    "_internal/PySide6/plugins/imageformats/qwebp.dll", "_internal/PySide6/plugins/imageformats/qjpeg.dll",
     "_internal/PySide6/plugins/iconengines/qsvgicon.dll", "_internal/autoprint/sounds/SOURCES.md", "_internal/autoprint/efir/page/screen.html",
     "_internal/autoprint/efir/page/app/lessonview.js", "_internal/autoprint/efir/page/favicon.svg",
     "_internal/autoprint/samples/lesson-example.md", "_internal/autoprint/samples/lesson-example_files/func-scheme.png",

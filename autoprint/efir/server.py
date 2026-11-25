@@ -180,6 +180,16 @@ class _Handler(BaseHTTPRequestHandler):
                 f = owner.media_path(m.group(1))
                 if f is None or not f.is_file():
                     return self._send(404, b"not found", "text/plain")
+                w = (parse_qs(query).get("w") or [""])[0]
+                if w.isdigit():                     # экран урока: копия под ширину колонки — прокрутка без рывков
+                    from .. import thumbs
+                    try:
+                        small = thumbs.thumb_for(f, int(w))
+                    except Exception:               # копия не удалась — оригинал, урок не ломается
+                        log.exception("Копия картинки %s", f.name)
+                        small = None
+                    if small is not None:
+                        return self._file(small, "private, max-age=600")
                 return self._file(f)
             self._send(404, b"not found", "text/plain")
         except (ConnectionError, OSError):
@@ -218,7 +228,7 @@ class _Handler(BaseHTTPRequestHandler):
             owner._client(-1, channel)
             self.close_connection = True
 
-    def _file(self, f: Path) -> None:
+    def _file(self, f: Path, cache: str = "no-store") -> None:
         size = f.stat().st_size
         ctype = mimetypes.guess_type(f.name)[0] or "application/octet-stream"
         rng = self.headers.get("Range", "")
@@ -244,7 +254,7 @@ class _Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", ctype)
         self.send_header("Accept-Ranges", "bytes")
         self.send_header("Content-Length", str(length))
-        self.send_header("Cache-Control", "no-store")
+        self.send_header("Cache-Control", cache)
         if partial:
             self.send_header("Content-Range", f"bytes {start}-{end}/{size}")
         self.end_headers()

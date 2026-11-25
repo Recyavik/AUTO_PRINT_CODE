@@ -2,12 +2,13 @@
 // Раскладки по размеру окна (body[data-size]):
 //   tiny  — только «сейчас»: название и время;
 //   tall  — табло, «Дальше · …», экран учеников 2×2 с подписями, «Следующий этап», набор кода;
-//   strip — «сейчас» слева, повестка ячейками направо («‹ N» / «N ›»);
+//   strip — «сейчас» слева, повестка ячейками направо («‹ N» / «N ›»), значки экрана учеников без подписей;
 //   side  — «сейчас» слева, список этапов справа.
+// Вид можно и выбрать (значок «Вид» вверху справа): окно станет нужного размера — LAYOUTS.
 // Время краснеет в последнюю минуту. Нет урока и эфира — «Нет эфира». Тянуть окно — за любое пустое место табло.
 "use strict";
 import { S, L as LC, on, send, now } from "./core.js";
-import { h, btn, iconBtn, menu, clear, zoom } from "./ui.js";
+import { h, btn, iconBtn, menu, clear, zoom, tip } from "./ui.js";
 import { icon } from "./icons.js";
 import { sendRegions } from "./shell.js";
 import { cmd, mmss, clockAt, durText } from "../lesson/state.js";
@@ -15,6 +16,20 @@ import { cmd, mmss, clockAt, durText } from "../lesson/state.js";
 const BUSY = ["running", "countdown", "paused", "line_wait"];
 let B = null;               // элементы табло
 let offset = 0;             // «‹ N» / «N ›»: с какой ячейки повестки показывать (широкий и низкий)
+
+// размеры в пикселях страницы (программа умножит на масштаб окна) — каждый попадает в свою раскладку sizeOf
+export const LAYOUTS = [
+  { size: "tall", label: "Табло", hint: "узкое и высокое: время, дальше, экран учеников", w: 360, h: 600 },
+  { size: "side", label: "Табло и этапы", hint: "время слева, все этапы списком справа", w: 660, h: 440 },
+  { size: "strip", label: "Полоса", hint: "низкая во всю ширину: этапы ячейками, значки экрана", w: 980, h: 160 },
+  { size: "tiny", label: "Только время", hint: "самое маленькое: название и сколько осталось", w: 300, h: 110 },
+];
+
+function layoutMenu(anchor) {
+  const cur = document.body.dataset.size;
+  menu(anchor, LAYOUTS.map((l) => ({ label: l.label, hint: l.hint, checked: l.size === cur,
+    on: () => send({ cmd: "window", op: "compact_size", arg: { w: l.w, h: l.h } }).catch(() => {}) })), { align: "right", cls: "stackmenu" });
+}
 
 export function sizeOf(w, hgt) {
   if (hgt < 150 || w < 260) return "tiny";
@@ -77,7 +92,8 @@ function exMenu(anchor) {
 
 function screenGrid() {
   const mk = (ic, label, fn) => {
-    const b = h("button", { class: "cs", type: "button", "aria-pressed": "false" }, icon(ic), h("span", null, label));
+    const b = h("button", { class: "cs", type: "button", "aria-pressed": "false", "aria-label": label }, icon(ic), h("span", null, label));
+    tip(b, label);                                  // в полосе подписи скрыты — подсказка остаётся
     b.addEventListener("click", () => fn(b));
     return b;
   };
@@ -93,6 +109,8 @@ function screenGrid() {
 function build() {
   const expand = iconBtn("expand", "Большой режим", () => send({ cmd: "window", op: "compact", arg: false }).catch(() => {}), { size: "sm", kind: "ghost" });
   expand.id = "compactExpand";
+  const layout = iconBtn("layers", "Вид маленького режима", () => layoutMenu(layout), { size: "sm", kind: "ghost" });
+  layout.id = "compactLayout";
   const label = h("div", { class: "cb-label" });
   const time = h("div", { class: "cb-time mono" });
   const sub = h("span", { class: "cb-sub" });
@@ -109,7 +127,7 @@ function build() {
   const typing = h("div", { class: "ctype", hidden: true }, icon("keyboard", "sm"), tname, tact,
     iconBtn("stop", "Стоп", () => cmd({ cmd: "typing", op: "stop" }), { size: "sm", kind: "ghost" }));
   const root = h("div", { id: "compact", "data-drag": "", "aria-label": "Маленький режим" },
-    h("div", { class: "ctop" }, expand), nowBox, agenda, scr.el, nextBtn, typing);
+    h("div", { class: "ctop" }, layout, expand), nowBox, agenda, scr.el, nextBtn, typing);
   document.body.append(root);
   B = { root, label, time, sub, name, bar, clock, next, agenda, scr, nextBtn, typing, tname, tact };
 }

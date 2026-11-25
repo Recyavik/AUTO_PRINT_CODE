@@ -146,7 +146,46 @@ class Shots:
             "sheet-plan": self.s_sheet_menu("План урока…"), "sheet-answer": self.s_sheet_menu("Обновить по ответу нейросети…"),
             "sheet-delete": self.s_sheet_menu("Удалить…"), "sheet-update": self.s_update, "sheet-report": self.s_report,
             "sheet-record": self.s_record, "sheet-crash": self.s_crash,
+            # 1.1: по отзыву после первого урока на 1.0
+            "lesson-slide": self.s_slide, "lesson-break": self.s_break, "lesson-shift": self.s_shift,
+            "zoom-panel": self.s_zoom_panel, "compact-menu": self.s_compact_menu, "look-from-lesson": self.s_look_from_lesson,
         }
+
+    def s_slide(self):
+        self.s_live()
+        self.app.lesson.command({"cmd": "slide_step", "d": 1})
+        self.app.lesson.publish()
+        pump(600)
+
+    def s_break(self):
+        self.s_live()
+        self.app.lesson.command({"cmd": "break", "minutes": 10})
+        self.app.lesson.publish()
+        pump(600)
+    s_break.__dict__["after"] = None
+
+    def s_shift(self):
+        self.s_live()
+        self.app.lesson.command({"cmd": "start_at", "index": 3})
+        self.app.lesson.publish()
+        pump(600)
+
+    def s_zoom_panel(self):
+        self.open_lesson(self.t)
+        self.js("document.querySelector('#zoomBtn').click()")
+
+    def s_compact_menu(self):
+        self.app.set_compact(True)
+        self.app.publish_now()
+        self.size(380, 640)
+        pump(400)
+        self.js("document.querySelector('#compactLayout').click()")
+    s_compact_menu.__dict__["after"] = None
+
+    def s_look_from_lesson(self):
+        self.open_lesson(self.t)
+        self.app.lesson.command({"cmd": "look_edit"})
+        pump(900)
 
     def s_lessons(self):
         self.go("#/lessons")
@@ -278,6 +317,13 @@ class Shots:
                     self.app.close_record()
             if name == "lesson-typing" and getattr(self, "_restore_snapshot", None):
                 self._restore_snapshot()
+            if name in ("lesson-slide", "lesson-break"):
+                self.app.efir.show_background()
+            if name in ("zoom-panel", "compact-menu"):
+                self.js("window.appUI && window.appUI.closePop()")
+            if name == "compact-menu":
+                self.unsize()
+                self.app.set_compact(False)
             if name == "efir-live":               # дальше — без идущего эфира («Эфир ● идёт» в меню слева)
                 self.app.efir.stop_live()
                 self.app.publish_now()
