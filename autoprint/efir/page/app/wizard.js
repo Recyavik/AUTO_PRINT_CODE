@@ -199,7 +199,7 @@ function step2(box, planId) {
   if (W.brk === null) W.brk = wz.brk || 0;
   if (!W.code) W.code = { style: ["comments", "steps", "parts"].includes(wz.style) ? wz.style : "steps", task: wz.task !== false,
     explain: wz.explain !== false, keep: wz.keep !== false, detail: wz.detail === "full" ? "full" : "short" };
-  const topic = h("input", { class: "inp big", id: "topic", value: W.topic, placeholder: "например, Циклы for в Python", "aria-label": "Тема урока" });
+  const topic = h("input", { class: "inp", id: "topic", value: W.topic, placeholder: "например, Циклы for в Python", "aria-label": "Тема урока" });
   topic.addEventListener("input", () => { W.topic = topic.value; });
   const cls = h("input", { class: "inp", id: "cls", value: W.cls, placeholder: "например, 5 класс или 11–12 лет" });
   cls.addEventListener("input", () => { W.cls = cls.value; });

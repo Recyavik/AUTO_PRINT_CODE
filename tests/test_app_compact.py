@@ -14,7 +14,8 @@ from autoprint.storage import Template
 def lessons() -> list[Template]:
     return [Template("Циклы", [stage("Начало", 5, id="c1"), note("Привет", id="cn"), code("print(1)", id="cc"),
                                stage("Перерыв", 5, id="c2", stage_kind="break"), stage("Практика", 20, id="c3"),
-                               stage("Итоги", 5, id="c4")], id="C")]
+                               stage("Итоги", 5, id="c4")], id="C"),
+            Template("Длинный", [stage(f"Этап номер {i} с длинным названием", 5, id=f"m{i}") for i in range(12)], id="M")]
 
 
 class CompactTest(AppPage):
@@ -54,6 +55,42 @@ class CompactTest(AppPage):
         for w, h, want in ((300, 500, "tall"), (200, 120, "tiny"), (900, 200, "strip"), (700, 400, "side"), (250, 400, "tiny")):
             self.size(w, h)
             self.assertTrue(self.wait_js(f"document.body.dataset.size === {want!r}"), (w, h, want, self.js("document.body.dataset.size")))
+
+    def test_size_counts_zoom(self):
+        """Раскладка — по размеру в пикселях страницы: при 150 % окно 720×420 — это 480×280, «сбоку» не влезает."""
+        self.size(720, 420)
+        self.assertTrue(self.wait_js("document.body.dataset.size === 'side'"))
+        self.app.settings.page_zoom = 150
+        self.app.publish_now()
+        self.js("window.dispatchEvent(new Event('resize'))")
+        self.assertTrue(self.wait_js("document.body.dataset.size === 'tall'"), self.js("document.body.dataset.size"))
+
+    def test_nothing_hidden_when_low(self):
+        """Низкое окно при 150 %: табло прокручивается — «Следующий этап» достижим, а не обрезан."""
+        self.go_live(1, tid="M")
+        self.app.settings.page_zoom = 150
+        self.app.publish_now()
+        self.size(720, 420)
+        self.assertTrue(self.wait_js("!!document.querySelector('#compact .cnext') && document.documentElement.style.zoom === '1.5'"))
+        pump(300)
+        over, oy = self.js("(() => { const c = document.querySelector('#compact');"
+                           " return [c.scrollHeight > c.clientHeight + 1, getComputedStyle(c).overflowY]; })()")
+        if over:                                            # не влезло — человек должен мочь прокрутить
+            self.assertIn(oy, ("auto", "scroll"))
+
+    def test_strip_cells_fit_whole(self):
+        """Широкий и низкий: только целые ячейки повестки, остальные — кнопкой «N ›»."""
+        self.go_live(1, tid="M")
+        self.size(1100, 150)
+        self.assertTrue(self.wait_js("document.body.dataset.size === 'strip' && document.querySelectorAll('#compact .ca-cell').length > 0"))
+        pump(300)
+        r = self.js("(() => { const a = document.querySelector('#compact .cagenda').getBoundingClientRect();"
+                    " return [...document.querySelectorAll('#compact .cagenda > *')].map(c => [c.getBoundingClientRect().right, a.right]); })()")
+        self.assertTrue(all(right <= edge + 1 for right, edge in r), r)
+        n = self.js("document.querySelectorAll('#compact .ca-cell').length")
+        total = len(self.app.efir.segments())
+        if n < total:
+            self.assertTrue(self.js("[...document.querySelectorAll('#compact .ca-more')].some(b => b.textContent.endsWith('›'))"))
 
     def test_compact_widths(self):
         self.go_live(2, tid="C")

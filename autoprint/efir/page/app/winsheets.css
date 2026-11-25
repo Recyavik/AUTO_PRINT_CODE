@@ -33,8 +33,13 @@
 .reprow > div { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .reprow b { font-weight: 500; }
 .rephead { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: -6px; }
-.reppreview { margin: 0; height: 200px; overflow: auto; padding: 10px 12px; border-radius: var(--r-md); background: var(--sunken);
-  border: 1px solid var(--line); color: var(--dim); font: 11.5px/1.5 var(--mono); white-space: pre; }
+.reppreview { margin: 0; flex: 1 1 200px; min-height: 96px; overflow: auto; padding: 10px 12px; border-radius: var(--r-md);
+  background: var(--sunken); border: 1px solid var(--line); color: var(--dim); font: 11.5px/1.5 var(--mono);
+  white-space: pre-wrap; overflow-wrap: anywhere; }
+.sheet:has(.repsheet) { overflow: hidden; }
+.sheet:has(.repsheet) > .sbody { flex: 1 1 auto; min-height: 0; overflow: auto; }
+.repsheet { flex: 1 1 auto; min-height: 0; }
+.repsheet .ta { min-height: 64px; }
 
 /* запись звука */
 .rechead { display: flex; align-items: center; gap: 12px; }

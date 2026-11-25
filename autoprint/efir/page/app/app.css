@@ -47,7 +47,7 @@
   --tk: #A3540A; --ts: #2F7A2A; --tf: #1F5FBF; --tc: #6E7686; --tnum: #7A3DB8; --tcl: #8A5A00; --tt: #C0322A;
   --ta: #A0522D; --tb: #0F7A99; --to: #525B6B;
   --shadow: 0 18px 48px rgba(20, 24, 33, .16); --shadow-sm: 0 6px 18px rgba(20, 24, 33, .1);
-  --scrim: rgba(24, 28, 36, .28);
+  --scrim: rgba(24, 28, 36, .46);
   color-scheme: light;
 }
 
@@ -113,7 +113,8 @@ kbd { padding: 1px 6px; border-radius: 5px; border: 1px solid var(--line2); back
 .seg button { height: 34px; padding: 0 12px; border-radius: 9px; border: 0; background: none; color: var(--dim);
   display: inline-flex; align-items: center; gap: 7px; font-weight: 500; font-size: 14px; cursor: pointer; }
 .seg button:hover { color: var(--text); background: var(--raised); }
-.seg button[aria-pressed="true"] { background: var(--raised2); color: var(--text); box-shadow: inset 0 0 0 1px var(--line2); }
+.seg button[aria-pressed="true"] { background: var(--panel); color: var(--text); font-weight: 600;
+  box-shadow: inset 0 0 0 1.5px var(--accent-line), 0 1px 2px rgba(0, 0, 0, .12); }
 .seg button[aria-pressed="true"] .i { color: var(--accent); }
 .seg.icons button { width: 38px; padding: 0; justify-content: center; }
 .seg.sm button { height: 28px; font-size: 13px; padding: 0 10px; }
@@ -147,7 +148,7 @@ select.sel { padding-right: 34px; appearance: none; cursor: pointer;
   background-position: calc(100% - 17px) 50%, calc(100% - 12px) 50%; background-size: 5px 5px; background-repeat: no-repeat; }
 .num { display: inline-flex; align-items: center; gap: 8px; }
 .num .inp { width: 96px; text-align: right; font-variant-numeric: tabular-nums; }
-.num .unit { color: var(--faint); font-size: 13px; }
+.num .unit { color: var(--faint); font-size: 13px; min-width: 52px; }
 .inp::placeholder, .ta::placeholder { color: var(--faint); }
 input[type=range] { accent-color: var(--accent); }
 input[type=checkbox]:not(.sw) { accent-color: var(--accent); width: 16px; height: 16px; }
@@ -184,9 +185,9 @@ input[type=checkbox]:not(.sw) { accent-color: var(--accent); width: 16px; height
   font-size: 13px; font-weight: 500; pointer-events: none; max-width: 320px; box-shadow: var(--shadow-sm); }
 
 /* ---------------------------------------------------------------- лист (окно внутри окна) */
-.scrim { position: fixed; inset: 0; z-index: 70; background: var(--scrim); display: grid; place-items: center;
+.scrim { position: fixed; inset: 44px 0 0 0; z-index: 70; background: var(--scrim); display: grid; place-items: center;
   padding: 24px 16px; animation: fade .12s ease-out; }
-.sheet { width: min(560px, 100%); max-height: calc(var(--vh) * 100 - 48px); overflow: auto; border-radius: var(--r-xl);
+.sheet { width: min(560px, 100%); max-height: calc(var(--vh) * 100 - 92px); overflow: auto; border-radius: var(--r-xl);
   background: var(--panel); border: 1px solid var(--line2); box-shadow: var(--shadow); display: flex;
   flex-direction: column; animation: rise .14s ease-out; }
 .sheet.wide { width: min(760px, 100%); }
@@ -205,7 +206,9 @@ input[type=checkbox]:not(.sw) { accent-color: var(--accent); width: 16px; height
 .sheet .sheetlist { border: 1px solid var(--line); border-radius: var(--r-md); padding: 6px; }
 .sheet .sheetlist .phead { padding: 6px 10px 2px; }
 .sheet .sheetlist .mi .ml { flex: 0 0 auto; }
-.sheet .sheetlist .mi .mh { margin-left: auto; text-align: right; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sheet .sheetlist .mi { border-radius: var(--r); }
+.sheet .sheetlist .mi:not([disabled])::after { content: "›"; color: var(--faint); font-size: 18px; margin-left: 4px; }
+.sheet .sheetlist .mi .mh { margin-left: auto; text-align: right; min-width: 0; white-space: normal; text-wrap: pretty; }
 .sheet .sheetlist .meta { padding: 4px 10px; margin: 0; }
 .answersheet .ansta { min-height: 200px; font: 13px/1.5 var(--mono); }
 .answersheet p { margin: 0; }
@@ -264,11 +267,12 @@ input[type=checkbox]:not(.sw) { accent-color: var(--accent); width: 16px; height
 body[data-view="lesson"] #rail, body[data-view="wizard"] #rail, body.compact #rail { display: none; }
 
 /* страница раздела (уроки, эфир, настройки) */
-.page { height: 100%; overflow: auto; padding: 26px clamp(16px, 3vw, 36px) 48px; }
+.page { height: 100%; overflow: auto; scrollbar-gutter: stable; padding: 26px clamp(16px, 3vw, 36px) 32px; }
 .page .wrap { max-width: 1000px; margin: 0 auto; display: flex; flex-direction: column; gap: 26px; }
 .page h1 { font-size: 28px; font-weight: 700; letter-spacing: -.01em; line-height: 1.2; }
 .pagehead { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 14px; }
 .pagehead h1 { flex: 1 1 200px; }
+.pagehead .phact { display: flex; align-items: center; gap: 12px 14px; margin-left: auto; flex-wrap: wrap; justify-content: flex-end; }
 .lead { font-size: 16px; color: var(--dim); max-width: 64ch; }
 .zoompanel { display: flex; flex-direction: column; gap: 8px; min-width: 260px; }
 .zoompanel .zrow { display: flex; align-items: center; gap: 8px; }

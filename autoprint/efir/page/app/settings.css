@@ -55,7 +55,9 @@
 .howto { padding: 8px 0 14px 20px; display: flex; flex-direction: column; gap: 6px; }
 .howto b.mono { font-weight: 600; }
 .rolegrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; padding: 8px 0 14px; }
-.rolei { display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; border-radius: var(--r); background: var(--raised); }
+.rolei { --rc: var(--faint); display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; border-radius: var(--r);
+  background: color-mix(in srgb, var(--rc) 10%, var(--raised)); box-shadow: inset 3px 0 0 var(--rc); min-height: 54px; }
+.rolei b { color: var(--rc); }
 .rolei small { color: var(--faint); font-size: 13px; }
 .rel { align-self: flex-start; font-size: 14px; }
 

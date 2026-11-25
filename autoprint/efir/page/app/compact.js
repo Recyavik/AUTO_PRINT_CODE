@@ -7,7 +7,7 @@
 // Время краснеет в последнюю минуту. Нет урока и эфира — «Нет эфира». Тянуть окно — за любое пустое место табло.
 "use strict";
 import { S, L as LC, on, send, now } from "./core.js";
-import { h, btn, iconBtn, menu, clear } from "./ui.js";
+import { h, btn, iconBtn, menu, clear, zoom } from "./ui.js";
 import { icon } from "./icons.js";
 import { sendRegions } from "./shell.js";
 import { cmd, mmss, clockAt, durText } from "../lesson/state.js";
@@ -117,7 +117,8 @@ function build() {
 function renderAgenda(b, size) {
   const box = B.agenda;
   const segs = b.segs;
-  const key = size + "|" + JSON.stringify(segs.map((s) => [s.name, s.start_ms, s.end_ms])) + "|" + b.idx + "|" + offset + "|" + innerWidth;
+  const key = size + "|" + JSON.stringify(segs.map((s) => [s.name, s.start_ms, s.end_ms])) + "|" + b.idx + "|" + offset + "|" + innerWidth
+    + "|" + zoom();
   if (box.dataset.k === key) return;
   box.dataset.k = key;
   clear(box);
@@ -127,7 +128,11 @@ function renderAgenda(b, size) {
     return;
   }
   if (size !== "strip") return;
-  const fit = Math.max(1, Math.floor((innerWidth - 300) / 150));
+  // только целые ячейки — по настоящей ширине полосы (масштаб уже учтён), с местом под «‹ N» и «N ›»
+  const CELL = 148, MORE = 64;
+  const avail = box.clientWidth || (innerWidth / zoom() - 300);
+  let fit = Math.max(1, Math.floor((avail + 8) / CELL));
+  if (fit < segs.length) fit = Math.max(1, Math.floor((avail + 8 - 2 * MORE) / CELL));
   const first = Math.max(0, Math.min(segs.length - fit, (b.idx >= 0 ? b.idx : 0) + offset));
   const before = first, after = Math.max(0, segs.length - first - fit);
   if (before) { const p = h("button", { class: "ca-more", type: "button" }, "‹ " + before); p.addEventListener("click", () => { offset -= 1; tick(); }); box.append(p); }
@@ -141,7 +146,7 @@ function renderAgenda(b, size) {
 
 function tick() {
   if (!B || !document.body.classList.contains("compact")) return;
-  const size = sizeOf(innerWidth, innerHeight);
+  const size = sizeOf(innerWidth / zoom(), innerHeight / zoom());     // в пикселях страницы: 150 % — места меньше
   if (document.body.dataset.size !== size) { document.body.dataset.size = size; queueRegions(); }
   const b = board();
   const lv = S.live || {};

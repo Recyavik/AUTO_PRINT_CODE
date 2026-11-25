@@ -576,6 +576,7 @@ export function efirView(root, r) {
     if (sub && sub.destroy) sub.destroy();
     sub = null;
     clear(left); clear(right); clear(liveBox);
+    page.classList.remove("wediting");
     const p = r2.parts;
     const isLooks = p[1] === "looks";
     const isLive = p[1] === "live";
@@ -604,7 +605,7 @@ export function efirView(root, r) {
     if (id === "new") { newPanel(right); return; }
     const w = webinars().find((x) => x.id === selId());
     if (!w) { right.append(h("p", { class: "dim empty" }, webinars().length ? "Расписание не найдено." : "Расписаний пока нет. «Новый эфир» — пустое, по описанию нейросетью, из текста или файла.")); crumbs(); return; }
-    if (p[2] === "edit") editor(right, w);
+    if (p[2] === "edit") { page.classList.add("wediting"); editor(right, w); }
     else detail(right, w);
   }
   show(r);

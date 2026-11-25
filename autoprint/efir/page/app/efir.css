@@ -61,15 +61,19 @@
 /* правка расписания */
 .ef2 { display: grid; grid-template-columns: 2fr 1fr; gap: 14px; }
 .wrows { display: flex; flex-direction: column; gap: 6px; }
-.wrow { display: grid; grid-template-columns: 44px minmax(140px, 1fr) 116px 124px 124px auto; align-items: center; gap: 8px;
+.wrow { display: grid; grid-template-columns: 44px minmax(140px, 1fr) 116px 136px 148px auto; align-items: center; gap: 8px;
   padding: 6px 8px; border-radius: var(--r); background: var(--panel); border: 1px solid var(--line); }
+.wrow > * { min-width: 0; }
+/* правка расписания — на всю ширину: список эфиров слева на это время не нужен */
+.page.efir.wediting .efbody { grid-template-columns: minmax(0, 1fr); }
+.page.efir.wediting .efleft { display: none; }
 .wrow.k-break { background: repeating-linear-gradient(135deg, var(--panel) 0 8px, var(--raised) 8px 16px); }
 .wrow.k-exercise { border-color: color-mix(in srgb, var(--ok) 40%, var(--line)); }
 .wrow .t { color: var(--faint); font-size: 12.5px; text-align: right; }
 .wrow .racts { display: flex; gap: 2px; }
 .wtools { display: flex; align-items: flex-end; gap: 10px; flex-wrap: wrap; }
 .wtools .spacer, .effoot .spacer, .wrow2 .spacer { flex: 1; }
-.wtools .field { width: 180px; }
+.wtools .field { width: 240px; }
 .effoot { position: sticky; bottom: 0; display: flex; align-items: center; gap: 10px; padding: 12px 0; background: var(--ground);
   border-top: 1px solid var(--line); margin-top: 6px; }
 .page.efir { padding-bottom: 0; }
@@ -122,6 +126,9 @@
 .efirlive { display: flex; flex-direction: column; height: 100%; }
 .lstrip { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 10px 18px; background: var(--panel);
   border-bottom: 1px solid var(--line); }
+.lstrip .ltab { flex: 1 1 0; min-width: 60px; text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lstrip > .btn, .lstrip .lscr { flex: none; }
+#liveEnd { margin-left: auto; }
 .lstrip .spacer { flex: 1; }
 .lscr { display: flex; gap: 4px; }
 .lscr .cs { display: inline-flex; align-items: center; gap: 6px; height: 34px; padding: 0 12px; border-radius: var(--r); cursor: pointer;

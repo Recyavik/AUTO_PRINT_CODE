@@ -275,7 +275,9 @@ function buildStrip() {
   endBtn.id = "endBtn";
   const strip = h("section", { id: "onair", "aria-label": "Урок и экран учеников" },
     h("div", { class: "sleft" }, status, startAt, meta, nowBtn, minutesBtn),
-    h("div", { class: "clocks" }, clockNow, clockEnd), screen, tools, h("div", { class: "sact" }, startBtn, endBtn));
+    h("div", { class: "clocks" }, clockNow, clockEnd),
+    // справа одной группой: перенеслась строка — главная кнопка всё равно в правом краю
+    h("div", { class: "sright" }, screen, tools, h("div", { class: "sact" }, startBtn, endBtn)));
   return { strip, status, tally, big, l1, l2, startAt, meta, nowBtn, minutesBtn, clockNow, clockEnd, screen, tools, planPosSeg, startBtn, endBtn };
 }
 

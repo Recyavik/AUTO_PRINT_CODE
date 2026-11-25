@@ -47,7 +47,8 @@
 #onair .clocks { display: flex; gap: 18px; }
 #onair .clock { display: flex; flex-direction: column; gap: 1px; font-size: 12.5px; color: var(--dim); }
 #onair .clock b { font-size: 16px; color: var(--text); font-weight: 600; }
-#onair .screenctl { display: flex; align-items: center; gap: 10px; margin-left: auto; flex-wrap: wrap; }
+#onair .sright { display: flex; align-items: center; gap: 10px 22px; margin-left: auto; flex-wrap: wrap; justify-content: flex-end; }
+#onair .screenctl { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 #onair .screenctl:empty { display: none; }
 #onair .stools { display: flex; align-items: center; gap: 8px; }
 #onair .sact { display: flex; align-items: center; gap: 8px; }
@@ -117,13 +118,15 @@
 #lessonLine i.cur { background: linear-gradient(90deg, var(--accent) 0 var(--f, 0%), var(--line2) var(--f, 0%) 100%); }
 
 /* план лентой сверху */
-#planRibbon { display: none; gap: 3px; padding: 10px 18px 12px; background: var(--panel); border-bottom: 1px solid var(--line); flex: none; }
+#planRibbon { display: none; gap: 3px; padding: 10px 18px 12px; background: var(--panel); border-bottom: 1px solid var(--line); flex: none;
+  overflow-x: auto; scrollbar-width: thin; }
 body.plan-top #planRibbon:not([hidden]) { display: flex; }
-.tseg { min-width: 0; flex: 1 1 0; border-radius: var(--r-sm); padding: 6px 9px 7px; background: var(--raised); font-size: 12.5px;
+.tseg { min-width: 112px; flex: 1 1 0; border-radius: var(--r-sm); padding: 6px 9px 7px; background: var(--raised); font-size: 12.5px;
   line-height: 1.3; position: relative; overflow: hidden; border: 0; text-align: left; cursor: pointer; color: var(--text); }
 .tseg:hover { box-shadow: inset 0 0 0 1px var(--line2); }
 .tseg .tt { display: block; color: var(--dim); font-size: 11.5px; white-space: nowrap; }
-.tseg .tsn { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 500; }
+.tseg .tsn { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; font-weight: 500;
+  overflow-wrap: break-word; }
 .tseg.done { background: none; color: var(--faint); box-shadow: inset 0 0 0 1px var(--line); }
 .tseg.done .tt { color: var(--faint); }
 .tseg.cur { background: var(--accent-soft); box-shadow: inset 0 0 0 1.5px var(--accent-line); }
@@ -181,14 +184,14 @@ nav#plan .phint { margin: 12px 10px 0; font-size: 13px; color: var(--faint); }
 .intro > .bar { display: none !important; }
 .stage.current { border-color: var(--accent-line); }
 .stage.ending { border-color: var(--live); }
-.sh { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; padding: 14px 20px; }
+.sh { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 10px 16px; padding: 14px 20px; }
 body.mode-lesson .sh { cursor: pointer; }
 .stage.current .sh { background: var(--accent-soft); }
 .sh .clock { background: var(--raised); color: var(--text); font-weight: 600; font-size: 14px; border-radius: var(--r-sm); padding: 5px 10px;
   font-family: var(--mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .stage.current .sh .clock { background: var(--accent); color: var(--on-accent); }
 .sht { flex: 1 1 240px; min-width: 0; }
-.sht .meta { font-size: 13px; color: var(--faint); font-weight: 500; }
+.sht .meta { font-size: 13px; color: var(--faint); font-weight: 500; text-wrap: pretty; }
 .sht h2 { margin: 2px 0 0; font-size: 20px; font-weight: 700; line-height: 1.25; overflow-wrap: anywhere; letter-spacing: -.005em; }
 body.mode-prep .sht h2 { cursor: text; border-radius: 6px; }
 body.mode-prep .sht h2:hover { background: var(--raised); }
@@ -233,6 +236,7 @@ body.mode-lesson .stage.past:not(.collapsed):hover { opacity: 1; }
   box-shadow: var(--shadow); cursor: pointer; }
 .lview, .lbody { position: relative; }
 #nowbar[hidden] { display: none; }
+body.plan-side #nowbar { left: calc(50% + 150px); }
 body.typing .blk.busy .say { display: none; }      /* «Скажи: …» во время набора — в полосе набора */
 
 /* план урока (документ): кто по нему и что такое заготовки */
@@ -311,7 +315,7 @@ body.mode-prep .lbl .sub { cursor: text; }
 .ansdel { min-height: 24px; padding: 0 6px; border: none; background: transparent; color: var(--faint); cursor: pointer; }
 .addans { align-self: flex-start; height: 28px; margin-top: 2px; padding: 0 10px; font-size: 13px; border-radius: var(--r-sm);
   border: 1px solid var(--line2); background: transparent; color: var(--dim); cursor: pointer; }
-.blk > .rtb { position: absolute; top: 2px; right: 8px; z-index: 6; display: flex; flex-wrap: wrap; gap: 2px; padding: 3px;
+.blk > .rtb { position: absolute; top: 14px; right: 12px; z-index: 6; display: flex; flex-wrap: wrap; gap: 2px; padding: 3px;
   border-radius: var(--r); background: var(--raised2); border: 1px solid var(--line2); box-shadow: var(--shadow-sm); }
 .rtb button { height: 28px; padding: 0 9px; font-size: 13px; border: none; border-radius: 6px; background: transparent; color: var(--text); cursor: pointer; }
 .rtb button:hover { background: var(--raised); }

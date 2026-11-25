@@ -71,6 +71,17 @@ DROP_PATTERNS = [
     r"/plugins/imageformats/qpdf\.dll$",
     r"/translations/(?!.*_ru\.qm$)[^/]+\.qm$",
     r"/translations/qt_help_[^/]+\.qm$",
+    # 1.0: модули QML (папка qml/) и привязка Python к QtOpenGL — встроенному браузеру окна не нужны
+    # (его библиотеки Qt6Quick/Qt6Qml/Qt6OpenGL остаются); проверяет --selftest собранной программы
+    r"(^|/)PySide6/qml/",
+    r"(^|/)PySide6/QtOpenGL\.pyd$",
+    # и библиотеки Qt, которые нужны только модулям QML (3D, графики, Quick Controls…): ни .pyd, ни плагины, ни
+    # QtWebEngineProcess.exe их не импортируют (проверено по таблицам импорта), ~57 МБ
+    r"(^|/)PySide6/Qt6(3D|Charts|Concurrent|DataVisualization|Graphs|Labs|Location|MultimediaQuick|OpenGLWidgets"
+    r"|PdfQuick|PositioningQuick|QmlCore|QmlLocalStorage|QmlNetwork|QmlXmlListModel|Quick3D|QuickControls2"
+    r"|QuickDialogs2|QuickEffects|QuickLayouts|QuickParticles|QuickShapes|QuickTemplates2|QuickTest|QuickTimeline"
+    r"|QuickVectorImage|RemoteObjects|Scxml|Sensors|ShaderTools|SpatialAudio|Sql|StateMachine|Test|TextToSpeech"
+    r"|VirtualKeyboard|WebChannelQuick|WebEngineQuick|WebSockets|WebView)[^/]*\.dll$",
 ]
 # Это в сборке должно быть обязательно — проверяется после PyInstaller
 REQUIRED = [

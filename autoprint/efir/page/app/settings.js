@@ -258,7 +258,7 @@ function providerBox(which, allowNone) {
   const cur = (st().ai || {})[which] || {};
   const provs = st().providers || [];
   const p = provs.find((x) => x.id === cur.id) || null;
-  const opts = (allowNone ? [["", "Не подключена — «Скопировать задание» для своего чата"]] : [])
+  const opts = (allowNone ? [["", "Не подключена — свой чат"]] : [])
     .concat(provs.map((x) => [x.id, x.name + (x.kind === "cli" ? (x.installed ? " · установлен" : " · не найден") : "")]));
   const prov = select(opts, cur.id, async (v) => {
     try { await call({ cmd: "ai_set", which, provider: v }); } catch (e) { fail(e); }

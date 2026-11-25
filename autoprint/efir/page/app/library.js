@@ -63,7 +63,8 @@ export function lessonsView(root) {
   const list = h("div", { id: "lessonList", class: "list", role: "list" });
   const plansSect = h("section", { class: "sect" }, h("h2", null, "Планы", h("span", { class: "meta" }, "этапы и время, по которым строятся уроки")), plansGrid);
   const page = h("div", { class: "page" }, h("div", { class: "wrap" },
-    h("div", { class: "pagehead" }, h("h1", null, "Уроки"), h("label", { class: "search" }, icon("search", "sm"), search), exportAll, newBtn),
+    h("div", { class: "pagehead" }, h("h1", null, "Уроки"),
+      h("div", { class: "phact" }, h("label", { class: "search" }, icon("search", "sm"), search), exportAll, newBtn)),
     jobs.el, cont, plansSect, h("section", { class: "sect" }, h("h2", null, "Все уроки"), list)));
   root.append(page);
 
