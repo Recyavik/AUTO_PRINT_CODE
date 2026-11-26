@@ -474,6 +474,12 @@ class ElectronTest(unittest.TestCase):
         self.assertEqual(opened, [])
         self.assertTrue(self.js("location.pathname.endsWith('/app') && window.__ready === true"))
 
+    def test_page_errors_go_to_program_log(self):
+        with self.assertLogs("autoprint.ui.shell_window", level="WARNING") as cm:
+            self.js("(() => { console.error('проверка журнала окна'); return 1; })()")
+            self.assertTrue(wait(lambda: any("проверка журнала окна" in r for r in cm.output), 5))
+        self.assertTrue(any("Страница окна: проверка журнала окна" in r for r in cm.output), cm.output)
+
     def test_page_served_by_program(self):
         with urllib.request.urlopen(self.fake.server.url + "app", timeout=5) as r:
             self.assertIn(b"<html", r.read(2000).lower())

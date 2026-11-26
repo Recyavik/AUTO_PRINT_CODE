@@ -177,14 +177,11 @@ function wire(w) {
   wc.setVisualZoomLevelLimits(1, 1).catch(() => {});
 }
 
-function onConsole(e, level, message, line, source) {
-  // Electron ≥ 35: одно событие с полями; раньше — отдельные аргументы
-  const lv = typeof e.level === "string" ? e.level : (["verbose", "info", "warning", "error"][level] || "info");
-  if (lv !== "error") return;
-  const msg = e.message !== undefined ? e.message : message;
-  const ln = e.lineNumber !== undefined ? e.lineNumber : line;
-  const src = String((e.sourceId !== undefined ? e.sourceId : source) || "").split("/").pop();
-  log("warning", `Страница окна: ${msg} (${src}:${ln})`);
+function onConsole(e) {
+  // Electron ≥ 35: всё — в полях события (отдельные аргументы устарели, Electron о них предупреждает)
+  if (e.level !== "error") return;
+  const src = String(e.sourceId || "").split("/").pop();
+  log("warning", `Страница окна: ${e.message} (${src}:${e.lineNumber})`);
 }
 
 function ours(url) {
