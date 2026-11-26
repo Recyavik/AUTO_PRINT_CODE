@@ -248,6 +248,8 @@ class FramelessWindow(QWidget):
             return True, self._hit_test(msg)
         if msg.message in (WM_NCLBUTTONDOWN, WM_ENTERSIZEMOVE, WM_EXITSIZEMOVE):
             self._log_frame(msg)                 # только запись в журнал: Windows делает своё как обычно
+            if msg.message != WM_NCLBUTTONDOWN:
+                self.on_sizemove(msg.message == WM_ENTERSIZEMOVE)
         return super().nativeEvent(event_type, message)
 
     def _log_frame(self, msg) -> None:
@@ -294,6 +296,9 @@ class FramelessWindow(QWidget):
         user32.ScreenToClient(hwnd, ctypes.byref(pt))
         dpr = self.devicePixelRatioF() or 1.0
         return self.client_hit(pt.x / dpr, pt.y / dpr)
+
+    def on_sizemove(self, on: bool) -> None:
+        """Окно начали (on) или перестали тянуть или растягивать. Окно программы говорит об этом странице."""
 
     def client_hit(self, lx: float, ly: float) -> int:
         """Точка внутри окна (логические пиксели): заголовок (тянуть) или содержимое. Окно программы спрашивает

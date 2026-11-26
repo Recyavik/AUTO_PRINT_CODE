@@ -17,7 +17,8 @@
 /* ---------------------------------------------------------------- раскладка */
 .lview { height: 100%; display: flex; flex-direction: column; min-height: 0; }
 .lbody { flex: 1; display: flex; min-height: 0; }
-.lcontent { flex: 1; min-width: 0; overflow: auto; padding: 22px clamp(16px, 3vw, 32px) 120px; position: relative; }
+.lcontent { flex: 1; min-width: 0; overflow: auto; padding: 22px clamp(16px, 2.6%, 32px) 120px; position: relative;
+  container-type: inline-size; }
 .lcol { max-width: 880px; margin: 0 auto; display: flex; flex-direction: column; gap: 14px; }
 /* ширина текста урока — «Аа» в шапке: текст переносится по ширине, на широком экране листать меньше */
 body[data-lw="narrow"] .lcol { max-width: 720px; }
@@ -353,8 +354,8 @@ body.mode-prep .lbl .sub { cursor: text; }
 .rtb .rt-bold { font-weight: 800; } .rtb .rt-italic { font-style: italic; font-family: Georgia, serif; } .rtb .rt-code { font-family: var(--mono); }
 .blk.editing .row { box-shadow: 0 0 0 1.5px var(--accent-line) inset; }
 /* «На экран» — справа у картинки, заметная; на большом окне крупнее (до предела) */
-.toscreen { margin-left: auto; display: inline-flex; align-items: center; gap: .45em; height: clamp(32px, 2.3vw, 44px);
-  padding: 0 clamp(14px, 1.2vw, 22px); font-size: clamp(13.5px, .95vw, 17px); font-weight: 650; border-radius: 999px;
+.toscreen { margin-left: auto; display: inline-flex; align-items: center; gap: .45em; height: clamp(32px, 2.4cqi, 44px);
+  padding: 0 clamp(14px, 1.3cqi, 22px); font-size: clamp(13.5px, 1cqi, 17px); font-weight: 650; border-radius: 999px;
   font-variant-caps: normal; letter-spacing: 0; background: var(--accent-soft); color: var(--accent);
   border: 1.5px solid var(--accent-line); cursor: pointer; flex: none; }
 .toscreen::before { content: ""; width: .9em; height: .62em; border: 2px solid currentColor; border-radius: 3px; }

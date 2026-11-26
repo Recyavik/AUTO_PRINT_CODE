@@ -323,6 +323,11 @@ class AppWindow(FramelessWindow):
             page.setBackgroundColor(QColor(_bg()))
 
     # ------------------------------------------------------------ области и кнопки окна
+    def on_sizemove(self, on: bool) -> None:
+        """Тянут край окна: страница держит прежний размер и перестраивается один раз, когда отпустили —
+        иначе урок перестраивается на каждый кадр и всё дёргается."""
+        self.run_js(f"window.__sizemove && window.__sizemove({'true' if on else 'false'})")
+
     def set_regions(self, data: dict) -> None:
         self.regions = Regions.from_data(data)
 

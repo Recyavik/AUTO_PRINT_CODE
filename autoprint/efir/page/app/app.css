@@ -267,7 +267,7 @@ input[type=checkbox]:not(.sw) { accent-color: var(--accent); width: 16px; height
 body[data-view="lesson"] #rail, body[data-view="wizard"] #rail, body.compact #rail { display: none; }
 
 /* страница раздела (уроки, эфир, настройки) */
-.page { height: 100%; overflow: auto; scrollbar-gutter: stable; padding: 26px clamp(16px, 3vw, 36px) 32px; }
+.page { height: 100%; overflow: auto; scrollbar-gutter: stable; padding: 26px clamp(16px, 2.6%, 36px) 32px; }
 .page .wrap { max-width: 1000px; margin: 0 auto; display: flex; flex-direction: column; gap: 26px; }
 .page h1 { font-size: 28px; font-weight: 700; letter-spacing: -.01em; line-height: 1.2; }
 .pagehead { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 14px; }

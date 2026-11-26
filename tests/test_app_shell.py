@@ -153,6 +153,23 @@ class WindowTest(unittest.TestCase):
         for part in ("нажатие — заголовок", "нажатие — правый край", "начали тянуть"):
             self.assertIn(part, text)
 
+    def test_sizemove_tells_page(self):
+        """Окно начали и перестали тянуть — страница узнаёт об этом (не перестраивается на каждый кадр)."""
+        import ctypes
+        from ctypes import wintypes
+        from shiboken6 import VoidPtr
+        from autoprint.ui import frameless
+        calls = []
+        self.w.run_js = lambda code, callback=None: calls.append(code)
+        msg = wintypes.MSG()
+        msg.hWnd, msg.wParam = 0, 0
+        for m in (frameless.WM_ENTERSIZEMOVE, frameless.WM_EXITSIZEMOVE):
+            msg.message = m
+            self.w.nativeEvent(b"windows_generic_MSG", VoidPtr(ctypes.addressof(msg)))
+        self.assertEqual(len(calls), 2, calls)
+        self.assertIn("__sizemove(true)", calls[0])
+        self.assertIn("__sizemove(false)", calls[1])
+
     def test_hit_test_uses_regions(self):
         w = self.w
         w.set_regions({"drag": [[0, 0, 300, 44]], "holes": [[250, 4, 40, 36]], "zoom": 1})
