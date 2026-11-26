@@ -601,6 +601,8 @@ class LessonController(QObject):
                 self._exercise(t, d)
             elif cmd == "background":
                 self.efir.show_background()
+            elif cmd == "black":
+                self.efir.show_black()
             elif cmd == "preset" and t is not None:
                 self._set_preset(t, str(d.get("id") or ""))
             elif cmd == "set_start" and t is not None:

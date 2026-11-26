@@ -1,7 +1,7 @@
 // Маленький режим: то же окно — маленькое и поверх всех; вместо экранов — табло урока или вебинара.
 // Раскладки по размеру окна (body[data-size]):
 //   tiny  — только «сейчас»: название и время;
-//   tall  — табло, «Дальше · …», экран учеников 2×2 с подписями, «Следующий этап», набор кода;
+//   tall  — табло, «Дальше · …», экран учеников (2 × 2 и «Слайд» во всю ширину) с подписями, «Следующий этап», набор кода;
 //   strip — «сейчас» слева, повестка ячейками направо («‹ N» / «N ›»), значки экрана учеников без подписей;
 //   side  — «сейчас» слева, список этапов справа.
 // Вид можно и выбрать (значок «Вид» вверху справа): окно станет нужного размера — LAYOUTS.
@@ -53,7 +53,7 @@ function board() {
 const mins = (s) => Math.round((s.end_ms - s.start_ms) / 60000);
 const set = (el, text) => { if (el.textContent !== text) el.textContent = text; };
 
-// ---------------------------------------------------------------- экран учеников (урок): четыре значка с подписями
+// ---------------------------------------------------------------- экран учеников (урок): пять значков с подписями
 function efir() { return (LC.state && LC.state.efir) || {}; }
 
 function breakMenu(anchor) {
@@ -99,19 +99,20 @@ function exClick(anchor) {
 }
 
 function screenGrid() {
-  const mk = (ic, label, fn) => {
-    const b = h("button", { class: "cs", type: "button", "aria-pressed": "false", "aria-label": label }, icon(ic), h("span", null, label));
-    tip(b, label);                                  // в полосе подписи скрыты — подсказка остаётся
+  const mk = (ic, label, fn, full = label) => {
+    const b = h("button", { class: "cs", type: "button", "aria-pressed": "false", "aria-label": full }, icon(ic), h("span", null, label));
+    tip(b, full);                                   // в полосе подписи скрыты — подсказка остаётся
     b.addEventListener("click", () => fn(b));
     return b;
   };
   const bg = mk("image", "Фон", () => cmd({ cmd: "background" }));
+  const blk = mk("blackout", "Чёрный", () => cmd({ cmd: efir().mode === "black" ? "background" : "black" }), "Чёрный экран");
   const ex = mk("activity", "Зарядка", (b) => exClick(b));
   ex.addEventListener("contextmenu", (e) => { e.preventDefault(); exMenu(ex); });
   const brk = mk("cup", "Перерыв", (b) => breakMenu(b));
   const sl = mk("slide", "Слайд", () => cmd(efir().mode === "slide" ? { cmd: "background" } : { cmd: "slide_step", d: 1 }));
-  const el = h("div", { class: "cscr", role: "group", "aria-label": "Экран учеников" }, bg, ex, brk, sl);
-  return { el, bg, ex, brk, sl };
+  const el = h("div", { class: "cscr", role: "group", "aria-label": "Экран учеников" }, bg, blk, ex, brk, sl);
+  return { el, bg, blk, ex, brk, sl };
 }
 
 // ---------------------------------------------------------------- табло
@@ -198,7 +199,7 @@ function tick() {
   renderAgenda(b, size);
   // экран учеников — только у урока на экране урока (вебинар ведут из «Эфира»)
   const mode = efir().mode || "idle";
-  for (const [el, m] of [[B.scr.bg, "idle"], [B.scr.ex, "exercise"], [B.scr.brk, "break"], [B.scr.sl, "slide"]]) el.setAttribute("aria-pressed", String(mode === m));
+  for (const [el, m] of [[B.scr.bg, "idle"], [B.scr.blk, "black"], [B.scr.ex, "exercise"], [B.scr.brk, "break"], [B.scr.sl, "slide"]]) el.setAttribute("aria-pressed", String(mode === m));
   B.scr.el.hidden = !(LC.state && LC.state.lesson);
   B.nextBtn.hidden = !(b.kind === "live" && b.next) && b.kind !== "before";
   set(B.nextBtn.querySelector(".bl"), b.kind === "before" ? "Начать сейчас" : "Следующий этап");

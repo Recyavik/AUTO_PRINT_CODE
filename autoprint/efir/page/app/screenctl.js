@@ -1,6 +1,7 @@
 // Экран учеников в эфирной полосе урока и набор кода.
 //  • Миниатюра — что сейчас у учеников и есть ли их вкладка; её панель: открыть вкладку, адрес, оформление.
-//  • Значки «Фон», «Зарядка», «Перерыв», «Слайд» — без подписей, с подсказками; нажатый — то, что у учеников.
+//  • Значки «Фон», «Чёрный экран», «Зарядка», «Перерыв», «Слайд» — без подписей, с подсказками; нажатый — то, что
+//    у учеников. «Чёрный экран» и «Слайд» — переключатели: нажаты — щелчок возвращает фон.
 //  • Идёт этап-перерыв или этап-зарядка — значок подсвечивается; экран учеников сам не меняется (включает учитель).
 //  • Блок кода: «Набрать» (с отсчётом) и «▾» — как набирать; полоса набора внизу урока, пока идёт набор.
 "use strict";
@@ -155,6 +156,7 @@ function thumbText(e) {
   if (e.mode === "break") return "У учеников перерыв" + tab;
   if (e.mode === "exercise") return "У учеников зарядка" + (e.ex_muted ? " без звука" : "") + tab;
   if (e.mode === "slide") return "У учеников слайд " + (e.slide_n || "") + tab;
+  if (e.mode === "black") return "У учеников чёрный экран" + tab;
   return "У учеников фон" + tab;
 }
 
@@ -173,6 +175,9 @@ function mount(V) {
   open.hidden = true;
   const bg = iconBtn("image", "Фон", () => cmd({ cmd: "background" }), { size: "sm", cls: "scrbtn" });
   bg.id = "scrBg";
+  const blk = iconBtn("blackout", "Чёрный экран", () => cmd({ cmd: ef().mode === "black" ? "background" : "black" }),
+    { size: "sm", cls: "scrbtn" });
+  blk.id = "scrBlack";
   const ex = iconBtn("activity", "Зарядка", () => { pulseKind = ""; exClick(ex); updateStrip(); }, { size: "sm", cls: "scrbtn" });
   ex.id = "scrEx";
   ex.addEventListener("contextmenu", (e) => { e.preventDefault(); pulseKind = ""; exMenu(ex); updateStrip(); });
@@ -195,11 +200,11 @@ function mount(V) {
   tip(left, "Перерыв: сколько осталось · щёлкните — +5 мин, пауза, убрать");
   // место под стрелки и отсчёт оставлено заранее: они выезжают, а значки и кнопки рядом не сдвигаются
   const info = h("span", { id: "scrInfo", class: "scrinfo" }, nav, left);
-  const icons = h("div", { class: "scricons", role: "group", "aria-label": "Что показать ученикам" }, bg, ex, brk, sl, info);
+  const icons = h("div", { class: "scricons", role: "group", "aria-label": "Что показать ученикам" }, bg, blk, ex, brk, sl, info);
   box.append(thumb, open, icons);
   const bar = buildTypingBar();
   V.content.closest(".lbody").after(bar);
-  W = { thumb, scr, dot, open, bg, ex, brk, sl, nav, left, bar };
+  W = { thumb, scr, dot, open, bg, blk, ex, brk, sl, nav, left, bar };
   lastStage = null;
   pulseKind = "";
   updateStrip();
@@ -209,7 +214,8 @@ function updateStrip() {
   if (!W || !W.thumb.isConnected) return;
   const e = ef();
   const mode = e.mode || "idle";
-  for (const [b, m] of [[W.bg, "idle"], [W.ex, "exercise"], [W.brk, "break"], [W.sl, "slide"]]) b.setAttribute("aria-pressed", String(mode === m));
+  for (const [b, m] of [[W.bg, "idle"], [W.blk, "black"], [W.ex, "exercise"], [W.brk, "break"], [W.sl, "slide"]]) b.setAttribute("aria-pressed", String(mode === m));
+  W.blk.dataset.tip = mode === "black" ? "Чёрный экран у учеников · щёлкните — снова фон" : "Чёрный экран";
   // миниатюра
   W.thumb.dataset.mode = mode;
   W.thumb.classList.toggle("closed", !e.tab_open);

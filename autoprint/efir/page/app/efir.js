@@ -7,7 +7,7 @@
 //  идущий вебинар (#/efir/live): табло, повестка, экран учеников, «Завершить эфир».
 "use strict";
 import { S, send, call, go, now } from "./core.js";
-import { h, btn, iconBtn, seg, toggle, field, numberField, select, popover, menu, ask, toast, clear, closePop } from "./ui.js";
+import { h, btn, iconBtn, seg, toggle, field, numberField, select, popover, menu, ask, toast, clear, closePop, tip } from "./ui.js";
 import { icon } from "./icons.js";
 import { setCrumbs } from "./shell.js";
 import { menuAt } from "./lessonmenu.js";
@@ -493,6 +493,8 @@ function liveView(box) {
   const scr = h("div", { class: "lscr", role: "group", "aria-label": "Экран учеников" });
   const mk = (op, ic, label_, fn) => { const b = h("button", { class: "cs", type: "button", "data-op": op }, icon(ic), h("span", null, label_)); b.addEventListener("click", () => fn(b)); scr.append(b); return b; };
   const sBg = mk("background", "image", "Фон", () => send({ cmd: "efir_screen", op: "background" }));
+  const sBlack = mk("black", "blackout", "Чёрный", () => send({ cmd: "efir_screen", op: ef().mode === "black" ? "background" : "black" }));
+  tip(sBlack, "Чёрный экран ученикам · ещё щелчок — снова фон");
   const sEx = mk("exercise", "activity", "Зарядка", (b) => {
     const list = ef().exercises || [];
     if (!list.length) { toast("В оформлении эфира нет видео зарядок"); return; }
@@ -558,7 +560,7 @@ function liveView(box) {
         h("span", { class: "t mono" }, clockAt(s.start_ms)), h("span", { class: "n" }, s.name), h("span", { class: "m mono" }, Math.round((s.end_ms - s.start_ms) / 60000) + " мин"))));
     }
     const mode = ef().mode || "idle";
-    for (const [b, m] of [[sBg, "idle"], [sEx, "exercise"], [sBrk, "break"]]) b.setAttribute("aria-pressed", String(mode === m));
+    for (const [b, m] of [[sBg, "idle"], [sBlack, "black"], [sEx, "exercise"], [sBrk, "break"]]) b.setAttribute("aria-pressed", String(mode === m));
     tab.textContent = ef().tab || "";
     openTab.hidden = !!ef().tab_open;
   }

@@ -1,6 +1,6 @@
 """«Эфир»: что сейчас на экране эфира (вкладке браузера) и команды к нему.
 
-Экран — три состояния: фон (он же занавес), зарядка (видео), перерыв (заставка с отсчётом). Контроллер держит
+Экран — фон (он же занавес), зарядка (видео), перерыв (заставка с отсчётом), слайд, чёрный экран. Контроллер держит
 состояние, отдаёт его странице через BroadcastServer и получает от страницы отчёты (подключилась, звук
 разрешён, ход видео, видео кончилось). Расписания и оформления правятся в окне программы (раздел «Эфир», 1.0);
 вопрос «заменить идущий эфир?» задаёт страница (force).
@@ -26,6 +26,7 @@ from ..efir.store import WebinarStore
 log = logging.getLogger(__name__)
 
 MODE_IDLE, MODE_EXERCISE, MODE_BREAK, MODE_SLIDE = "idle", "exercise", "break", "slide"
+MODE_BLACK = "black"       # чёрный экран по щелчку учителя: ни фона, ни надписи (1.2.2)
 KEEP_LIVE_AFTER_END = timedelta(minutes=30)    # после конца повестки эфир ещё восстанавливается при запуске
 BREAK_HOLD_S = 60          # «когда время вышло» на экране — столько секунд, потом экран сам возвращается к фону
 TAB_REOPEN_S = 30          # сами открыли вкладку экрана учеников — столько секунд ждём, пока она подключится
@@ -198,7 +199,8 @@ class EfirController(QObject):
     def state(self) -> dict:
         w = self.webinar
         if w is None:
-            return {"mode": MODE_IDLE, "bg": {"kind": "color", "value": "#000000"}, "caption": ""}
+            return {"mode": MODE_BLACK if self.mode == MODE_BLACK else MODE_IDLE,
+                    "bg": {"kind": "color", "value": "#000000"}, "caption": ""}
         st = {"mode": self.mode, "bg": self._bg(w.background), "caption": w.caption, "font": self._font(w),
               "color": w.text_color}
         if self.mode == MODE_EXERCISE and 0 <= self.ex_index < len(w.exercises):
@@ -433,6 +435,13 @@ class EfirController(QObject):
     # ================================================================ команды экрана
     def show_background(self) -> None:
         self.mode = MODE_IDLE
+        self.ex_paused = False
+        self._forget_break()
+        self.publish()
+
+    def show_black(self) -> None:
+        """Чёрный экран ученикам: перерыв, зарядка, слайд убираются; снова фон — show_background."""
+        self.mode = MODE_BLACK
         self.ex_paused = False
         self._forget_break()
         self.publish()

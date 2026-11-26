@@ -115,8 +115,8 @@ class CompactTest(AppPage):
                       " [...g.querySelectorAll('button')].map(b => b.dataset.tip)]; })()")
         self.assertTrue(vis[0], vis)
         self.assertTrue(vis[1], vis)
-        self.assertEqual(vis[2], ["none"] * 4)
-        self.assertEqual(vis[3], ["Фон", "Зарядка", "Перерыв", "Слайд"])
+        self.assertEqual(vis[2], ["none"] * 5)
+        self.assertEqual(vis[3], ["Фон", "Чёрный экран", "Зарядка", "Перерыв", "Слайд"])
 
     def test_size_counts_zoom(self):
         """Раскладка — по размеру в пикселях страницы: при 150 % окно 720×420 — это 480×280, «сбоку» не влезает."""
@@ -194,9 +194,20 @@ class CompactTest(AppPage):
     def test_compact_screen_icons_and_next(self):
         self.size(360, 600)
         self.go_live(2, tid="C")
-        self.assertTrue(self.wait_js("document.querySelectorAll('#compact .cscr button').length === 4", 6))
+        self.assertTrue(self.wait_js("document.querySelectorAll('#compact .cscr button').length === 5", 6))
         labels = self.js("[...document.querySelectorAll('#compact .cscr button')].map(b => b.textContent.trim())")
-        self.assertEqual(labels, ["Фон", "Зарядка", "Перерыв", "Слайд"])
+        self.assertEqual(labels, ["Фон", "Чёрный", "Зарядка", "Перерыв", "Слайд"])
+        # 2 × 2 и «Слайд» во всю ширину — ни одна кнопка не висит одна в ряду с пустым местом
+        rows = self.js("(() => { const b = [...document.querySelectorAll('#compact .cscr button')].map(e => e.getBoundingClientRect());"
+                       " return [b[0].top === b[1].top, b[2].top === b[3].top, Math.round(b[4].width) >= Math.round(b[0].width * 2)]; })()")
+        self.assertEqual(rows, [True, True, True])
+        black = "[...document.querySelectorAll('#compact .cscr button')][1]"
+        self.js(black + ".click()")
+        self.assertTrue(self.wait_py(lambda: self.app.efir.mode == "black"))
+        self.app.publish_now()
+        self.assertTrue(self.wait_js(black + ".getAttribute('aria-pressed') === 'true'", 6))
+        self.js(black + ".click()")                    # ещё раз — снова фон
+        self.assertTrue(self.wait_py(lambda: self.app.efir.mode == "idle"))
         before = self.app.efir.store.live.anchor
         self.click("#compact .cnext")                   # «Следующий этап» — перерыв начинается сейчас
         self.assertTrue(self.wait_py(lambda: self.app.efir.store.live.anchor != before))
@@ -215,8 +226,8 @@ class CompactTest(AppPage):
         self.app.settings.exercise_pick = "next"
         self.size(360, 600)
         self.go_live(2, tid="C")
-        self.assertTrue(self.wait_js("document.querySelectorAll('#compact .cscr button').length === 4", 6))
-        ex = "[...document.querySelectorAll('#compact .cscr button')][1]"
+        self.assertTrue(self.wait_js("document.querySelectorAll('#compact .cscr button').length === 5", 6))
+        ex = "[...document.querySelectorAll('#compact .cscr button')][2]"
         try:
             self.js(ex + ".click()")
             self.assertTrue(self.wait_py(lambda: self.app.efir.mode == "exercise"))

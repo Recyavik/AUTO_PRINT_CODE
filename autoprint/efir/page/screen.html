@@ -16,7 +16,10 @@
   .layer { position: fixed; inset: 0; transition: opacity .6s ease; }
   /* фоны — в своём контексте наложения: их z-index при смене не поднимает их над надписями */
   #bgs { position: fixed; inset: 0; z-index: 0; }
-  #caption { z-index: 2; } #brk { z-index: 3; } #vid { z-index: 4; } #slide { z-index: 5; } #dot { z-index: 9; }
+  #caption { z-index: 2; } #brk { z-index: 3; } #vid { z-index: 4; } #slide { z-index: 5; } #black { z-index: 8; } #dot { z-index: 9; }
+  /* чёрный экран (учитель нажал «Чёрный экран»): поверх фона, надписи, перерыва, видео и слайда — плавно */
+  #black { position: fixed; inset: 0; background: #000; opacity: 0; transition: opacity .4s ease; pointer-events: none; }
+  #black.on { opacity: 1; }
   .layer canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
   /* картинка-заставка: целиком в окне любой формы (вкладка браузера редко ровно 16:9) — ничего не обрезано;
      поля по краям — та же картинка, растянутая и размытая (без чёрных полос) */
@@ -88,6 +91,7 @@
 </div>
 <div id="vid"><video playsinline preload="auto"></video><img alt=""></div>
 <div id="slide"><div class="sblur"></div><div class="sfill"></div><img alt=""></div>
+<div id="black"></div>
 <div id="dot"></div>
 <div id="gallery">
   <h1>Фон экрана эфира</h1>
@@ -405,6 +409,7 @@ function startScreen() {
   let front = bgA, back = bgB;
   const brkEl = document.getElementById('brk'), brkBg = new Scene(brkEl.querySelector('.bgwrap'));
   const capEl = document.getElementById('caption'), vidEl = document.getElementById('vid');
+  const blackEl = document.getElementById('black');
   const video = vidEl.querySelector('video'), img = vidEl.querySelector('img');
   // подсказок на экране нет: его видят ученики. Про звук ведущему говорит таймер в программе
   const dot = document.getElementById('dot');
@@ -528,6 +533,7 @@ function startScreen() {
     }
     if (st.mode === 'exercise' && st.exercise && st.exercise.url) showVideo(st.exercise); else hideVideo();
     showSlide(st.mode === 'slide' ? st.slide : null);
+    blackEl.classList.toggle('on', st.mode === 'black');
   }
 
   // слайд презентации: картинка во весь экран; следующий грузится заранее — без чёрного кадра при листании

@@ -384,6 +384,25 @@ class LiveTest(EfirPage):
         self.click("#efirLive .lscr [data-op=background]")
         self.assertTrue(self.wait_py(lambda: self.app.efir.mode == "idle"))
 
+    def test_live_black_screen(self):
+        """Табло вебинара: «Чёрный» рядом с «Фоном» — у учеников чёрный экран; нажат, пока он идёт; ещё раз — фон."""
+        self.app.printer.set_focus("")
+        self.app.efir.clients = 1
+        self.app.efir.launch(self.w1.id, "")
+        self.app.publish_now()
+        self.go("#/efir/live", "efir")
+        sel = "#efirLive .lscr [data-op=black]"
+        self.assertTrue(self.wait_js(f"!!document.querySelector('{sel}')", 6))
+        self.assertEqual(self.js(f"document.querySelector('{sel}').textContent.trim()"), "Чёрный")
+        self.assertEqual(self.js(f"document.querySelector('{sel}').previousElementSibling.dataset.op"), "background")
+        self.click(sel)
+        self.assertTrue(self.wait_py(lambda: self.app.efir.mode == "black"))
+        self.app.publish_now()
+        self.assertTrue(self.wait_js(f"document.querySelector('{sel}').getAttribute('aria-pressed') === 'true'", 6))
+        self.click(sel)
+        self.assertTrue(self.wait_py(lambda: self.app.efir.mode == "idle"))
+        self.app.efir.stop_live()
+
 
 class OldWindowsRemovedTest(unittest.TestCase):
     def test_efir_windows_removed(self):

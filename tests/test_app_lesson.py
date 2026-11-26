@@ -349,6 +349,22 @@ class ScreenCtlTest(AppPage):
             self.assertEqual(self.js(f"document.querySelector('{sel}').innerText.trim()"), "")      # без подписи
         self.assertEqual(self.js("document.querySelector('#scrBg').getAttribute('aria-pressed')"), "true")
 
+    def test_black_one_click_and_back(self):
+        """«Чёрный экран» — значок рядом с «Фоном»: щелчок — у учеников чёрный, миниатюра так и говорит; ещё щелчок — фон."""
+        sel = "#scrBlack"
+        self.assertEqual(self.js(f"document.querySelector('{sel}').getAttribute('aria-label')"), "Чёрный экран")
+        self.assertEqual(self.js(f"document.querySelector('{sel}').innerText.trim()"), "")
+        self.assertEqual(self.js(f"document.querySelector('{sel}').previousElementSibling.id"), "scrBg")
+        self.click(sel)
+        self.assertTrue(self.wait_py(lambda: self.app.efir.mode == "black"))
+        self.app.lesson.publish()
+        self.assertTrue(self.wait_js(f"document.querySelector('{sel}').getAttribute('aria-pressed') === 'true'"))
+        self.assertEqual(self.js("document.querySelector('#scrBg').getAttribute('aria-pressed')"), "false")
+        self.assertTrue(self.js("document.querySelector('#screenThumb').dataset.tip.startsWith('У учеников чёрный экран')"))
+        self.assertIn("снова фон", self.js(f"document.querySelector('{sel}').dataset.tip"))
+        self.click(sel)
+        self.assertTrue(self.wait_py(lambda: self.app.efir.mode == "idle"))
+
     def test_exercise_one_click_in_turn(self):
         """«Зарядка» — одним щелчком: сразу видео по очереди, без меню; подсказка говорит, какое включится."""
         self.app.lesson.publish()
@@ -425,7 +441,7 @@ class ScreenCtlTest(AppPage):
         self.assertIn("без звука", self.js("document.querySelector('#scrEx').dataset.tip"))
         self.app.efir.video_muted = False
 
-    ICONS = ("#scrBg", "#scrEx", "#scrBreak", "#scrSlide")
+    ICONS = ("#scrBg", "#scrBlack", "#scrEx", "#scrBreak", "#scrSlide")
 
     def icon_x(self):
         sels = ",".join(repr(s) for s in self.ICONS)
@@ -891,6 +907,19 @@ class ScreenSlideFillTest(AppPage):
                                          "getComputedStyle(document.querySelector('#caption')).display === 'flex'"))
         px = self.shot()
         self.assertEqual(px(700, 300), (0, 0, 0))                         # чёрный квадрат слайда, не белая надпись
+
+    def test_black_hides_slide_and_caption(self):
+        """Чёрный экран: у учеников ни слайда, ни фона, ни надписи — вся вкладка чёрная; «Фон» — снова надпись."""
+        self.show("sp1")
+        self.app.lesson.command({"cmd": "black"})
+        self.assertTrue(self.screen.wait("document.querySelector('#black').classList.contains('on')", 10))
+        pump(300)
+        px = self.shot()
+        for x, y in ((10, 40), (10, 400), (300, 40), (700, 300), (1000, 400), (1390, 400), (700, 580)):
+            self.assertEqual(px(x, y), (0, 0, 0), (x, y))
+        self.app.lesson.command({"cmd": "background"})
+        self.assertTrue(self.screen.wait("!document.querySelector('#black').classList.contains('on') && "
+                                         "getComputedStyle(document.querySelector('#caption')).display === 'flex'", 10))
 
     def test_thin_pattern_edge_filled_with_its_color(self):
         """Край в основном белый, по нему тонкие линии узора — поле белое (не размытое и не чёрное)."""

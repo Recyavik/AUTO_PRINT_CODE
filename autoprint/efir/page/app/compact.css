@@ -26,8 +26,9 @@ body.compact #compact { display: flex; position: fixed; inset: 0; z-index: 40; f
 #compact .cb-next { font-size: 14px; padding: 8px 10px; border-radius: var(--r); background: var(--panel); border: 1px solid var(--line);
   overflow-wrap: anywhere; }
 
-/* экран учеников 2×2 — значок и подпись */
+/* экран учеников: 2 × 2 и последняя («Слайд») во всю ширину — значок и подпись */
 #compact .cscr { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+#compact .cscr .cs:last-child:nth-child(odd) { grid-column: 1 / -1; }
 #compact .cscr[hidden] { display: none; }
 #compact .cs { display: flex; align-items: center; gap: 8px; min-width: 0; height: 40px; padding: 0 10px; border-radius: var(--r);
   border: 1px solid var(--line); background: var(--panel); color: var(--text); cursor: pointer; font: inherit; font-size: 14px; }
@@ -75,7 +76,7 @@ body[data-size="strip"] #compact .cnow { flex: 0 0 260px; }
 body[data-size="strip"] #compact .cb-time { font-size: 36px; }
 body[data-size="strip"] #compact .cb-next, body[data-size="strip"] #compact .cnext,
 body[data-size="strip"] #compact .cb-clock { display: none; }
-/* полоса: экран учеников — четыре значка без подписей (подсказки — при наведении), справа от этапов */
+/* полоса: экран учеников — пять значков без подписей (подсказки — при наведении), справа от этапов */
 body[data-size="strip"] #compact .cscr { order: 3; flex: none; display: flex; gap: 4px; }
 body[data-size="strip"] #compact .cscr[hidden] { display: none; }
 body[data-size="strip"] #compact .cs { width: 38px; height: 38px; padding: 0; justify-content: center; }

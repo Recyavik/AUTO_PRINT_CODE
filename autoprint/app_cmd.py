@@ -609,12 +609,14 @@ class AppCommands(QObject):
         self.app.publish_now()
 
     def cmd_efir_screen(self, d: dict) -> None:
-        """Экран учеников из табло вебинара (урок не нужен): background | break | exercise | break_adjust |
+        """Экран учеников из табло вебинара (урок не нужен): background | black | break | exercise | break_adjust |
         break_pause | exercise_pause."""
         ef = self._ef
         op = str(d.get("op") or "")
         if op == "background":
             ef.show_background()
+        elif op == "black":
+            ef.show_black()
         elif op == "break":
             w = ef.webinar or ef.live_webinar()
             ef.start_break(int(d.get("minutes") or 0) or (w.break_min if w else 10))
