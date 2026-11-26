@@ -58,6 +58,7 @@ class EfirController(QObject):
         self.ex_seq = 0
         self.ex_restart = 0
         self.ex_paused = False
+        self.ex_started = -1e9           # когда включили зарядку (time.monotonic) — двойной щелчок не перескакивает видео
         self.video_pos = 0.0
         self.video_dur = 0.0
         self.video_error = ""
@@ -386,7 +387,10 @@ class EfirController(QObject):
             return
         end = live.anchor + timedelta(minutes=w.total_min)
         if datetime.now() > end + KEEP_LIVE_AFTER_END or live.anchor.date() < datetime.now().date():
-            self.store.set_live(None)
+            self.store.set_live(None)        # вчерашний урок не завершили — снят; экран урока и учеников узнают
+            if self.server.running:
+                self.publish()
+            self.live_changed.emit()
             return
         self.webinar = w
         self.ensure_server()
@@ -442,6 +446,7 @@ class EfirController(QObject):
             self.message.emit(f"Нет файла зарядки: {w.exercises[index].path}", True)
             return
         self.ensure_server()
+        self.ex_started = time.monotonic()
         self.ex_index = index
         self.ex_seq += 1
         self.ex_paused = False
@@ -450,8 +455,19 @@ class EfirController(QObject):
         self.video_muted = self.video_waiting = False
         self.mode = MODE_EXERCISE
         self._forget_break()
+        self._remember_exercise(w.exercises[index].title)
         self.publish()
         self.ensure_tab()
+
+    def _remember_exercise(self, title: str) -> None:
+        """Прошлое видео зарядки — в настройки: «по очереди» продолжит со следующего и после перезапуска."""
+        s = self.settings
+        if s is None or not hasattr(s, "exercise_last") or s.exercise_last == title:
+            return
+        s.exercise_last = title
+        timer = getattr(self.main, "_settings_timer", None)
+        if timer is not None:
+            timer.start()
 
     def exercise_pause(self) -> None:
         if self.mode == MODE_EXERCISE:

@@ -322,6 +322,8 @@ class ScreenCtlTest(AppPage):
             self.stop_live()
         ef.show_background()
         ef.clients = 1
+        self.app.settings.exercise_pick = "next"     # по умолчанию с 1.2.1: щелчок — видео по очереди
+        self.app.settings.exercise_last = ""
         self.app.lesson._last_slide = ""             # «Слайд» после другого теста — снова с первого
         self.app.printer.set_focus("SC")
         self.app.lesson.publish()
@@ -343,9 +345,41 @@ class ScreenCtlTest(AppPage):
     def test_icons_have_tooltips_no_labels(self):
         for sel, name in (("#scrBg", "Фон"), ("#scrEx", "Зарядка"), ("#scrBreak", "Перерыв"), ("#scrSlide", "Слайд")):
             self.assertEqual(self.js(f"document.querySelector('{sel}').getAttribute('aria-label')"), name)
-            self.assertEqual(self.js(f"document.querySelector('{sel}').dataset.tip"), name)
+            self.assertTrue(self.js(f"document.querySelector('{sel}').dataset.tip").startswith(name), sel)
             self.assertEqual(self.js(f"document.querySelector('{sel}').innerText.trim()"), "")      # без подписи
         self.assertEqual(self.js("document.querySelector('#scrBg').getAttribute('aria-pressed')"), "true")
+
+    def test_exercise_one_click_in_turn(self):
+        """«Зарядка» — одним щелчком: сразу видео по очереди, без меню; подсказка говорит, какое включится."""
+        self.app.lesson.publish()
+        self.assertTrue(self.wait_js("document.querySelector('#scrEx').dataset.tip.includes('«Глаза»')"))
+        self.assertIn("правой кнопкой", self.js("document.querySelector('#scrEx').dataset.tip"))
+        self.click("#scrEx")
+        self.assertTrue(self.wait_py(lambda: self.app.efir.mode == "exercise" and self.app.efir.ex_index == 0))
+        self.assertFalse(self.js("!!document.querySelector('.pop')"))                 # без меню
+        self.assertEqual(self.app.settings.exercise_last, "Глаза")
+        self.app.lesson.publish()
+        self.assertTrue(self.wait_js("document.querySelector('#scrEx').getAttribute('aria-pressed') === 'true'"))
+        self.click("#scrEx")                          # идёт — щелчок открывает меню: пауза, сначала, другое видео
+        items = self.menu_items()
+        for x in ("Пауза", "Сначала", "Убрать — снова фон", "Глаза", "Спина"):
+            self.assertIn(x, items)
+
+    def test_exercise_ask_but_stage_has_video(self):
+        """«Спросить», но идёт этап-зарядка со своим видео — щелчок включает его, и подсказка так и говорит."""
+        self.app.settings.exercise_pick = "ask"
+        self.go_live(11, tid="SC")                    # этап «Зарядка» (10–15 мин) — своё видео «Спина»
+        self.app.lesson.publish()
+        self.assertTrue(self.wait_js("document.querySelector('#scrEx').dataset.tip.includes('«Спина»')", 6),
+                        self.js("document.querySelector('#scrEx').dataset.tip"))
+
+    def test_exercise_ask_setting_opens_menu(self):
+        self.app.settings.exercise_pick = "ask"
+        self.app.lesson.publish()
+        self.assertTrue(self.wait_js("document.querySelector('#scrEx').dataset.tip === 'Зарядка — выбрать видео'"))
+        self.click("#scrEx")
+        self.assertEqual(self.menu_items()[:2], ["Глаза", "Спина"])
+        self.assertEqual(self.app.efir.mode, "idle")
 
     def test_break_menu_planned_first(self):
         self.click("#scrBreak")
@@ -381,8 +415,8 @@ class ScreenCtlTest(AppPage):
 
     def test_exercise_list_and_muted_mark(self):
         self.app.lesson.publish()
-        self.click("#scrEx")
-        self.assertEqual(self.menu_items()[:2], ["Глаза", "Спина"])
+        self.js("document.querySelector('#scrEx').dispatchEvent(new MouseEvent('contextmenu', {bubbles: true, cancelable: true}))")
+        self.assertEqual(self.menu_items()[:2], ["Глаза", "Спина"])           # правой кнопкой — выбрать видео
         self.js("[...document.querySelectorAll('.pop .mi')].find(b => b.textContent.includes('Глаза')).click()")
         self.assertTrue(self.wait_py(lambda: self.app.efir.mode == "exercise"))
         self.app.efir.video_muted = True
@@ -599,8 +633,17 @@ class ScreenCtlTest(AppPage):
             self.assertTrue(all(a != b for a, b in zip(seen, seen[1:])), seen)     # не то же видео подряд
         finally:
             back.unlink()
-            self.app.settings.exercise_pick = "ask"
+            self.app.settings.exercise_pick = "next"
             self.app.lesson.publish()
+
+    def test_exercise_stage_without_video_in_turn(self):
+        """Этап «зарядка» без своего видео, настройка «По очереди» — кнопка этапа называет видео и включает его."""
+        self.app.lesson.publish()
+        sel = self.stage_ex_btn("a5")
+        self.assertTrue(self.wait_js(f"document.querySelector('{sel}')?.textContent === 'Включить зарядку ученикам · Глаза'"))
+        self.click(sel)
+        self.assertTrue(self.wait_py(lambda: self.app.efir.mode == "exercise" and self.app.efir.ex_index == 0))
+        self.assertFalse(self.js("!!document.querySelector('.pop')"))
 
     def test_slide_arrows(self):
         self.click("#scrSlide")
@@ -739,6 +782,124 @@ class ScreenImageTest(AppPage):
         finally:
             screen.close()
             self.app.efir.show_background()
+
+
+def slide_lessons() -> list[Template]:
+    """Слайды 16:9: обычный (белый, синяя полоса заголовка во всю ширину, чёрный квадрат) и «фото» (пёстрый край)."""
+    import random
+    import tempfile
+    from PySide6.QtGui import QColor, QImage
+    from autoprint.storage import BLOCK_IMAGE, Block
+    d = Path(tempfile.mkdtemp())
+    plain = QImage(320, 180, QImage.Format_RGB32)
+    plain.fill(QColor("#ffffff"))
+    for y in range(36):
+        for x in range(320):
+            plain.setPixelColor(x, y, QColor("#1e50c8"))          # полоса заголовка: верхние 20 %
+    for y in range(70, 110):
+        for x in range(140, 180):
+            plain.setPixelColor(x, y, QColor("#000000"))
+    photo = QImage(320, 180, QImage.Format_RGB32)
+    rnd = random.Random(7)
+    for y in range(0, 180, 4):                                   # пятна 4×4 — край «фото», не одного цвета
+        for x in range(0, 320, 4):
+            c = QColor(rnd.randrange(40, 255), rnd.randrange(40, 255), rnd.randrange(40, 255))
+            for j in range(4):
+                for i in range(4):
+                    photo.setPixelColor(x + i, y + j, c)
+    lines = QImage(320, 180, QImage.Format_RGB32)             # белый, у правого края — тонкие линии узора
+    lines.fill(QColor("#ffffff"))
+    for y in range(0, 180, 10):
+        for x in range(200, 320):
+            lines.setPixelColor(x, y, QColor("#8a8a8a"))
+    paths = [d / "plain.png", d / "photo.png", d / "lines.png"]
+    plain.save(str(paths[0]))
+    photo.save(str(paths[1]))
+    lines.save(str(paths[2]))
+    return [Template("Слайды", [stage("Начало", 5, id="f1"), Block(BLOCK_IMAGE, str(paths[0]), slide=1, id="sp1"),
+                                Block(BLOCK_IMAGE, str(paths[1]), slide=2, id="sp2"),
+                                Block(BLOCK_IMAGE, str(paths[2]), slide=3, id="sp3")], id="SF")]
+
+
+class ScreenSlideFillTest(AppPage):
+    """Слайд ученикам: целиком, а поля вокруг (вкладка шире слайда 16:9) — не чёрные: продолжение края слайда
+    (цвет и полосы заголовка); край пёстрый — тот же слайд, размытый."""
+    port = 18999
+    templates = staticmethod(slide_lessons)
+    route = "#/lesson/SF"
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        from cdp import Edge
+        from autoprint.efir.model import Look
+        cls.look = Look(title="С надписью", caption="█████")          # надпись оформления — до урока на фоне
+        cls.app.efir.save_look(cls.look)
+        cls.store.get("SF").look = cls.look.id
+        cls.app.printer.set_focus("SF")
+        cls.app.lesson.publish()
+        cls.screen = Edge.start(f"http://127.0.0.1:{cls.app.efir.server.port}/?nofade", pump=lambda: pump(5),
+                                width=1400, height=600)
+        cls.screen.call("Emulation.setDeviceMetricsOverride", {"width": 1400, "height": 600, "deviceScaleFactor": 1,
+                                                               "mobile": False})
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.screen.close()
+        cls.app.efir.show_background()
+        super().tearDownClass()
+
+    def show(self, bid):
+        self.app.efir.clients = max(1, self.app.efir.clients)
+        self.app.lesson.command({"cmd": "slide", "block": bid})
+        self.assertTrue(self.screen.wait("document.querySelector('#slide').classList.contains('on') && "
+                                         f"document.querySelector('#slide img').getAttribute('src') === "
+                                         f"{self.app.efir.state()['slide']['src']!r} && "
+                                         "document.querySelector('#slide img').complete", 10))
+        pump(300)
+
+    def shot(self):
+        import base64
+        from PySide6.QtGui import QImage
+        data = base64.b64decode(self.screen.call("Page.captureScreenshot", {"format": "png"})["data"])
+        img = QImage.fromData(data)
+        self.assertEqual((img.width(), img.height()), (1400, 600))
+        return lambda x, y: img.pixelColor(x, y).getRgb()[:3]
+
+    def test_plain_slide_margins_continue_its_edge(self):
+        self.show("sp1")
+        px = self.shot()
+        # слайд 16:9 во вкладке 1400×600 — 1067×600 по центру, поля по 166 px слева и справа
+        self.assertEqual(px(700, 300), (0, 0, 0))                         # квадрат в середине слайда — на месте
+        for x in (10, 1390):
+            self.assertEqual(px(x, 400), (255, 255, 255), x)            # поле — белое, как край слайда, не чёрное
+            r, g, b = px(x, 40)                                          # полоса заголовка продолжается в поле
+            self.assertTrue(abs(r - 0x1e) < 6 and abs(g - 0x50) < 6 and abs(b - 0xc8) < 6, (x, r, g, b))
+        self.assertEqual(self.screen.eval("getComputedStyle(document.querySelector('#slide .sblur')).display"), "none")
+
+    def test_photo_slide_margins_blurred_copy(self):
+        self.show("sp2")
+        self.assertEqual(self.screen.eval("getComputedStyle(document.querySelector('#slide .sblur')).display"), "block")
+        px = self.shot()
+        for x in (10, 1390):
+            self.assertGreater(sum(px(x, 300)), 60, x)                   # не чёрная полоса — размытый слайд
+
+    def test_slide_covers_look_caption(self):
+        """Надпись оформления (до урока она на фоне) — под слайдом, а не поверх него."""
+        self.show("sp1")
+        self.assertTrue(self.screen.wait("document.querySelector('#caption').textContent === '█████' && "
+                                         "getComputedStyle(document.querySelector('#caption')).display === 'flex'"))
+        px = self.shot()
+        self.assertEqual(px(700, 300), (0, 0, 0))                         # чёрный квадрат слайда, не белая надпись
+
+    def test_thin_pattern_edge_filled_with_its_color(self):
+        """Край в основном белый, по нему тонкие линии узора — поле белое (не размытое и не чёрное)."""
+        self.show("sp3")
+        self.assertEqual(self.screen.eval("getComputedStyle(document.querySelector('#slide .sblur')).display"), "none")
+        px = self.shot()
+        for y in (5, 300, 555):
+            self.assertEqual(px(1390, y), (255, 255, 255), y)
+            self.assertEqual(px(10, y), (255, 255, 255), y)
 
 
 PNG_1x1_B64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="

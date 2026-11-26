@@ -16,7 +16,7 @@
   .layer { position: fixed; inset: 0; transition: opacity .6s ease; }
   /* фоны — в своём контексте наложения: их z-index при смене не поднимает их над надписями */
   #bgs { position: fixed; inset: 0; z-index: 0; }
-  #caption { z-index: 2; } #brk { z-index: 3; } #vid { z-index: 4; } #dot { z-index: 9; }
+  #caption { z-index: 2; } #brk { z-index: 3; } #vid { z-index: 4; } #slide { z-index: 5; } #dot { z-index: 9; }
   .layer canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
   /* картинка-заставка: целиком в окне любой формы (вкладка браузера редко ровно 16:9) — ничего не обрезано;
      поля по краям — та же картинка, растянутая и размытая (без чёрных полос) */
@@ -48,9 +48,15 @@
   #vid.on { opacity: 1; }
   #vid video { width: 100%; height: 100%; object-fit: contain; display: block; background: #000; }
   #vid img { width: 100%; height: 100%; object-fit: contain; display: none; }
-  #slide { position: fixed; inset: 0; background: #000; opacity: 0; transition: opacity .25s ease; pointer-events: none; }
+  /* слайд — целиком (ничего не обрезано); вкладка почти никогда не по форме слайда — поля вокруг не чёрные:
+     цвет края слайда (.sfill) или, если край пёстрый, тот же слайд, растянутый и размытый (.sblur) */
+  #slide { position: fixed; inset: 0; background: #000; opacity: 0; transition: opacity .25s ease; pointer-events: none;
+    overflow: hidden; }
   #slide.on { opacity: 1; }
-  #slide img { width: 100%; height: 100%; object-fit: contain; display: block; }
+  #slide .sfill { position: absolute; inset: 0; }
+  #slide .sblur { position: absolute; inset: -8%; background: center / cover no-repeat;
+    filter: blur(32px) brightness(.55) saturate(1.1); display: none; }
+  #slide img { position: relative; width: 100%; height: 100%; object-fit: contain; display: block; }
   #dot { position: fixed; right: 12px; bottom: 12px; width: 9px; height: 9px; border-radius: 50%;
     background: #888; opacity: 0; transition: opacity .6s; }
   #dot.on { opacity: .35; }
@@ -81,7 +87,7 @@
   <div class="bar"><i></i></div>
 </div>
 <div id="vid"><video playsinline preload="auto"></video><img alt=""></div>
-<div id="slide"><img alt=""></div>
+<div id="slide"><div class="sblur"></div><div class="sfill"></div><img alt=""></div>
 <div id="dot"></div>
 <div id="gallery">
   <h1>Фон экрана эфира</h1>
@@ -526,16 +532,73 @@ function startScreen() {
 
   // слайд презентации: картинка во весь экран; следующий грузится заранее — без чёрного кадра при листании
   const slideEl = document.getElementById('slide'), slideImg = slideEl.querySelector('img');
-  let preload = null;
+  const slideFill = slideEl.querySelector('.sfill'), slideBlur = slideEl.querySelector('.sblur');
+  let preload = null, edges = {};
   function showSlide(sl) {
     if (!sl || !sl.src) { slideEl.classList.remove('on'); return; }
     if (slideImg.getAttribute('src') !== sl.src) {
       const im = new Image();
-      im.onload = im.onerror = () => { slideImg.src = sl.src; slideEl.classList.add('on'); };
+      im.onload = im.onerror = () => {
+        edges = im.naturalWidth ? slideEdges(im) : {};
+        slideImg.src = sl.src; paintMargins(); slideEl.classList.add('on');
+      };
       im.src = sl.src;
     } else slideEl.classList.add('on');
     if (sl.next) { preload = new Image(); preload.src = sl.next; }
   }
+
+  // Поля вокруг слайда (вкладка редко по форме слайда — сверху панель браузера): не чёрные. Каждое поле — по своему
+  // краю слайда: край спокойный (один цвет, полосы заголовка и подвала, плавный градиент) — край тянется на поле,
+  // и слайд будто во всю вкладку; край в основном одного цвета (тонкие линии узора по белому) — этим цветом;
+  // пёстрый (фото) или слайд с другого сайта (его точки не прочитать) — под полем та же картинка, размытая.
+  // Возвращает слой CSS-фона для поля или ''.
+  function edgeStrip(im, side) {
+    const w = im.naturalWidth, h = im.naturalHeight, vert = side === 'l' || side === 'r';
+    const strip = (n) => {                          // край, чуть внутрь (у края бывает рамка в пиксель): n точек
+      const c = document.createElement('canvas'); c.width = vert ? 1 : n; c.height = vert ? n : 1;
+      const x = c.getContext('2d', { willReadFrequently: true });
+      x.imageSmoothingQuality = 'high';             // уменьшая край до 90 точек — усреднять, а не брать через одну
+      x.fillStyle = '#000'; x.fillRect(0, 0, c.width, c.height);       // прозрачное — как чёрный фон слайда
+      const ins = Math.floor((vert ? w : h) * .004);
+      if (side === 'l') x.drawImage(im, ins, 0, 1, h, 0, 0, 1, n);
+      else if (side === 'r') x.drawImage(im, w - 1 - ins, 0, 1, h, 0, 0, 1, n);
+      else if (side === 't') x.drawImage(im, 0, ins, w, 1, 0, 0, n, 1);
+      else x.drawImage(im, 0, h - 1 - ins, w, 1, 0, 0, n, 1);
+      return c;
+    };
+    const probe = strip(90), d = probe.getContext('2d').getImageData(0, 0, probe.width, probe.height).data;
+    let jumps = 0;                                  // соседние точки края заметно разные: у фото их много
+    for (let k = 4; k < d.length; k += 4)
+      if (Math.abs(d[k] - d[k - 4]) + Math.abs(d[k + 1] - d[k - 3]) + Math.abs(d[k + 2] - d[k - 2]) > 36) jumps++;
+    if (jumps <= 6) return `url("${strip(Math.max(2, Math.min(vert ? h : w, 1080))).toDataURL()}")`;
+    const pts = [];
+    for (let k = 0; k < d.length; k += 4) pts.push([d[k], d[k + 1], d[k + 2]]);
+    const med = [0, 1, 2].map((ch) => pts.map((p) => p[ch]).sort((a, b) => a - b)[pts.length >> 1]);
+    const near = pts.filter((p) => Math.abs(p[0] - med[0]) + Math.abs(p[1] - med[1]) + Math.abs(p[2] - med[2]) <= 40);
+    if (near.length < pts.length * .6) return '';
+    const rgb = [0, 1, 2].map((ch) => Math.round(near.reduce((s, p) => s + p[ch], 0) / near.length)).join(', ');
+    return `linear-gradient(rgb(${rgb}), rgb(${rgb}))`;
+  }
+  function slideEdges(im) {
+    const e = { w: im.naturalWidth, h: im.naturalHeight };
+    try { for (const s of ['l', 'r', 't', 'b']) e[s] = edgeStrip(im, s); }
+    catch (err) { /* картинка с другого сайта — только размытой копией */ }
+    return e;
+  }
+  function paintMargins() {
+    const e = edges;
+    if (!e.w) { slideFill.style.background = ''; slideBlur.style.display = 'none'; return; }
+    const wide = innerWidth / innerHeight > e.w / e.h;          // поля слева и справа (иначе — сверху и снизу)
+    const [a, b] = wide ? [e.l, e.r] : [e.t, e.b], size = wide ? '50% 100%' : '100% 50%';
+    const layers = [];
+    if (a) layers.push(`${a} left top / ${size} no-repeat`);
+    if (b) layers.push(`${b} ${wide ? 'right top' : 'left bottom'} / ${size} no-repeat`);
+    slideFill.style.background = layers.join(', ');
+    const blur = !(a && b);                         // поле без своего фона — видна размытая копия под ним
+    slideBlur.style.display = blur ? 'block' : 'none';
+    if (blur) slideBlur.style.backgroundImage = `url("${slideImg.getAttribute('src')}")`;
+  }
+  window.addEventListener('resize', paintMargins);
 
   // звук: первый щелчок по странице разрешает воспроизведение со звуком до перезагрузки вкладки
   const unlock = () => {

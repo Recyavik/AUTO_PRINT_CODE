@@ -88,6 +88,12 @@ def apply(settings, store=None) -> bool:
         settings.window_geometry = ""
         done.append("v1")
         changed = True
+    if "exercise_v121" not in done:
+        # 1.2.1: щелчок по «Зарядке» сразу включает видео — по очереди. «Спросить» до этого стояло само (по умолчанию)
+        if settings.exercise_pick == "ask":
+            settings.exercise_pick = "next"
+        done.append("exercise_v121")
+        changed = True
     if store is None:
         return changed
     if "roles_v10" not in done:

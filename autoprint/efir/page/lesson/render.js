@@ -436,8 +436,9 @@ export function stageVideo(it) {
 function efirRow(it) {
   const ex = exerciseList();
   const video = stageVideo(it);
-  const pick = (A.S && A.S.prefs && A.S.prefs.exercise_pick) || "ask";
-  const k = "efir:" + it.id + ":" + it.kind + ":" + ex.join("|") + ":" + (it.exercise || "") + ":" + it.minutes + ":" + ((A.S && A.S.efir && A.S.efir.tab) || "") + ":" + (A.S && A.S.efir && A.S.efir.tab_open ? 1 : 0) + ":" + ((A.S && A.S.exercises_missing) || []).join("|") + ":" + pick;
+  const pick = (A.S && A.S.prefs && A.S.prefs.exercise_pick) || "next";
+  const next = (A.S && A.S.exercise_next) || "";        // «по очереди»: какое видео включит кнопка
+  const k = "efir:" + it.id + ":" + it.kind + ":" + ex.join("|") + ":" + (it.exercise || "") + ":" + it.minutes + ":" + ((A.S && A.S.efir && A.S.efir.tab) || "") + ":" + (A.S && A.S.efir && A.S.efir.tab_open ? 1 : 0) + ":" + ((A.S && A.S.exercises_missing) || []).join("|") + ":" + pick + ":" + next;
   let n = nodes.get("efir:" + it.id);
   if (n && n.dataset.k === k) return n;
   const fresh = el("div", "blk efir");
@@ -455,7 +456,8 @@ function efirRow(it) {
     c.appendChild(b);
   } else if (ex.length) {
     const b = el("button", "efirbtn", video ? "Включить зарядку ученикам · " + video
-      : pick === "random" ? "Включить случайную зарядку" : "Выбрать зарядку ученикам…");
+      : pick === "random" ? "Включить случайную зарядку" : pick === "ask" ? "Выбрать зарядку ученикам…"
+      : "Включить зарядку ученикам" + (next ? " · " + next : ""));
     b.dataset.act = "exercise";
     b.dataset.stage = it.id;
     c.appendChild(b);

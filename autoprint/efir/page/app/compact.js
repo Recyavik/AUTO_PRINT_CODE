@@ -89,6 +89,15 @@ function exMenu(anchor) {
   menu(anchor, items);
 }
 
+// «Зарядка» одним щелчком — как в большом режиме: идёт — меню; нет — сразу видео (своё у идущего этапа-зарядки его
+// выберет программа, иначе по очереди или случайное); «Спросить» или видео нет — меню. Правая кнопка — меню всегда.
+function exClick(anchor) {
+  const list = (LC.state && LC.state.exercises) || [];
+  const pick = (LC.state && LC.state.prefs && LC.state.prefs.exercise_pick) || "next";
+  if (efir().mode === "exercise" || !list.length || pick === "ask" && list.length > 1) { exMenu(anchor); return; }
+  cmd({ cmd: "exercise", pick });
+}
+
 function screenGrid() {
   const mk = (ic, label, fn) => {
     const b = h("button", { class: "cs", type: "button", "aria-pressed": "false", "aria-label": label }, icon(ic), h("span", null, label));
@@ -97,7 +106,8 @@ function screenGrid() {
     return b;
   };
   const bg = mk("image", "Фон", () => cmd({ cmd: "background" }));
-  const ex = mk("activity", "Зарядка", (b) => exMenu(b));
+  const ex = mk("activity", "Зарядка", (b) => exClick(b));
+  ex.addEventListener("contextmenu", (e) => { e.preventDefault(); exMenu(ex); });
   const brk = mk("cup", "Перерыв", (b) => breakMenu(b));
   const sl = mk("slide", "Слайд", () => cmd(efir().mode === "slide" ? { cmd: "background" } : { cmd: "slide_step", d: 1 }));
   const el = h("div", { class: "cscr", role: "group", "aria-label": "Экран учеников" }, bg, ex, brk, sl);

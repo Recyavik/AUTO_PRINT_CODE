@@ -710,8 +710,10 @@ class PlanTest(EditPage):
         self.open_lesson("F")
         self.editing(True)
         self.assertTrue(self.wait_js("!!document.querySelector('#st-fz .efirbtn')"))
-        # 1.1: своего видео у этапа нет, видео два — выбирают на уроке (не «первое попавшееся»)
-        self.assertEqual(self.js("document.querySelector('#st-fz .efirbtn').textContent"), "Выбрать зарядку ученикам…")
+        # 1.2.1: своего видео у этапа нет, видео два — кнопка включает следующее по очереди и называет его
+        # («Спросить» в настройках — снова «Выбрать зарядку ученикам…», см. test_app_lesson)
+        self.assertRegex(self.js("document.querySelector('#st-fz .efirbtn').textContent"),
+                         r"^Включить зарядку ученикам · (Глаза|Шея)$")
         self.click("#st-fz .kindbtn")
         self.menu_click("Шея")
         self.assertTrue(self.wait_py(lambda: self.store.get("F").find_block("fz").exercise == "Шея"))

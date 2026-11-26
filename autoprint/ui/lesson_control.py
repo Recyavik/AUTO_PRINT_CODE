@@ -10,6 +10,7 @@ from __future__ import annotations
 import concurrent.futures
 import json
 import logging
+import time
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -25,8 +26,9 @@ log = logging.getLogger(__name__)
 
 # «Мои настройки» экрана урока: поле Settings → допустимые значения
 PREFS = {"page_zoom": "zoom", "page_zoom_auto": "bool", "page_plan": ("side", "top", "hidden"),
-         "page_width": "width", "exercise_pick": ("ask", "random"), "page_past": ("dim", "collapse"),
+         "page_width": "width", "exercise_pick": ("next", "random", "ask"), "page_past": ("dim", "collapse"),
          "page_stage_timer": "bool", "start_compact": "bool", "start_screen": "bool"}
+EX_DOUBLE_S = 2.0           # «Зарядка» нажата второй раз так быстро — это двойной щелчок, а не «следующее видео»
 ANSWER_FETCH_LIMIT = 90     # «Вставить ответ нейросети»: фото качаются не дольше, потом урок добавляется со ссылками
 
 
@@ -54,6 +56,8 @@ class LessonController(QObject):
         self._timeline: dict[str, tuple[int, int]] = {}   # этапы идущего урока: id → (с минуты, по минуту)
         self._timer = QTimer(self, singleShot=True, interval=300, timeout=self.publish)
         self._last = ""          # что ушло на страницу в последний раз: то же самое второй раз не шлём
+        self._idle_key = ""      # урок и оформление, по которым экран учеников показывает фон до урока
+        self._idle_w = None      # и шаблон экрана, который для этого поставлен (EfirController.webinar)
         for sig in (self.efir.live_changed, self.efir.screen_changed, self.efir.tab_changed,
                     self.efir.webinars_changed, theme.changed, main.printer.changed):
             sig.connect(self.schedule_publish)
@@ -86,8 +90,31 @@ class LessonController(QObject):
         if not self._timer.isActive():
             self._timer.start()
 
+    def _idle_screen(self, t: Template | None) -> None:
+        """Урок не идёт и эфира по расписанию нет, у учеников фон — экран учеников в оформлении урока, открытого в
+        программе (нет урока — оформление по умолчанию): фон, надпись, шрифт, а не чёрный экран с запуска. Открыли
+        другой урок, поправили оформление — экран меняется. Перерыв, зарядку, слайд до урока не трогаем."""
+        ef = self.efir
+        if ef.store.live is not None or ef.mode != "idle":
+            return
+        look = ef.lesson_look(t)
+        if look is None:
+            return
+        key = json.dumps([t.id if t is not None else "", look.to_dict()], ensure_ascii=False, sort_keys=True)
+        if key == self._idle_key and ef.webinar is self._idle_w:
+            return                       # экран уже в этом оформлении (а не вебинара, который только что завершили)
+        self._idle_key = key
+        if t is not None:
+            ef.webinar = scenario.webinar_for(t, look)
+        else:
+            from ..efir.model import Webinar, compose
+            ef.webinar = compose(Webinar(title="", id="idle"), look)
+        self._idle_w = ef.webinar
+        ef.publish()
+
     def publish(self) -> None:
         t = self.current()
+        self._idle_screen(t)
         live = self.efir.store.live
         anchor = None
         if t is not None and live is not None and self.efir.live_lesson_id() == t.id:
@@ -127,8 +154,12 @@ class LessonController(QObject):
         state["notice"] = dict(self._notice)
         state["button_countdown"] = self._countdown()      # «Набрать»: через сколько секунд начнётся набор
         # видео зарядок, файлов которых нет (удалили, переместили) — этап-зарядка предупредит заранее
-        state["exercises_missing"] = [e.title for e in (preset.exercises if preset is not None else [])
-                                      if not Path(e.path).is_file()]
+        exs = preset.exercises if preset is not None else []
+        have = [Path(e.path).is_file() for e in exs]       # файлы проверяются раз на отправку (флешка, сеть — медленно)
+        state["exercises_missing"] = [e.title for e, ok in zip(exs, have) if not ok]
+        # «по очереди»: какое видео включит щелчок по «Зарядке» — подсказке значка и кнопке этапа
+        state["exercise_next"] = (exs[self._next_exercise(exs, "next", have)].title
+                                  if exs and self.main.settings.exercise_pick != "random" else "")
         # во время зарядки экран эфира шлёт ход видео раз в секунду: странице суфлёра от этого ничего не
         # меняется — не перерисовывать её (иначе пересоздаются кнопки и теряются щелчки)
         key = json.dumps(state, ensure_ascii=False, sort_keys=True)
@@ -567,9 +598,7 @@ class LessonController(QObject):
             elif cmd == "recognize" and t is not None:
                 self.main.recognize_lesson(t)
             elif cmd == "exercise" and t is not None:
-                self._ensure_screen(t)
-                self.efir.start_exercise(self._exercise_index(t, str(d.get("stage") or ""), d.get("index"),
-                                                              str(d.get("pick") or "")))
+                self._exercise(t, d)
             elif cmd == "background":
                 self.efir.show_background()
             elif cmd == "preset" and t is not None:
@@ -685,9 +714,32 @@ class LessonController(QObject):
         w = self.efir.webinar or self.efir.live_webinar()
         self.efir.start_break(int(minutes or 0) or (w.break_min if w else 10))
 
+    def _exercise(self, t: Template, d: dict) -> None:
+        """Зарядка ученикам. Без номера видео (щелчок по «Зарядке», кнопка этапа, маленький режим) — своё видео этапа:
+        названного страницей, иначе идущего этапа-зарядки; иначе по настройке. Зарядка только что включилась, а
+        щелчок без номера пришёл ещё раз (двойной щелчок: страница не успела узнать) — ничего, иначе видео
+        перескочило бы на следующее."""
+        index = d.get("index")
+        chosen = index is not None and str(index).strip() != ""
+        ef = self.efir
+        if not chosen and ef.mode == "exercise" and time.monotonic() - ef.ex_started < EX_DOUBLE_S:
+            return
+        stage = str(d.get("stage") or "") or self._live_exercise_stage(t)
+        self._ensure_screen(t)
+        ef.start_exercise(self._exercise_index(t, stage, index, str(d.get("pick") or "")))
+
+    def _live_exercise_stage(self, t: Template) -> str:
+        """Идёт урок t и сейчас этап-зарядка — id этого этапа, иначе ""."""
+        if self.efir.store.live is None or self.efir.live_lesson_id() != t.id:
+            return ""
+        stages = scenario.stages(t)[1]
+        i = self._current_stage(t)
+        s = stages[i] if 0 <= i < len(stages) else None
+        return s.block.id if s is not None and s.block.stage_kind == "exercise" else ""
+
     def _exercise_index(self, t: Template, stage_id: str, index, pick: str = "") -> int:
         """Какое видео зарядки включить: своё видео этапа (по названию); иначе выбранное в меню (index); иначе —
-        «Случайная зарядка» (pick или настройка): любое видео с файлом, но не то же, что в прошлый раз; иначе первое."""
+        по настройке «Какое видео включать» (pick или настройка) — см. _next_exercise."""
         from ..lesson_md import video_key
         w = self.efir.webinar or self.efir.live_webinar()
         exs = w.exercises if w is not None else []
@@ -699,13 +751,31 @@ class LessonController(QObject):
                 return titles.index(want)
         if index is not None and str(index).strip() != "":
             return int(index)
-        if (pick or self.main.settings.exercise_pick) == "random" and exs:
+        return self._next_exercise(exs, pick or self.main.settings.exercise_pick)
+
+    def _next_exercise(self, exs, pick: str, have: list[bool] | None = None) -> int:
+        """Видео зарядки без выбора: «По очереди» (next, и ask без выбора) — следующее после прошлого показанного
+        (Settings.exercise_last — помнится между уроками и запусками); «Случайное» — любое, но не прошлое. Видео без
+        файла пропускаются (все без файла — по порядку, программа скажет «нет файла»). have — есть ли файл у каждого
+        видео, если уже проверено."""
+        from ..lesson_md import video_key
+        if not exs:
+            return 0
+        have = have if have is not None else [Path(e.path).is_file() for e in exs]
+        ok = [i for i, h in enumerate(have) if h] or list(range(len(exs)))
+        keys = [video_key(e.title) for e in exs]
+        last = video_key(self.main.settings.exercise_last)
+        k = keys.index(last) if last and last in keys else -1
+        cur = self.efir.ex_index
+        if 0 <= cur < len(exs) and last and keys[cur] == last:
+            k = cur                          # одинаковые названия (старые оформления: все «Зарядка») — от игравшего
+        if pick == "random":
             import random
-            ok = [i for i, e in enumerate(exs) if Path(e.path).is_file()] or list(range(len(exs)))
-            if len(ok) > 1 and self.efir.ex_index in ok:
-                ok.remove(self.efir.ex_index)          # прошлое видео — не подряд
+            prev = k if k >= 0 else self.efir.ex_index
+            if len(ok) > 1 and prev in ok:
+                ok.remove(prev)                        # прошлое видео — не подряд
             return random.choice(ok)
-        return 0
+        return next((i for i in ((k + 1 + j) % len(exs) for j in range(len(exs))) if i in ok), ok[0])
 
     def _ensure_screen(self, t: Template) -> None:
         """Перерыв или зарядка до «Начать урок»: оформление экрана — из пресета урока."""

@@ -87,13 +87,44 @@ function exMenu(anchor) {
   menu(anchor, items, { cls: "scrmenu" });
 }
 
-// кнопка этапа-зарядки в тексте урока: своё видео — сразу; нет — меню видео (как «Зарядка» наверху) или случайное
+// какое видео включает щелчок без выбора: next — по очереди, random — случайное, ask — меню (настройка «Урок → Зарядка»)
+function exPick() { return (A.S && A.S.prefs && A.S.prefs.exercise_pick) || "next"; }
+
+// этап-зарядка, который идёт сейчас (его видео — первым), или null
+function exStage() {
+  const { cur, stages } = computeCurrent();
+  const c = cur >= 0 ? stages[cur] : null;
+  return c && c.item.kind === "exercise" ? c : null;
+}
+
+// «Зарядка» наверху одним щелчком: идёт — меню (пауза, сначала, другое видео); нет — сразу видео: своё у этапа-
+// зарядки, который идёт, иначе по очереди или случайное. «Спросить» в настройках или видео нет — меню. Правая
+// кнопка — меню всегда (выбрать другое видео).
+function exClick(anchor) {
+  const list = exerciseList(), st = exStage();
+  if (ef().mode === "exercise" || !list.length || exPick() === "ask" && list.length > 1 && !(st && stageVideo(st.item))) {
+    exMenu(anchor);
+    return;
+  }
+  cmd({ cmd: "exercise", stage: st ? st.id : "", pick: exPick() });
+}
+
+// подсказка «Зарядки»: что включит щелчок
+function exTip() {
+  const list = exerciseList();
+  if (!list.length) return "Зарядка — добавить видео";
+  const st = exStage(), own = st ? stageVideo(st.item) : "";      // идёт этап-зарядка со своим видео — оно
+  if (!own && exPick() === "ask" && list.length > 1) return "Зарядка — выбрать видео";
+  const name = own || (list.length === 1 ? list[0] : exPick() === "random" ? "" : (A.S && A.S.exercise_next) || "");
+  const what = name ? "«" + name + "»" : exPick() === "random" ? "случайную" : "видео";
+  return "Зарядка: включить " + what + (list.length > 1 ? " · правой кнопкой — другое видео" : "");
+}
+
+// кнопка этапа-зарядки в тексте урока: своё видео — сразу; нет — по настройке (по очереди, случайное, меню видео)
 function stageExercise(b) {
   const it = A.byId.get(b.dataset.stage);
   if (!it) return false;
-  const pick = (A.S && A.S.prefs && A.S.prefs.exercise_pick) || "ask";
-  if (stageVideo(it) || exerciseList().length < 2) cmd({ cmd: "exercise", stage: it.id });
-  else if (pick === "random") cmd({ cmd: "exercise", stage: it.id, pick: "random" });
+  if (stageVideo(it) || exerciseList().length < 2 || exPick() !== "ask") cmd({ cmd: "exercise", stage: it.id, pick: exPick() });
   else exMenu(b);
   pulseKind = "";
   updateStrip();
@@ -142,8 +173,9 @@ function mount(V) {
   open.hidden = true;
   const bg = iconBtn("image", "Фон", () => cmd({ cmd: "background" }), { size: "sm", cls: "scrbtn" });
   bg.id = "scrBg";
-  const ex = iconBtn("activity", "Зарядка", () => { pulseKind = ""; exMenu(ex); updateStrip(); }, { size: "sm", cls: "scrbtn" });
+  const ex = iconBtn("activity", "Зарядка", () => { pulseKind = ""; exClick(ex); updateStrip(); }, { size: "sm", cls: "scrbtn" });
   ex.id = "scrEx";
+  ex.addEventListener("contextmenu", (e) => { e.preventDefault(); pulseKind = ""; exMenu(ex); updateStrip(); });
   const openBreak = () => { pulseKind = ""; breakMenu(brk); updateStrip(); };
   const brk = iconBtn("cup", "Перерыв", openBreak, { size: "sm", cls: "scrbtn" });
   brk.id = "scrBreak";
@@ -203,7 +235,8 @@ function updateStrip() {
   const exWarn = mode === "exercise" && (e.ex_muted || e.ex_waiting);
   W.ex.classList.toggle("warn", exWarn);
   W.ex.dataset.tip = e.ex_waiting ? "Зарядка ждёт щелчка — щёлкните один раз по вкладке учеников"
-    : exWarn ? "Зарядка идёт без звука — щёлкните один раз по вкладке учеников" : mode === "exercise" ? "Зарядка идёт" : "Зарядка";
+    : exWarn ? "Зарядка идёт без звука — щёлкните один раз по вкладке учеников"
+    : mode === "exercise" ? "Зарядка идёт · щелчок — пауза, сначала, другое видео" : exTip();
   // слайд
   const has = slides().length > 0;
   W.sl.disabled = !has && mode !== "slide";
@@ -224,6 +257,7 @@ function tickStrip(info) {
   if (id !== lastStage) {
     lastStage = id;
     pulseKind = c && (c.item.kind === "break" || c.item.kind === "exercise") ? c.item.kind : "";
+    if ((ef().mode || "idle") !== "exercise") W.ex.dataset.tip = exTip();    // новый этап — подсказка про его видео
   }
   const mode = ef().mode || "idle";
   W.brk.classList.toggle("pulse", pulseKind === "break" && mode !== "break");

@@ -451,6 +451,7 @@ class ExerciseTest(unittest.TestCase):
             win.lesson.command({"cmd": "exercise", "stage": "z"})
             self.assertEqual(win.efir.ex_index, 1)
             t.blocks[0].exercise = "Нет такого"
+            win.efir.show_background()           # 1.2.1: щелчок сразу после включения — двойной, его пропускают
             win.lesson.command({"cmd": "exercise", "stage": "z"})
             self.assertEqual(win.efir.ex_index, 0)
             self.assertEqual(win.exercise_titles(t), ["Глаза", "Шея"])

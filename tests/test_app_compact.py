@@ -201,6 +201,34 @@ class CompactTest(AppPage):
         self.click("#compact .cnext")                   # «Следующий этап» — перерыв начинается сейчас
         self.assertTrue(self.wait_py(lambda: self.app.efir.store.live.anchor != before))
 
+    def test_compact_exercise_one_click(self):
+        """«Зарядка» в маленьком режиме — как наверху: щелчок сразу включает видео (по очереди), правой кнопкой — меню."""
+        import tempfile
+        from pathlib import Path
+        from autoprint.efir.model import Exercise, Look
+        d = Path(tempfile.mkdtemp())
+        (d / "e.mp4").write_bytes(b"x")
+        look = Look(title="З", exercises=[Exercise("Глаза", str(d / "e.mp4")), Exercise("Шея", str(d / "e.mp4"))])
+        self.app.efir.save_look(look)
+        self.store.get("C").look = look.id
+        self.app.efir.clients = 1
+        self.app.settings.exercise_pick = "next"
+        self.size(360, 600)
+        self.go_live(2, tid="C")
+        self.assertTrue(self.wait_js("document.querySelectorAll('#compact .cscr button').length === 4", 6))
+        ex = "[...document.querySelectorAll('#compact .cscr button')][1]"
+        try:
+            self.js(ex + ".click()")
+            self.assertTrue(self.wait_py(lambda: self.app.efir.mode == "exercise"))
+            self.assertFalse(self.js("!!document.querySelector('.pop')"))
+        finally:
+            self.app.efir.show_background()
+            self.app.publish_now()
+        self.assertTrue(self.wait_js(ex + ".getAttribute('aria-pressed') === 'false'", 6))
+        self.js(ex + ".dispatchEvent(new MouseEvent('contextmenu', {bubbles: true, cancelable: true}))")
+        self.assertTrue(self.wait_js("[...document.querySelectorAll('.pop .mi')].some(b => b.textContent.includes('Шея'))"))
+        self.js("window.appUI && window.appUI.closePop && window.appUI.closePop()")
+
     def test_compact_drag_regions(self):
         self.size(360, 600)
         self.assertTrue(self.wait_js("!!document.querySelector('#compact[data-drag]')"))
