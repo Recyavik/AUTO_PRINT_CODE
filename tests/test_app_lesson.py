@@ -800,6 +800,41 @@ class ScreenImageTest(AppPage):
             self.app.efir.show_background()
 
 
+class ScreenExerciseClickTest(AppPage):
+    """Зарядка во вкладке, по которой ещё не щёлкали (браузер не даёт звук без щелчка): видео не идёт без звука —
+    стоит в начале и ждёт щелчка по вкладке; щёлкнули — идёт с начала и со звуком."""
+    port = 18988
+    route = "#/lesson/L1"
+
+    def test_waits_for_click_then_plays_with_sound(self):
+        from autoprint.efir.model import Exercise, Look
+        from cdp import Edge
+        video = Path(__file__).resolve().parent / "media" / "exercise-3s.webm"
+        look = Look(title="Со звуком", exercises=[Exercise("Глаза", str(video))])
+        self.app.efir.save_look(look)
+        self.app.printer.set_focus("L1")
+        self.store.get("L1").look = look.id
+        self.app.lesson.publish()
+        screen = Edge.start(f"http://127.0.0.1:{self.app.efir.server.port}/", pump=lambda: pump(5), width=800, height=450,
+                            flags=("--autoplay-policy=document-user-activation-required",))
+        v = "document.querySelector('#vid video')"
+        try:
+            self.assertTrue(self.wait_py(lambda: self.app.efir.clients > 0, 10))
+            self.app.lesson.command({"cmd": "exercise", "index": 0})
+            self.assertTrue(screen.wait(f"!!{v}.getAttribute('src') && {v}.readyState >= 2", 10))
+            self.assertTrue(self.wait_py(lambda: self.app.efir.video_waiting, 6))        # учителю: «ждёт щелчка»
+            pump(1200)
+            self.assertEqual(screen.eval(f"[{v}.paused, {v}.currentTime]"), [True, 0])     # не пошло без звука
+            for kind in ("mousePressed", "mouseReleased"):                                # щелчок по вкладке (без окна)
+                screen.call("Input.dispatchMouseEvent", {"type": kind, "x": 200, "y": 200, "button": "left", "clickCount": 1})
+            self.assertTrue(screen.wait(f"!{v}.paused && !{v}.muted && {v}.currentTime > 0", 6),
+                            screen.eval(f"[{v}.paused, {v}.muted, {v}.currentTime]"))
+            self.assertTrue(self.wait_py(lambda: not self.app.efir.video_waiting and not self.app.efir.video_muted, 6))
+        finally:
+            screen.close()
+            self.app.efir.show_background()
+
+
 def slide_lessons() -> list[Template]:
     """Слайды 16:9: обычный (белый, синяя полоса заголовка во всю ширину, чёрный квадрат) и «фото» (пёстрый край)."""
     import random

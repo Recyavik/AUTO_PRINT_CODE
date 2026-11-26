@@ -494,10 +494,10 @@ function startScreen() {
     const p = video.play();
     if (p) p.catch(err => {
       if (err && err.name === 'NotAllowedError') {          // браузер не даёт звук без щелчка по странице
-        blocked = true; video.muted = true;
-        // без звука — идёт сразу (ученики видят); не дали и так — стоит до щелчка по вкладке (учителю скажут)
-        video.play().then(() => report({ type: 'blocked', seq: exSeq }))
-          .catch(() => report({ type: 'blocked', seq: exSeq, all: true }));
+        // без звука не запускаем: стоит в начале до щелчка по вкладке (учителю скажут), потом — с начала и со звуком
+        blocked = true; video.pause();
+        try { video.currentTime = 0; } catch (e) {}
+        report({ type: 'blocked', seq: exSeq, all: true });
       } else report({ type: 'video_error', seq: exSeq, message: String(err && err.message || err) });
     });
   }

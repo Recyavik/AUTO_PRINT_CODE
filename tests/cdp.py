@@ -131,7 +131,9 @@ class Edge:
         self.pump = None
 
     @classmethod
-    def start(cls, url: str, pump=None, width: int = 1360, height: int = 900) -> "Edge":
+    def start(cls, url: str, pump=None, width: int = 1360, height: int = 900, flags: tuple = ()) -> "Edge":
+        """flags — свои ключи Edge (например, --autoplay-policy=user-gesture-required: звук только после щелчка,
+        как в обычном браузере). Звук всегда выключен (--mute-audio)."""
         exe = edge_path()
         if not exe:
             raise unittest.SkipTest("Edge не найден — тесты страницы пропущены")
@@ -140,7 +142,7 @@ class Edge:
         e.tmp = tempfile.mkdtemp(prefix="suflor-edge-")
         e.proc = subprocess.Popen([exe, "--headless=new", "--remote-debugging-port=0", f"--user-data-dir={e.tmp}",
                                    "--no-first-run", "--no-default-browser-check", "--disable-extensions",
-                                   "--disable-background-networking", "--disable-sync", "--mute-audio",
+                                   "--disable-background-networking", "--disable-sync", "--mute-audio", *flags,
                                    f"--window-size={width},{height}", "about:blank"],
                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         port_file = Path(e.tmp) / "DevToolsActivePort"
