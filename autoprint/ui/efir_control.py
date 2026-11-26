@@ -284,6 +284,7 @@ class EfirController(QObject):
         else:
             anchor = now
         self.store.set_live(wid, anchor)
+        self._keep_black()
         self.webinar = w
         self.ensure_server()
         self.publish()
@@ -328,6 +329,7 @@ class EfirController(QObject):
         self.store.drop_lesson_schedules(keep=w.id)      # служебные эфиры прошлых уроков больше не нужны
         w = self.store.put(w)
         self.store.set_live(w.id, anchor)
+        self._keep_black()
         self.webinar = w
         self.ensure_server()
         self.publish()
@@ -403,6 +405,8 @@ class EfirController(QObject):
             self.brk_left_paused = None
         elif self.store.slide:                                      # слайд был у учеников — снова он
             self.mode, self.slide = MODE_SLIDE, dict(self.store.slide)
+        elif self.store.black:                                      # был чёрный экран — снова он
+            self.mode = MODE_BLACK
         self.publish()
 
     def _tick(self) -> None:
@@ -416,6 +420,16 @@ class EfirController(QObject):
         if self.store.slide is not None:          # что угодно другое у учеников — слайда больше нет
             self.store.set_slide(None)
         self.slide = None
+        self._forget_black()
+
+    def _keep_black(self) -> None:
+        """Эфир начался, а у учеников уже чёрный экран (включили до урока) — он переживёт и перезапуск."""
+        if self.mode == MODE_BLACK and not self.store.black:
+            self.store.set_black(True)
+
+    def _forget_black(self) -> None:
+        if self.store.black:                      # что угодно другое у учеников — чёрного экрана больше нет
+            self.store.set_black(False)
 
     def show_slide(self, ref: str, n: int, bid: str, next_ref: str = "") -> None:
         """Слайд презентации ученикам (по действию учителя: «На экран», ◀ ▶ кликера)."""
@@ -425,6 +439,7 @@ class EfirController(QObject):
         self.ensure_server()
         if self.mode == MODE_BREAK and self.store.brk is not None:
             self.store.set_break(None)
+        self._forget_black()
         self.slide = {"ref": ref, "next": next_ref, "n": n, "bid": bid}
         self.mode = MODE_SLIDE
         self.ex_paused = False
@@ -440,10 +455,13 @@ class EfirController(QObject):
         self.publish()
 
     def show_black(self) -> None:
-        """Чёрный экран ученикам: перерыв, зарядка, слайд убираются; снова фон — show_background."""
+        """Чёрный экран ученикам: перерыв, зарядка, слайд убираются; снова фон — show_background. Идёт урок или
+        вебинар — переживает перезапуск программы (как слайд и перерыв)."""
         self.mode = MODE_BLACK
         self.ex_paused = False
         self._forget_break()
+        if self.store.live is not None:
+            self.store.set_black(True)
         self.publish()
 
     def start_exercise(self, index: int) -> None:
@@ -510,6 +528,7 @@ class EfirController(QObject):
         self.brk_left_paused = None
         self.brk_seq += 1
         self.mode = MODE_BREAK
+        self._forget_black()
         if self.store.live:
             if self.store.slide is not None:
                 self.store.slide = None

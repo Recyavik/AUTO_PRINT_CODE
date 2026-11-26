@@ -66,12 +66,14 @@ class WebinarStore:
         self.live: Live | None = None
         self.brk: dict | None = None             # идущий перерыв (переживает перезапуск программы)
         self.slide: dict | None = None           # слайд у учеников: {"ref", "next", "n", "bid"} — тоже переживает
+        self.black = False                       # у учеников чёрный экран — тоже переживает перезапуск (1.2.2)
         self.imported_legacy = False      # перенос из «Таймера вебинара» уже был (второй раз не предлагать)
         self.load()
 
     # ------------------------------------------------------------ файлы
     def load(self) -> None:
         self.webinars, self.looks, self.live, self.brk, self.slide = [], [], None, None, None
+        self.black = False
         raw = _read_json(self.path)
         if raw is None and not self.path.exists():
             self._migrate_legacy()
@@ -110,6 +112,7 @@ class WebinarStore:
         if self.live and isinstance(sl, dict) and isinstance(sl.get("ref"), str):
             self.slide = {"ref": sl["ref"], "next": str(sl.get("next") or ""), "n": int(sl.get("n") or 0),
                           "bid": str(sl.get("bid") or "")}
+        self.black = bool(self.live and raw.get("black") is True)
 
     def _migrate_legacy(self) -> None:
         """0.10 (looks_v10): шаблоны 0.9 → расписания + оформления; одинаковые оформления — одно. Служебные
@@ -140,7 +143,8 @@ class WebinarStore:
                           **({"plan": self.live.plan.isoformat(timespec="seconds")} if self.live.plan else {})}
                          if self.live else None),
                 "brk": self.brk if self.live and self.brk else None,
-                "slide": self.slide if self.live and self.slide else None}
+                "slide": self.slide if self.live and self.slide else None,
+                "black": bool(self.live and self.black)}
         storage._atomic_write(self.looks_path, {"version": 1, "looks": [lk.to_dict() for lk in self.looks]},
                               backup=True)
         storage._atomic_write(self.path, data, backup=True)
@@ -254,6 +258,7 @@ class WebinarStore:
         self.live = Live(wid, anchor or datetime.now(), plan) if wid else None
         if not self.live:
             self.brk = self.slide = None
+            self.black = False
         self.save()
 
     def set_plan(self, plan: datetime | None) -> None:
@@ -268,4 +273,8 @@ class WebinarStore:
 
     def set_slide(self, slide: dict | None) -> None:
         self.slide = slide
+        self.save()
+
+    def set_black(self, on: bool) -> None:
+        self.black = bool(on)
         self.save()

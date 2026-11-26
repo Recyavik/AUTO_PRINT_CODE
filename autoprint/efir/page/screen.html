@@ -519,7 +519,8 @@ function startScreen() {
     if (st.mode === 'wait') return;          // программа только запускается — прежний кадр остаётся
     S = st; offset = (st.server_now || Date.now()) - Date.now();
     applyFont(st.font, st.color);
-    setBackground(st.bg);
+    // чёрный экран: под ним фон не нужен — анимация не крутится зря (вкладку захватывают); «Фон» — проявится снова
+    setBackground(st.mode === 'black' ? null : st.bg);
     capEl.textContent = st.caption || '';
     capEl.style.display = st.caption ? 'flex' : 'none';
     if (st.mode === 'break' && st.brk) {

@@ -921,6 +921,23 @@ class ScreenSlideFillTest(AppPage):
         self.assertTrue(self.screen.wait("!document.querySelector('#black').classList.contains('on') && "
                                          "getComputedStyle(document.querySelector('#caption')).display === 'flex'", 10))
 
+    def test_black_stops_animated_background(self):
+        """Под чёрным экраном анимация фона не крутится (вкладку захватывают — лишняя работа); «Фон» — снова она."""
+        self.look.background = "anim:cube"
+        self.app.efir.save_look(self.look)
+        try:
+            self.app.lesson.command({"cmd": "background"})
+            self.app.lesson.publish()
+            self.assertTrue(self.screen.wait("document.querySelectorAll('#bgs canvas').length > 0", 10))
+            self.app.lesson.command({"cmd": "black"})
+            self.assertTrue(self.screen.wait("document.querySelectorAll('#bgs canvas').length === 0", 10))
+            self.app.lesson.command({"cmd": "background"})
+            self.assertTrue(self.screen.wait("document.querySelectorAll('#bgs canvas').length > 0", 10))
+        finally:
+            self.look.background = "color:#000000"
+            self.app.efir.save_look(self.look)
+            self.app.lesson.publish()
+
     def test_thin_pattern_edge_filled_with_its_color(self):
         """Край в основном белый, по нему тонкие линии узора — поле белое (не размытое и не чёрное)."""
         self.show("sp3")

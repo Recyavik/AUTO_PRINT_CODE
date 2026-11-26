@@ -23,9 +23,12 @@ class BlackScreenTest(unittest.TestCase):
     def setUp(self):
         from autoprint.efir.model import Look
         self.look = Look(title="Синий", background="color:#123456", caption="Скоро начнём", exercises=videos("Глаза 1"))
+        self.look_b = Look(title="Зелёный", background="color:#00aa00", exercises=videos("Шея 1", "Шея 2"))
         self.win = window([lesson("A"), lesson("B")], self.port)
         self.win.efir.save_look(self.look)
+        self.win.efir.save_look(self.look_b)
         self.win.store.get("A").look = self.look.id
+        self.win.store.get("B").look = self.look_b.id
         self.focus("A")
 
     def tearDown(self):
@@ -78,6 +81,53 @@ class BlackScreenTest(unittest.TestCase):
         self.win.lesson.command({"cmd": "black"})
         self.focus("B")
         self.assertEqual(self.screen()["mode"], "black")
+
+    def test_other_lesson_look_ready_under_black(self):
+        """Чёрный экран между уроками: открыли другой урок — «Фон» сразу его (без мелькания прошлого), и зарядка до
+        начала урока — из его видео."""
+        self.win.lesson.command({"cmd": "black"})
+        self.focus("B")
+        self.win.lesson.command({"cmd": "background"})
+        self.assertEqual(self.screen()["bg"], {"kind": "color", "value": "#00aa00"})       # сразу, а не через 0,3 с
+        self.win.lesson.command({"cmd": "exercise", "index": 1})
+        self.assertEqual(self.screen()["exercise"]["title"], "Шея 2")
+
+    def test_black_survives_restart_during_lesson(self):
+        """Урок идёт, у учеников чёрный, программу перезапустили — снова чёрный (как слайд и перерыв), а не фон."""
+        ef = self.win.efir
+        self.win.lesson.command({"cmd": "start", "force": True})
+        self.win.lesson.command({"cmd": "black"})
+        ef.store.load()                                   # с диска — как после перезапуска
+        ef.mode, ef.webinar = "idle", None
+        ef.restore()
+        self.assertEqual(ef.mode, "black")
+        self.assertEqual(self.screen()["mode"], "black")
+        self.win.lesson.command({"cmd": "background"})
+        ef.store.load()
+        ef.mode = "idle"
+        ef.restore()
+        self.assertEqual(ef.mode, "idle")                 # фон включили — после перезапуска фон
+
+    def test_black_before_start_survives_restart(self):
+        """Чёрный включили до «Начать урок», урок начали, программу перезапустили — у учеников всё ещё чёрный."""
+        ef = self.win.efir
+        self.win.lesson.command({"cmd": "black"})
+        self.win.lesson.command({"cmd": "start", "force": True})
+        self.assertEqual(ef.mode, "black")
+        ef.store.load()
+        ef.mode, ef.webinar = "idle", None
+        ef.restore()
+        self.assertEqual(ef.mode, "black")
+
+    def test_black_not_kept_after_slide_or_break(self):
+        """Чёрный, потом слайд или перерыв — после перезапуска не чёрный."""
+        ef = self.win.efir
+        self.win.lesson.command({"cmd": "start", "force": True})
+        self.win.lesson.command({"cmd": "black"})
+        self.win.lesson.command({"cmd": "break", "minutes": 5})
+        ef.store.load()
+        self.assertFalse(getattr(ef.store, "black", False))
+        self.assertIsNotNone(ef.store.brk)
 
     def test_black_without_any_look(self):
         """Оформлений нет вовсе — всё равно чёрный экран (а не «фон»)."""

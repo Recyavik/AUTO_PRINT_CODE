@@ -76,10 +76,12 @@ body[data-size="strip"] #compact .cnow { flex: 0 0 260px; }
 body[data-size="strip"] #compact .cb-time { font-size: 36px; }
 body[data-size="strip"] #compact .cb-next, body[data-size="strip"] #compact .cnext,
 body[data-size="strip"] #compact .cb-clock { display: none; }
-/* полоса: экран учеников — пять значков без подписей (подсказки — при наведении), справа от этапов */
-body[data-size="strip"] #compact .cscr { order: 3; flex: none; display: flex; gap: 4px; }
+/* полоса: экран учеников — пять значков без подписей (подсказки — при наведении), справа от этапов; в два ряда
+   (3 + 2) — повестке остаётся место на целые ячейки */
+body[data-size="strip"] #compact .cscr { order: 3; flex: none; display: grid; grid-template-columns: repeat(3, 38px); gap: 4px; }
 body[data-size="strip"] #compact .cscr[hidden] { display: none; }
 body[data-size="strip"] #compact .cs { width: 38px; height: 38px; padding: 0; justify-content: center; }
+body[data-size="strip"] #compact .cscr .cs:last-child { grid-column: auto; }
 body[data-size="strip"] #compact .cs span { display: none; }
 body[data-size="strip"] #compact .cagenda { display: flex; flex: 1; gap: 8px; align-items: stretch; overflow: hidden; }
 
@@ -90,6 +92,11 @@ body[data-size="side"] #compact .cagenda { display: flex; flex-direction: column
   max-height: calc(var(--vh) * 100 - 62px); margin-top: 30px; padding-right: 4px; }
 body[data-size="side"] #compact .cnow, body[data-size="side"] #compact .cscr, body[data-size="side"] #compact .cnext,
 body[data-size="side"] #compact .ctype { grid-column: 1; }
+/* сбоку: экран учеников — пять значков одним рядом (подписи — в подсказках), чтобы полоса набора кода не уходила вниз */
+body[data-size="side"] #compact .cscr { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+body[data-size="side"] #compact .cs { padding: 0; justify-content: center; }
+body[data-size="side"] #compact .cscr .cs:last-child { grid-column: auto; }
+body[data-size="side"] #compact .cs span { display: none; }
 /* в маленьком режиме заголовка нет — лист на всё окно */
 body.compact .scrim { inset: 0; }
 body.compact .sheet { max-height: calc(var(--vh) * 100 - 48px); }

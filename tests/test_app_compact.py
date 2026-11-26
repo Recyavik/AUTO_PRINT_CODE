@@ -154,6 +154,33 @@ class CompactTest(AppPage):
         if n < total:
             self.assertTrue(self.js("[...document.querySelectorAll('#compact .ca-more')].some(b => b.textContent.endsWith('›'))"))
 
+    def test_strip_default_size_keeps_two_stages(self):
+        """«Полоса» своего размера (980 × 160): пять значков экрана учеников (два ряда) не отнимают ячейку повестки —
+        видно не меньше двух этапов, как до «Чёрного экрана»; значки целиком в окне."""
+        self.go_live(1, tid="M")
+        self.size(980, 160)
+        self.assertTrue(self.wait_js("document.body.dataset.size === 'strip' && document.querySelectorAll('#compact .ca-cell').length > 0"))
+        pump(300)
+        self.assertGreaterEqual(self.js("document.querySelectorAll('#compact .ca-cell').length"), 2)
+        r = self.js("(() => { const b = [...document.querySelectorAll('#compact .cscr button')].map(e => e.getBoundingClientRect());"
+                    " return [b.every(x => x.bottom <= innerHeight + 1 && x.right <= innerWidth + 1), new Set(b.map(x => Math.round(x.top))).size]; })()")
+        self.assertEqual(r, [True, 2])
+
+    def test_side_layout_typing_bar_visible(self):
+        """«Табло и этапы» (660 × 440): пять кнопок экрана учеников и полоса набора кода — всё видно без прокрутки."""
+        p = self.app.printer
+        snap = p.snapshot
+        p.snapshot = lambda: {**snap(), "state": "paused", "block": "cc", "progress": .5}
+        self.addCleanup(lambda: setattr(p, "snapshot", snap))
+        self.go_live(1, tid="C")
+        self.size(660, 440)
+        self.app.publish_now()
+        self.assertTrue(self.wait_js("document.body.dataset.size === 'side' && !document.querySelector('#compact .ctype').hidden", 6))
+        pump(300)
+        r = self.js("(() => { const t = document.querySelector('#compact .ctype').getBoundingClientRect();"
+                    " const c = document.querySelector('#compact'); return [t.bottom <= innerHeight + 1, c.scrollHeight <= c.clientHeight + 1]; })()")
+        self.assertEqual(r, [True, True])
+
     def test_compact_widths(self):
         self.go_live(2, tid="C")
         for zoom in (100, 200):
