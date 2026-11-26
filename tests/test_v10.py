@@ -692,19 +692,22 @@ class FixTest(unittest.TestCase):
         finally:
             self.close(win)
 
-    def test_break_until_stage_end(self):
+    def test_break_full_minutes_from_click(self):
+        """«Перерыв по плану · 10 мин», включённый позже плана, — всё равно 10 минут с этой минуты (ученики ушли
+        сейчас), а не до планового конца этапа (1.2.2: включили в 20:46 — «ПРОДОЛЖАЕМ» было в 20:55)."""
+        import time
         from datetime import datetime, timedelta
         win, t = self.lesson_window(18976)
         try:
             t.find_block("sB").stage_kind = "break"
             win.lesson.command({"cmd": "start"})
             store = win.efir.store
-            anchor = datetime.now().replace(microsecond=0) - timedelta(minutes=13)        # перерыв идёт 3 минуты
+            anchor = datetime.now().replace(microsecond=0) - timedelta(minutes=13)        # этап-перерыв идёт 3 минуты
             store.set_live(store.live.webinar_id, anchor)
             win.lesson.command({"cmd": "break", "stage": "sB", "minutes": 10})
-            end = (anchor + timedelta(minutes=20)).timestamp()
             self.assertEqual(win.efir.mode, "break")
-            self.assertLess(abs(win.efir.brk_ends - end), 2)
+            self.assertAlmostEqual(win.efir.brk_ends - time.time(), 600, delta=2)
+            self.assertAlmostEqual(win.efir.brk_total, 600, delta=1)
             win.efir.show_background()
             win.lesson.command({"cmd": "break"})                                           # вне плана
             self.assertAlmostEqual(win.efir.brk_total, 600, delta=1)                       # break_min урока — 10

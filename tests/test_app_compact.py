@@ -239,6 +239,22 @@ class CompactTest(AppPage):
         self.click("#compact .cnext")                   # «Следующий этап» — перерыв начинается сейчас
         self.assertTrue(self.wait_py(lambda: self.app.efir.store.live.anchor != before))
 
+    def test_compact_planned_break_full_minutes(self):
+        """Маленький режим: этап «Перерыв» (5 мин) идёт уже минуту — «По плану · 5 мин» даёт все 5 минут с этой
+        минуты, а не остаток по расписанию."""
+        self.app.efir.clients = 1
+        self.size(360, 600)
+        self.go_live(6, tid="C")                        # этап «Перерыв» 5–10 мин идёт с 5-й минуты
+        self.assertTrue(self.wait_js("document.querySelectorAll('#compact .cscr button').length === 5", 6))
+        try:
+            self.js("[...document.querySelectorAll('#compact .cscr button')][3].click()")
+            self.assertTrue(self.wait_js("[...document.querySelectorAll('.pop .mi')].some(b => b.textContent.includes('По плану · 5 мин'))"))
+            self.js("[...document.querySelectorAll('.pop .mi')].find(b => b.textContent.includes('По плану')).click()")
+            self.assertTrue(self.wait_py(lambda: self.app.efir.mode == "break"))
+            self.assertAlmostEqual(self.app.efir.brk_total, 300, delta=2)
+        finally:
+            self.app.efir.show_background()
+
     def test_compact_exercise_one_click(self):
         """«Зарядка» в маленьком режиме — как наверху: щелчок сразу включает видео (по очереди), правой кнопкой — меню."""
         import tempfile

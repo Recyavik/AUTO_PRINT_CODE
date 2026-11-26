@@ -57,7 +57,7 @@ function breakMenu(anchor) {
   const pb = planBreak();
   const items = [{ head: "Перерыв ученикам" }];
   if (pb && pb.s.minutes > 0) {
-    items.push({ label: "По плану · " + pb.s.minutes + " мин", hint: pb.now ? "до конца этапа" : (pb.s.item.title || "этап плана"),
+    items.push({ label: "По плану · " + pb.s.minutes + " мин", hint: "с этой минуты" + (pb.now ? "" : " · " + (pb.s.item.title || "этап плана")),
       on: () => cmd({ cmd: "break", stage: pb.s.id, minutes: pb.s.minutes }) });
   }
   for (const m of [5, 10, 15, 20]) items.push({ label: m + " мин", on: () => cmd({ cmd: "break", minutes: m }) });

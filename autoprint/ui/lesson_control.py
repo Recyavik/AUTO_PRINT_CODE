@@ -700,17 +700,11 @@ class LessonController(QObject):
             p.toggle(countdown=self._countdown())
 
     def _break(self, t: Template, sid: str, minutes) -> None:
-        """Перерыв ученикам (E6): с карточки этапа-перерыва, который идёт сейчас, — до планового конца этапа;
-        с другого этапа — его минуты; вне плана — перерыв по умолчанию (break_min эфира урока, обычно 10)."""
+        """Перерыв ученикам (E6): этапа плана — его минуты с этой минуты (включили позже плана — перерыв всё равно
+        полный: ученики уходят сейчас, а не по расписанию; 1.2.2); вне плана — перерыв по умолчанию (break_min
+        эфира урока, обычно 10) или выбранные минуты."""
         self._ensure_screen(t)
         st = next((s for s in scenario.stages(t)[1] if s.block.id == sid), None)
-        live = self.efir.store.live
-        if st is not None and live is not None and self.efir.live_lesson_id() == t.id:
-            elapsed = (datetime.now() - live.anchor).total_seconds() / 60
-            if st.start_min <= elapsed < st.end_min:
-                end = live.anchor + timedelta(minutes=st.end_min)
-                self.efir.start_break(st.end_min - st.start_min, ends_at=end.timestamp())
-                return
         if st is not None and st.end_min > st.start_min:
             self.efir.start_break(st.end_min - st.start_min)
             return

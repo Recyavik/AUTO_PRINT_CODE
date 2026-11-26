@@ -70,7 +70,8 @@ function breakMenu(anchor) {
   }
   const b = board();
   const items = [{ head: "Перерыв ученикам" }];
-  if (b.kind === "live" && b.cur.kind === "break") items.push({ label: "По плану · " + mins(b.cur) + " мин", hint: "до конца этапа", on: () => cmd({ cmd: "break", minutes: Math.max(1, Math.round(b.left / 60)) }) });
+  // этап-перерыв — все его минуты с этой минуты, а не остаток по расписанию (включили позже — перерыв всё равно полный)
+  if (b.kind === "live" && b.cur.kind === "break") items.push({ label: "По плану · " + mins(b.cur) + " мин", hint: "с этой минуты", on: () => cmd({ cmd: "break", minutes: mins(b.cur) }) });
   for (const m of [5, 10, 15, 20]) items.push({ label: m + " мин", on: () => cmd({ cmd: "break", minutes: m }) });
   menu(anchor, items);
 }
