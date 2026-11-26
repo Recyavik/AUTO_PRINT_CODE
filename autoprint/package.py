@@ -27,6 +27,13 @@ from .storage import BLOCK_IMAGE, BLOCK_STAGE, KIND_PLAN, Template, _template_fr
 EXT = ".autoprint"
 FORMAT = "autoprintcode-package"
 MAX_FILES = 5000
+# уже сжатое (картинки, видео, звук, шрифты) кладётся как есть: пережимать — долго и без толку
+STORED = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".avif", ".mp4", ".webm", ".mov", ".mkv", ".avi", ".m4v",
+          ".mp3", ".m4a", ".ogg", ".opus", ".aac", ".woff", ".woff2", ".zip", ".7z", ".rar", ".gz"}
+
+
+class Cancelled(Exception):
+    """Запись файла отменили (progress бросил это) — недописанный файл удалён."""
 
 
 @dataclass
@@ -46,8 +53,9 @@ def _safe_name(name: str) -> str:
 class _Files:
     """Файлы в архиве: одно имя на один исходный файл, без совпадений."""
 
-    def __init__(self, z: zipfile.ZipFile, folder: str) -> None:
+    def __init__(self, z: zipfile.ZipFile, folder: str, done=None) -> None:
         self.z, self.folder, self.by_src, self.used, self.bytes = z, folder, {}, set(), 0
+        self.done = done                         # done(байт) — после каждого файла (ход записи)
 
     def add(self, src: Path) -> str:
         key = str(src.resolve())
@@ -60,9 +68,13 @@ class _Files:
             name = f"{Path(base).stem}-{n}{Path(base).suffix}"
         self.used.add(name.lower())
         arc = f"{self.folder}/{name}"
-        self.z.write(src, arc)
-        self.bytes += src.stat().st_size
+        kind = zipfile.ZIP_STORED if src.suffix.lower() in STORED else zipfile.ZIP_DEFLATED
+        self.z.write(src, arc, compress_type=kind)
+        size = src.stat().st_size
+        self.bytes += size
         self.by_src[key] = arc
+        if self.done is not None:
+            self.done(size)
         return arc
 
 
@@ -82,46 +94,75 @@ def lesson_files(t: Template) -> list[Path]:
     return [p for b in t.blocks if b.type == BLOCK_IMAGE and (p := storage.media_path(b.text)) is not None and p.is_file()]
 
 
-def export_package(path, lessons=(), plans=(), looks=()) -> dict:
-    """Записать файл .autoprint. → {"lessons", "plans", "looks", "files", "bytes"}."""
+def _sizes(lessons, plans, looks, media: bool) -> int:
+    files = {p.resolve() for t in (list(lessons) + list(plans)) for p in lesson_files(t)} if media else set()
+    files |= {p.resolve() for lk in looks for p in look_files(lk)}
+    return sum(p.stat().st_size for p in files if p.is_file())
+
+
+def export_package(path, lessons=(), plans=(), looks=(), media: bool = True, progress=None) -> dict:
+    """Записать файл .autoprint. → {"lessons", "plans", "looks", "files", "bytes"}.
+
+    media=False — без картинок уроков: места картинок остаются пустыми (у слайда — его номер), их потом подставят.
+    progress(записано, всего) — в байтах файлов, после каждого файла; бросил Cancelled — запись брошена, файла нет."""
     from .lesson_md import to_md
     path = Path(path)
     tmp = path.with_name(path.name + ".part")
-    with zipfile.ZipFile(tmp, "w", compression=zipfile.ZIP_DEFLATED) as z:
-        media, lmedia = _Files(z, "media"), _Files(z, "looks_media")
-        manifest = {"format": FORMAT, "version": 1, "app": __version__, "lessons": [], "plans": [], "looks": []}
-        md_names: set[str] = set()
-        for folder, items, key in (("plans", plans, "plans"), ("lessons", lessons, "lessons")):
-            for t in items:
-                d = asdict(t)
-                arcs: dict[str, str] = {}
-                for b, bd in zip(t.blocks, d["blocks"]):
-                    p = storage.media_path(b.text) if b.type == BLOCK_IMAGE else None
-                    if p is not None and p.is_file():
-                        arcs[b.id] = bd["text"] = media.add(p)
-                z.writestr(f"{folder}/{t.id}.json", json.dumps(d, ensure_ascii=False, indent=1))
-                manifest[key].append(t.id)
-                name = _safe_name(t.title) + ".md"
-                while name.lower() in md_names:
-                    name = Path(name).stem + "-2.md"
-                md_names.add(name.lower())
-                z.writestr(name, to_md(t, "media", copy_image=lambda b, a=arcs: a.get(b.id)))
-        for look in looks:
-            d = look.to_dict()
-            for k in ("background", "break_background"):
-                if d[k].startswith("image:") and Path(d[k][6:]).is_file():
-                    d[k] = "image:" + lmedia.add(Path(d[k][6:]))
-            for e in d["exercises"]:
-                if e.get("path") and Path(e["path"]).is_file():
-                    e["path"] = lmedia.add(Path(e["path"]))
-            if d["font"].startswith("file:") and Path(d["font"][5:]).is_file():
-                d["font"] = "file:" + lmedia.add(Path(d["font"][5:]))
-            z.writestr(f"looks/{look.id}.json", json.dumps(d, ensure_ascii=False, indent=1))
-            manifest["looks"].append(look.id)
-        z.writestr("manifest.json", json.dumps(manifest, ensure_ascii=False, indent=1))
-    tmp.replace(path)
+    total = _sizes(lessons, plans, looks, media)
+    state = {"done": 0}
+
+    def done(n: int) -> None:
+        state["done"] += n
+        if progress is not None:
+            progress(state["done"], total)
+
+    try:
+        with zipfile.ZipFile(tmp, "w", compression=zipfile.ZIP_DEFLATED) as z:
+            files, lmedia = _Files(z, "media", done), _Files(z, "looks_media", done)
+            manifest = {"format": FORMAT, "version": 1, "app": __version__, "lessons": [], "plans": [], "looks": []}
+            md_names: set[str] = set()
+            for folder, items, key in (("plans", plans, "plans"), ("lessons", lessons, "lessons")):
+                for t in items:
+                    d = asdict(t)
+                    arcs: dict[str, str] = {}
+                    for b, bd in zip(t.blocks, d["blocks"]):
+                        if b.type != BLOCK_IMAGE:
+                            continue
+                        if not media:
+                            bd["text"] = ""              # место картинки остаётся: название и номер слайда — в уроке
+                            continue
+                        p = storage.media_path(b.text)
+                        if p is not None and p.is_file():
+                            arcs[b.id] = bd["text"] = files.add(p)
+                    z.writestr(f"{folder}/{t.id}.json", json.dumps(d, ensure_ascii=False, indent=1))
+                    manifest[key].append(t.id)
+                    name = _safe_name(t.title) + ".md"
+                    while name.lower() in md_names:
+                        name = Path(name).stem + "-2.md"
+                    md_names.add(name.lower())
+                    md_t = t if media else _template_from(d)     # без картинок — и в .md места, а не пути
+                    z.writestr(name, to_md(md_t, "media", copy_image=lambda b, a=arcs: a.get(b.id)))
+            for look in looks:
+                d = look.to_dict()
+                for k in ("background", "break_background"):
+                    if d[k].startswith("image:") and Path(d[k][6:]).is_file():
+                        d[k] = "image:" + lmedia.add(Path(d[k][6:]))
+                for e in d["exercises"]:
+                    if e.get("path") and Path(e["path"]).is_file():
+                        e["path"] = lmedia.add(Path(e["path"]))
+                if d["font"].startswith("file:") and Path(d["font"][5:]).is_file():
+                    d["font"] = "file:" + lmedia.add(Path(d["font"][5:]))
+                z.writestr(f"looks/{look.id}.json", json.dumps(d, ensure_ascii=False, indent=1))
+                manifest["looks"].append(look.id)
+            z.writestr("manifest.json", json.dumps(manifest, ensure_ascii=False, indent=1))
+        if progress is not None:
+            progress(total, total)
+        tmp.replace(path)
+    except BaseException:
+        tmp.unlink(missing_ok=True)            # отменили или не записалось — недописанного файла не оставляем
+        raise
     return {"lessons": len(lessons), "plans": len(plans), "looks": len(looks),
-            "files": len(media.by_src) + len(lmedia.by_src), "bytes": media.bytes + lmedia.bytes}
+            "files": len(files.by_src) + len(lmedia.by_src), "bytes": files.bytes + lmedia.bytes}
 
 
 # ---------------------------------------------------------------- чтение

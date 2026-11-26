@@ -92,6 +92,10 @@ class AppWindow(FramelessWindow):
             self.view = QWebEngineView(self)
             page = _make_page_class()(self.profile, self.view)
             page.setBackgroundColor(QColor(_bg()))
+            from PySide6.QtWebEngineCore import QWebEngineSettings
+            # брошенная на окно ссылка или картинка не уводит страницу (иначе вместо программы — голая картинка);
+            # файлы ловит само окно (_watch_drops), текст в поля — как обычно
+            page.settings().setAttribute(QWebEngineSettings.WebAttribute.NavigateOnDropEnabled, False)
             self.view.setPage(page)
             self.view.setContextMenuPolicy(Qt.ContextMenuPolicy.NoContextMenu)
             self.view.loadFinished.connect(self._on_loaded)

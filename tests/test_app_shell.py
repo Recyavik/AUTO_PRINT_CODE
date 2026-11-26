@@ -222,6 +222,21 @@ class FailTest(unittest.TestCase):
 
 
 class WebEngineTest(unittest.TestCase):
+    def test_dropped_link_does_not_navigate(self):
+        """Брошенная на окно ссылка или картинка не уводит страницу (иначе вместо программы — голая картинка)."""
+        try:
+            from PySide6.QtWebEngineCore import QWebEngineSettings
+        except ImportError as e:
+            self.skipTest(f"нет QtWebEngine: {e}")
+        fake = FakeApp(running=False)
+        w = AppWindow(fake, web=True)
+        try:
+            s = w.view.page().settings()
+            self.assertFalse(s.testAttribute(QWebEngineSettings.WebAttribute.NavigateOnDropEnabled))
+        finally:
+            w.close()
+            fake.close()
+
     def test_webengine_offscreen_ready(self):
         try:
             import PySide6.QtWebEngineWidgets  # noqa: F401

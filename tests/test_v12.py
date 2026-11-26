@@ -1188,6 +1188,103 @@ class PackageTest(unittest.TestCase):
         finally:
             close(win)
 
+    def test_without_pictures_keeps_places(self):
+        """1.1.4: «без картинок» — файлов картинок внутри нет, а места остаются (у слайда — номер): их потом подставят
+        из презентации. Сам урок не меняется."""
+        import zipfile
+        from autoprint import package
+        p, t = self.lesson_with_media()
+        ref = t.blocks[-1].text
+        t.blocks.append(Block(BLOCK_IMAGE, ref, title="Слайд 3", slide=3, id="sl3"))
+        f = TMP / "без-картинок.autoprint"
+        s = package.export_package(f, lessons=[t], plans=[p], media=False)
+        self.assertEqual((s["files"], s["bytes"]), (0, 0))
+        with zipfile.ZipFile(f) as z:
+            self.assertFalse([n for n in z.namelist() if n.startswith("media/")])
+            md = z.read("Функции.md").decode("utf-8")
+        self.assertIn("![Слайд 3 · Слайд 3](slide:3)", md)                        # и в копии .md — место, не путь
+        self.assertIn("![Кот](фото)", md)
+        self.assertNotIn(str(storage.DATA_DIR), md)
+        new = package.read_package(f).lessons[0]
+        imgs = [(b.title, b.slide, b.text) for b in new.blocks if b.type == BLOCK_IMAGE]
+        self.assertEqual(imgs, [("Кот", 0, ""), ("Слайд 3", 3, "")])
+        self.assertEqual(t.blocks[-1].text, ref)                                    # исходный урок — как был
+
+    def test_pictures_and_video_not_recompressed(self):
+        """Картинки и видео (они и так сжаты) кладутся в файл как есть — сохранение в разы быстрее; текст — сжат."""
+        import zipfile
+        from autoprint import package
+        p, t = self.lesson_with_media()
+        f = TMP / "как-есть.autoprint"
+        package.export_package(f, lessons=[t], plans=[p], looks=[self.look_with_media()])
+        with zipfile.ZipFile(f) as z:
+            kinds = {i.filename.rsplit(".", 1)[-1]: i.compress_type for i in z.infolist() if "media/" in i.filename}
+            text_kind = z.getinfo("manifest.json").compress_type
+        self.assertEqual((kinds["png"], kinds["mp4"]), (zipfile.ZIP_STORED, zipfile.ZIP_STORED))
+        self.assertEqual(text_kind, zipfile.ZIP_DEFLATED)
+
+    def test_progress_and_cancel(self):
+        """Ход записи — сколько байт из скольких; отмена посреди — ни файла, ни недописанного .part."""
+        from autoprint import package
+        p, t = self.lesson_with_media()
+        look = self.look_with_media()
+        seen = []
+        f = TMP / "ход.autoprint"
+        package.export_package(f, lessons=[t], plans=[p], looks=[look], progress=lambda done, total: seen.append((done, total)))
+        self.assertTrue(seen)
+        self.assertEqual(seen[-1][0], seen[-1][1])
+        self.assertGreater(seen[-1][1], 100)
+
+        def stop(done, total):
+            raise package.Cancelled()
+        g = TMP / "отмена.autoprint"
+        with self.assertRaises(package.Cancelled):
+            package.export_package(g, lessons=[t], plans=[p], looks=[look], progress=stop)
+        self.assertFalse(g.exists())
+        self.assertFalse(g.with_name(g.name + ".part").exists())
+
+    def test_export_runs_in_background(self):
+        """1.1.4: урок одним файлом пишется в фоне — окно не замирает: ответ сразу (работа), файл — к её концу;
+        галочки «картинки», «план», «оформление» решают, что внутри."""
+        import zipfile
+        p, t = self.lesson_with_media()
+        win = window([p, t], 18931)
+        try:
+            notes = []
+            win._notify = lambda text, **k: notes.append(text)
+            f = TMP / "в-фоне.autoprint"
+            r = win.commands.call_export({"id": t.id, "fmt": "package", "path": str(f), "plans": True, "looks": False,
+                                          "pics": False})
+            self.assertTrue(r.get("job"))
+            self.assertEqual(win.jobs.get(r["job"]).kind, "export")
+            self.assertTrue(wait(lambda: f.is_file() and not win.jobs.busy()))
+            self.assertTrue(wait(lambda: any("Сохранено одним файлом" in n for n in notes)), notes)
+            with zipfile.ZipFile(f) as z:
+                names = z.namelist()
+            self.assertFalse([n for n in names if n.startswith(("media/", "looks/"))], names)
+            self.assertTrue([n for n in names if n.startswith("plans/")], names)
+        finally:
+            close(win)
+
+    def test_export_several_by_ids(self):
+        """«Уроки одним файлом»: только отмеченные уроки (ids), их планы — с ними."""
+        import zipfile
+        p, t = self.lesson_with_media()
+        other = Template("Другой", [stage("А", 5)], id="OTHER")
+        win = window([p, t, other], 18932)
+        try:
+            f = TMP / "выбранные.autoprint"
+            r = win.commands.call_export({"ids": [t.id], "fmt": "package", "path": str(f), "plans": True, "looks": False})
+            self.assertTrue(r.get("job"))
+            self.assertTrue(wait(lambda: f.is_file() and not win.jobs.busy()))
+            with zipfile.ZipFile(f) as z:
+                lessons_in = [n for n in z.namelist() if n.startswith("lessons/")]
+            self.assertEqual(lessons_in, [f"lessons/{t.id}.json"])
+            s = win.commands.call_export_sizes({"ids": [other.id]})
+            self.assertEqual((s["pics"], s["linked"]), (0, False))
+        finally:
+            close(win)
+
 
 class LiveSafetyTest(unittest.TestCase):
     def test_compact_during_lesson_keeps_it(self):

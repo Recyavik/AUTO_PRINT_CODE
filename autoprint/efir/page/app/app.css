@@ -180,6 +180,11 @@ input[type=checkbox]:not(.sw) { accent-color: var(--accent); width: 16px; height
 .menu .mi .ml { flex: 1; min-width: 0; }
 .menu .mi .mh { color: var(--faint); font-size: 12.5px; }
 .menu .mi.danger { color: var(--live); }
+/* меню с длинными пояснениями («Импорт»): пояснение — второй строкой под названием */
+.pop.stack2 .menu .mi { flex-wrap: wrap; align-items: baseline; row-gap: 2px; padding: 8px 10px; }
+.pop.stack2 .menu .mi > .i { align-self: center; }
+.pop.stack2 .menu .mi .ml { font-weight: 600; }
+.pop.stack2 .menu .mi .mh { flex: 1 0 100%; padding-left: 26px; white-space: normal; text-wrap: pretty; line-height: 1.35; }
 .menu .mi[aria-checked="true"] .ml::after { content: " ✓"; color: var(--accent); }
 .tip { position: fixed; z-index: 90; padding: 6px 10px; border-radius: var(--r-sm); background: var(--text); color: var(--ground);
   font-size: 13px; font-weight: 500; pointer-events: none; max-width: 320px; box-shadow: var(--shadow-sm); }
@@ -203,6 +208,18 @@ input[type=checkbox]:not(.sw) { accent-color: var(--accent); width: 16px; height
 .printsheet .flabel, .exportsheet .flabel { margin-bottom: -4px; }
 .printsheet .seg { align-self: flex-start; }
 .pkgopts[hidden] { display: none; }
+.pkgopts .onlyplan { align-self: flex-start; margin: -4px 0 0 46px; }
+.pkgopts .pkgsize { margin: 0; color: var(--text); font-weight: 600; }
+/* «Уроки одним файлом»: что сохранить */
+.xchoose { display: flex; flex-direction: column; gap: 6px; }
+.xchoose .xtools { display: flex; gap: 6px; }
+.xlist { max-height: min(34vh, 320px); overflow: auto; border: 1px solid var(--line); border-radius: var(--r-md); padding: 4px 6px; }
+.xlist .phead { padding: 8px 8px 2px; }
+.xrow { display: flex; align-items: baseline; gap: 10px; padding: 6px 8px; border-radius: var(--r); cursor: pointer; }
+.xrow:hover { background: var(--raised); }
+.xrow input { flex: none; width: 16px; height: 16px; accent-color: var(--accent); transform: translateY(2px); }
+.xrow .xt { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.xrow .meta { flex: none; max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sheet .sheetlist { border: 1px solid var(--line); border-radius: var(--r-md); padding: 6px; }
 .sheet .sheetlist .phead { padding: 6px 10px 2px; }
 .sheet .sheetlist .mi .ml { flex: 0 0 auto; }

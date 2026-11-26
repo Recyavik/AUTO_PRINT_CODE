@@ -432,6 +432,9 @@ figure img { display: block; max-width: 100%; max-height: 520px; border-radius: 
 .missing { font-size: 14px; color: var(--dim); border: 1.5px dashed var(--line2); border-radius: var(--r-lg); padding: 12px 14px; }
 .placebox { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; border-color: var(--accent-line); }
 .placebox .ptxt { font-weight: 600; color: var(--text); flex: 1 1 220px; }
+.placebox .pico { flex: none; width: 44px; height: 36px; display: grid; place-items: center; border-radius: var(--r);
+  background: var(--raised); color: var(--dim); }
+.placebox .pico svg { width: 22px; height: 22px; }
 .placebox .pacts { display: flex; flex-wrap: wrap; gap: 8px; }
 .placebox button, .efirbtn { height: 32px; padding: 0 12px; font-size: 13.5px; font-weight: 600; border-radius: var(--r-sm);
   border: 1px solid var(--line2); background: var(--raised); color: var(--text); cursor: pointer; }
@@ -514,7 +517,26 @@ body > .menu.wide { width: 340px; } body > .menu.roles { width: 330px; }
 @media (prefers-reduced-motion: reduce) { .lview * { transition: none !important; scroll-behavior: auto !important; } }
 
 /* ---------------------------------------------------------------- печать урока на бумагу / в PDF */
+#printHead { display: none; }            /* шапка печати: на экране план — сбоку */
 @media print {
+  #printHead { display: block; margin: 0 0 18px; padding-bottom: 14px; border-bottom: 2px solid var(--text); break-inside: avoid; }
+  #printHead h1 { font-size: 25px; font-weight: 750; line-height: 1.15; letter-spacing: -.01em; margin: 0 0 4px; text-wrap: balance; }
+  #printHead .phmeta { font-size: 12.5px; color: var(--dim); margin: 0 0 12px; }
+  #printHead .phbar { display: flex; gap: 2px; height: 7px; margin: 0 0 8px; border-radius: 4px; overflow: hidden; }
+  #printHead .phbar i { flex: 1 1 0; min-width: 3px; background: #C99A3E; }
+  #printHead .phbar i.k-break { background: #C9CBD3; } #printHead .phbar i.k-exercise { background: #6FAF7E; }
+  #printHead .phplan { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  #printHead .phplan td { padding: 5px 8px; border-bottom: 1px solid var(--line); vertical-align: baseline; }
+  #printHead .phplan tr:last-child td { border-bottom: 0; }
+  #printHead .phplan .t { width: 52px; padding-left: 0; font-family: var(--mono); color: var(--dim); font-variant-numeric: tabular-nums; }
+  #printHead .phplan .n { font-weight: 600; }
+  #printHead .phplan .m { width: 72px; padding-right: 0; text-align: right; font-family: var(--mono); font-variant-numeric: tabular-nums; }
+  #printHead .phplan tr.k-break .n, #printHead .phplan tr.k-break .m { color: var(--dim); font-weight: 500; }
+  #printHead .phplan .kind { display: inline-block; margin-left: 8px; padding: 0 6px; border: 1px solid var(--line2); border-radius: 999px;
+    font-size: 10.5px; font-weight: 500; color: var(--dim); }
+  #printHead .phplan tr.k-exercise .kind { border-color: #6FAF7E; color: #237A32; }
+  #printHead .phplan .phpart th { text-align: left; padding: 10px 0 3px; font-size: 12px; font-weight: 700; color: var(--text); }
+  #printHead .phplan tr { break-inside: avoid; }
   :root, :root.light { --ground: #fff; --panel: #fff; --raised: #F0F0F4; --raised2: #E6E6EC; --sunken: #F5F5F7;
     --line: #ddd; --line2: #bbb; --text: #111; --dim: #555; --faint: #666; --accent: #9A6200; --accent-soft: transparent;
     --say: #1F5FBF; --tell: #237A32; --ask: #9A6200; --do: #555; --imp: #B00020; --trap: #B00020; --show: #6B2FB0;
@@ -528,7 +550,8 @@ body > .menu.wide { width: 340px; } body > .menu.roles { width: 330px; }
   .ins, .blk > .tools, .sedit, .pmin, #planbanner, .blk.place, .nextcard, .scrim, .pop, .tip { display: none !important; }
   #frame, #view, .lview, .lbody { display: block; height: auto; overflow: visible; }
   .lcontent { overflow: visible; padding: 0; }
-  nav#plan { display: block !important; width: auto; border: 0; overflow: visible; margin-bottom: 14px; }
+  nav#plan { display: none !important; }      /* план — в шапке печати (#printHead), под названием урока */
+  .intro:not(:has(.blk:not(.is-empty))) { display: none !important; }   /* пустое «Перед уроком» — не печатать */
   .stage, .intro { content-visibility: visible !important; }
   .stage { break-inside: auto; margin-bottom: 10px; } .stage .body, .stage.collapsed .body { display: block !important; }
   body.mode-prep .body { padding-left: 20px; } .prow .m { display: inline !important; }

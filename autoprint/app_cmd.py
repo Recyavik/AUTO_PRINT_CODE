@@ -864,11 +864,10 @@ class AppCommands(QObject):
         fmt, path = str(d.get("fmt") or "package"), str(d.get("path") or "")
         if not path:
             raise ValueError("не выбран файл")
-        if fmt == "package":
-            s = self.app._package_to(ts, path, bool(d.get("plans", True)), bool(d.get("looks", True)))
-            if s is None:
-                raise ValueError("файл не сохранился")
-            return s
+        if fmt == "package":                     # картинки и видео — сотни МБ: пишется в фоне, окно не замирает
+            job = self.app.export_package_job(ts, path, bool(d.get("plans", True)), bool(d.get("looks", True)),
+                                              bool(d.get("pics", True)))
+            return {"job": job}
         if fmt not in ("md", "ipynb", "students", "json") or len(ts) != 1:
             raise ValueError("неизвестный формат")
         if not self.app.export_template(ts[0], fmt, path):

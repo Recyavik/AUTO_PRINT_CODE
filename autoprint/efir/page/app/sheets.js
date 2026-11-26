@@ -20,49 +20,109 @@ const FORMATS = [
   { value: "json", label: ".json", ext: "json", filter: "JSON (*.json)" },
 ];
 
-/** Лист «Экспорт»: урок id или все уроки (all). */
+/** Список «что сохранить» для нескольких уроков: планы и уроки с галочками. chosen — Set id; changed() — после правки. */
+function chooseList(chosen, changed) {
+  const all = S.lessons || [];
+  const box = h("div", { class: "xlist", role: "group", "aria-label": "Что сохранить" });
+  const row = (x) => {
+    const inp = h("input", { type: "checkbox", "data-id": x.id });
+    inp.checked = chosen.has(x.id);
+    inp.addEventListener("change", () => { if (inp.checked) chosen.add(x.id); else chosen.delete(x.id); changed(); });
+    return h("label", { class: "xrow" }, inp, h("span", { class: "xt" }, x.title), x.meta ? h("span", { class: "meta" }, x.meta) : null);
+  };
+  const plans = all.filter((x) => x.kind === "plan"), lessons = all.filter((x) => x.kind !== "plan");
+  if (plans.length) box.append(h("div", { class: "phead" }, "Планы"), ...plans.map(row));
+  if (lessons.length) box.append(h("div", { class: "phead" }, "Уроки"), ...lessons.map(row));
+  const setAll = (on) => {
+    for (const i of box.querySelectorAll("input")) { i.checked = on; if (on) chosen.add(i.dataset.id); else chosen.delete(i.dataset.id); }
+    changed();
+  };
+  const tools = h("div", { class: "xtools" }, btn("Все", { size: "sm", kind: "ghost", onClick: () => setAll(true) }),
+    btn("Ни одного", { size: "sm", kind: "ghost", onClick: () => setAll(false) }));
+  return h("div", { class: "xchoose" }, tools, box);
+}
+
+/** Лист «Экспорт»: урок или план id — или несколько уроков одним файлом (all: все отмечены, можно снять). */
 export function exportSheet(id, all = false) {
   const x = all ? null : lessonById(id);
   if (!all && !x) return;
-  const q = all ? { all: true } : { id };
-  const opts = { fmt: "package", plans: true, looks: true };
-  const pkg = h("div", { class: "pkgopts" }, h("p", { class: "meta" }, "Считаю, сколько весят картинки…"));
-  call({ cmd: "export_sizes", ...q }).then((s) => {
+  const isPlan = !!x && x.kind === "plan";
+  const chosen = new Set(all ? (S.lessons || []).map((l) => l.id) : [id]);
+  const q = () => (all ? { ids: [...chosen] } : { id });
+  const opts = { fmt: "package", plans: true, looks: true, pics: true };
+  let sizes = null, seq = 0, timer = 0, api = null;
+  const pkg = h("div", { class: "pkgopts" });
+  const total = h("p", { class: "meta pkgsize", "aria-live": "polite" });
+  const showTotal = () => {
+    if (!sizes) return;
+    const n = (opts.pics ? sizes.pics : 0) + (opts.looks ? sizes.looks : 0);
+    total.textContent = all && !chosen.size ? "Ничего не отмечено." : "Файл — около " + mb(n) + ".";
+  };
+  const drawOpts = () => {
     clear(pkg);
-    const pics = toggle("Картинки и слайды урока — " + mb(s.pics), true, null, "внутри всегда");
-    pics.input.disabled = true;
-    opts.plans = !!s.linked;
-    const plan = toggle("План урока — этапы и минуты, по которым идёт урок", opts.plans, (v) => { opts.plans = v; });
-    plan.input.disabled = !s.linked;
-    const looks = toggle("Оформление экрана учеников: фон, заставка перерыва, видео зарядок — " + mb(s.looks), true,
-      (v) => { opts.looks = v; });
-    pkg.append(pics, plan, looks, h("p", { class: "meta" },
+    const s = sizes;
+    if (!s) { pkg.append(h("p", { class: "meta" }, "Считаю, сколько весят картинки…")); return; }
+    if (s.pics) {
+      pkg.append(toggle("Картинки и слайды урока — " + mb(s.pics), opts.pics, (v) => { opts.pics = v; showTotal(); },
+        "без них файл лёгкий: на месте картинки — её значок и подпись («Слайд 3»), слайды потом подставите из презентации"));
+    } else pkg.append(h("p", { class: "meta" }, all ? "Картинок в отмеченных уроках нет." : "Картинок в уроке нет."));
+    if (!isPlan) {
+      const plan = x && x.plan_id ? (S.plans || []).find((p) => p.id === x.plan_id) : null;
+      if (s.linked) {
+        pkg.append(toggle(all ? "Планы этих уроков — этапы и минуты" : "План урока — этапы и минуты, по которым идёт урок",
+          opts.plans, (v) => { opts.plans = v; }, "без плана урок откроется обычным, с этими же этапами"));
+        if (plan) {
+          const only = btn("Только план «" + plan.title + "» отдельным файлом…", { size: "sm", kind: "ghost", icon: "layers",
+            onClick: () => { if (api) api.done(null); exportSheet(plan.id); } });
+          only.classList.add("onlyplan");
+          pkg.append(only);
+        }
+      } else {
+        pkg.append(h("p", { class: "meta" }, all ? "Отмеченные уроки без плана: этапы и минуты — внутри уроков."
+          : "Урок без плана: этапы и минуты — внутри урока. Привязать к плану — «План урока…» в меню урока."));
+      }
+    }
+    pkg.append(toggle("Оформление экрана учеников: фон, заставка перерыва, видео зарядок" + (s.looks ? " — " + mb(s.looks) : ""), opts.looks,
+      (v) => { opts.looks = v; showTotal(); }));
+    pkg.append(total, h("p", { class: "meta" },
       "Внутри — обычный архив, и в нём понятная копия урока (.md с картинками): её можно открыть и без AutoPrint."));
-  }).catch((e) => { clear(pkg); pkg.append(h("p", { class: "meta" }, "Размер не посчитать: " + e.message)); });
+    showTotal();
+  };
+  const refresh = () => {
+    const n = ++seq;
+    if (all && !chosen.size) { sizes = { pics: 0, looks: 0, linked: false }; drawOpts(); return; }
+    call({ cmd: "export_sizes", ...q() }).then((s) => { if (n === seq) { sizes = s; drawOpts(); } })
+      .catch((e) => { if (n === seq) { clear(pkg); pkg.append(h("p", { class: "meta" }, "Размер не посчитать: " + e.message)); } });
+  };
+  drawOpts();
+  refresh();
   const body = h("div", { class: "exportsheet" });
   if (all) {
-    body.append(h("p", { class: "dim" }, "Один файл .autoprint — все уроки и планы с картинками. Отдайте его коллеге или "
-      + "перенесите на другой компьютер: «Импорт» откроет всё так же."));
+    body.append(h("p", { class: "dim" }, "Отмеченные уроки и планы — одним файлом .autoprint. Отдайте его коллеге или "
+      + "перенесите на другой компьютер: «Импорт» откроет всё так же."),
+    chooseList(chosen, () => { clearTimeout(timer); timer = setTimeout(refresh, 150); }));
   } else {
     body.append(h("div", { class: "flabel" }, "Формат"),
-      seg(FORMATS.map((f) => ({ value: f.value, label: f.label })), opts.fmt, (v) => { opts.fmt = v; pkg.hidden = v !== "package"; },
-        { cls: "vseg", label: "Формат" }));
+      seg(FORMATS.map((f) => ({ value: f.value, label: isPlan && f.value === "package" ? "План одним файлом (.autoprint)" : f.label })),
+        opts.fmt, (v) => { opts.fmt = v; pkg.hidden = v !== "package"; }, { cls: "vseg", label: "Формат" }));
   }
   body.append(pkg);
-  let api = null;
   const save = async () => {
+    if (all && !chosen.size) { toast("Отметьте хотя бы один урок"); return; }
     const f = FORMATS.find((y) => y.value === opts.fmt);
-    const base = all ? "Уроки AutoPrint" : safeName(x.title);
+    const one = all && chosen.size === 1 ? lessonById([...chosen][0]) : null;
+    const base = all ? (one ? safeName(one.title) : "Уроки AutoPrint") : safeName(x.title);
     const name = opts.fmt === "students" ? base + " — для учеников.ipynb" : base + "." + f.ext;
     let path = "";
-    try { path = await call({ cmd: "pick_save", name, filter: f.filter, title: all ? "Все уроки одним файлом" : "Экспорт урока" }); } catch (e) { fail(e); return; }
+    try { path = await call({ cmd: "pick_save", name, filter: f.filter, title: all ? "Уроки одним файлом" : "Экспорт" }); } catch (e) { fail(e); return; }
     if (!path) return;                                       // передумали — лист остаётся
     try {
-      await call({ cmd: "export", ...q, fmt: opts.fmt, path, plans: opts.plans, looks: opts.looks });
+      const r = await call({ cmd: "export", ...q(), fmt: opts.fmt, path, plans: opts.plans, looks: opts.looks, pics: opts.pics });
       if (api) api.done(true);
+      if (r && r.job) toast("Сохраняю в файл — окно не ждёт. Готово — скажу.");
     } catch (e) { toast("Не сохранилось: " + e.message, { warn: true }); }
   };
-  sheet(all ? "Все уроки одним файлом" : "Экспорт урока «" + x.title + "»", body, [
+  sheet(all ? "Уроки одним файлом" : (isPlan ? "Экспорт плана «" : "Экспорт урока «") + x.title + "»", body, [
     { spacer: true }, { label: "Отмена", kind: "ghost", value: null },
     { label: "Сохранить…", kind: "primary", check: () => { save(); return false; } },
   ], { wide: true, onOpen: (a) => { api = a; } });

@@ -10,6 +10,7 @@ function phaseText(j) {
   const n = (j.chars || 0).toLocaleString("ru-RU");
   if (j.kind === "photos") return "скачиваю картинки" + (j.preview ? ": " + j.preview : "…");
   if (j.kind === "copy") return "копирую" + (j.preview ? ": " + j.preview : "…");
+  if (j.kind === "export") return "записываю" + (j.preview ? " — " + j.preview : "…");
   return { connect: "жду ответа", think: j.chars ? "думает — объём рассуждений " + n : "думает",
     write: "пишет — " + n + " знаков" }[j.phase] || "работает";
 }

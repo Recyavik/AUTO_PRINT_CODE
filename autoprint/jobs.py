@@ -68,10 +68,13 @@ class Jobs(QObject):
     def get(self, jid: str) -> Job | None:
         return next((j for j in self.items if j.id == jid), None)
 
-    def start(self, kind: str, fn: Callable[[Job], object], on_done: Callable[[object], None], title: str) -> str:
-        """fn(job) → результат — в фоне; on_done(результат) — в потоке окна, если работа не отменена и без ошибки."""
+    def start(self, kind: str, fn: Callable[[Job], object], on_done: Callable[[object], None], title: str,
+              on_error: Callable[[str], object] | None = None) -> str:
+        """fn(job) → результат — в фоне; on_done(результат) — в потоке окна, если работа не отменена и без ошибки;
+        on_error(текст) — в потоке окна, если с ошибкой (её видно и в строке работы)."""
         self._n += 1
         job = Job(f"j{self._n}-{int(time.time())}", kind, title, self._pinged.emit)
+        job.on_error = on_error
         self.items.append(job)
 
         def work() -> None:
@@ -104,6 +107,11 @@ class Jobs(QObject):
                 job.error = f"Не получилось: {e}"
         if not job.error:
             QTimer.singleShot(KEEP_DONE_S * 1000, lambda j=job: self.dismiss(j.id))
+        elif getattr(job, "on_error", None) is not None:
+            try:
+                job.on_error(job.error)
+            except Exception:   # noqa: BLE001
+                log.exception("Сообщение об ошибке фоновой работы «%s» не показано", job.title)
         self.changed.emit()
 
     def _tick(self) -> None:

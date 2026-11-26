@@ -36,7 +36,10 @@ def lessons() -> list[Template]:
     e = Template("Со слайдами", [stage("Слайды", 10, id="e1"), Block(BLOCK_IMAGE, "", slide=2, id="es")], id="E")
     s = Template("Сценарий", [note("## ⏱ 00:00–00:05 · Приветствие\nЗдравствуйте", role="text", id="sn1"),
                               note("## ⏱ 00:05–00:10 · Разбор\nСмотрим код", role="text", id="sn2")], id="S")
-    return [a, p, e, s]
+    from autoprint import plans
+    b = plans.new_topic(p, "По плану")
+    b.id = "B"
+    return [a, p, e, s, b]
 
 
 ANSWER = "~~~markdown\n---\ntitle: По ответу\n---\n\n## Всё · 30 мин\n\n> [!say]\n> Текст по ответу\n~~~"
@@ -130,17 +133,95 @@ class SheetsTest(AppPage):
         self.assertFalse([n for n in names if n.startswith("looks/")], names)
         self.assertTrue([n for n in names if n.startswith("media/")], names)
 
+    def switch(self, text: str):
+        """Переключатель листа по началу надписи: input или None."""
+        return (f"([...document.querySelectorAll('.scrim .sheet label.switch')].find(l => l.textContent.includes({text!r})) || {{}})"
+                ".querySelector?.('input')")
+
+    def test_export_without_pictures(self):
+        """1.1.4: картинки и слайды можно не брать — файл лёгкий, места картинок остаются."""
+        out = TMP / "bez-kartinok.autoprint"
+        self.patch(self.app.commands, "call_pick_save", lambda d: str(out))
+        self.menu_pick("Экспорт…")
+        self.assertTrue(self.wait_js(f"!!{self.switch('Картинки и слайды урока')}"))
+        self.assertFalse(self.js(f"{self.switch('Картинки и слайды урока')}.disabled"))
+        self.js(f"{{ const i = {self.switch('Картинки и слайды урока')}; i.checked = false; i.dispatchEvent(new Event('change')); }}")
+        self.assertTrue(self.wait_js("document.querySelector('.scrim .sheet .pkgsize').textContent.includes('Файл —')"))
+        self.sheet_click("Сохранить…")
+        self.assertTrue(self.wait_js("!document.querySelector('.scrim')"))                 # лист закрылся сразу, файл — в фоне
+        self.assertTrue(self.wait_py(lambda: out.is_file() and not self.app.jobs.busy()))
+        names = zipfile.ZipFile(out).namelist()
+        self.assertFalse([n for n in names if n.startswith("media/")], names)
+
+    def test_export_lesson_without_plan_says_so(self):
+        """Урок без плана: вместо серого переключателя «План урока» — понятная строка."""
+        self.open_lesson("E")
+        self.menu_pick("Экспорт…")
+        self.assertTrue(self.wait_js("document.querySelector('.scrim .sheet').textContent.includes('Урок без плана')"))
+        self.assertFalse(self.js(f"!!{self.switch('План урока')}"))
+
+    def test_export_plan_alone(self):
+        """Урок по плану: «План урока» — галочкой, а «Только план … отдельным файлом…» — свой файл с одним планом."""
+        out = TMP / "plan.autoprint"
+        self.patch(self.app.commands, "call_pick_save", lambda d: str(out))
+        self.open_lesson("B")
+        self.menu_pick("Экспорт…")
+        self.assertTrue(self.wait_js(f"!!{self.switch('План урока')}"))
+        self.assertFalse(self.js(f"{self.switch('План урока')}.disabled"))
+        self.sheet_click("Только план «Онлайн 45» отдельным файлом…")
+        self.assertTrue(self.wait_js("[...document.querySelectorAll('.scrim .sheet h2')].pop().textContent === 'Экспорт плана «Онлайн 45»'"))
+        self.assertEqual(self.js("document.querySelectorAll('.scrim .sheet').length"), 1)
+        self.sheet_click("Сохранить…")
+        self.assertTrue(self.wait_py(lambda: out.is_file() and not self.app.jobs.busy()))
+        names = zipfile.ZipFile(out).namelist()
+        self.assertEqual(([n for n in names if n.startswith("plans/")], [n for n in names if n.startswith("lessons/")]),
+                         (["plans/P.json"], []))
+
     def test_export_all_from_library(self):
         out = TMP / "all.autoprint"
         self.patch(self.app.commands, "call_pick_save", lambda d: str(out))
         self.go("#/lessons", "lessons")
         self.click("#exportAll")
-        self.assertIn("Все уроки одним файлом", self.sheet())
+        self.assertIn("Уроки одним файлом", self.sheet())
+        self.assertTrue(self.wait_js("document.querySelectorAll('.scrim .sheet .xlist input:checked').length >= 4"))
         self.sheet_click("Сохранить…")
-        self.assertTrue(self.wait_py(lambda: out.is_file()))
+        self.assertTrue(self.wait_py(lambda: out.is_file() and not self.app.jobs.busy()))
         self.assertGreaterEqual(len([n for n in zipfile.ZipFile(out).namelist() if n.startswith("lessons/")]), 3)
 
+    def test_export_chosen_lessons(self):
+        """«Уроки одним файлом»: отметить, какие — в файле только они."""
+        out = TMP / "chosen.autoprint"
+        self.patch(self.app.commands, "call_pick_save", lambda d: str(out))
+        self.go("#/lessons", "lessons")
+        self.click("#exportAll")
+        self.sheet()
+        self.sheet_click("Ни одного")
+        self.assertTrue(self.wait_js("document.querySelectorAll('.scrim .sheet .xlist input:checked').length === 0"))
+        self.js("{ const i = document.querySelector('.scrim .sheet .xlist input[data-id=A]'); i.checked = true; i.dispatchEvent(new Event('change', {bubbles: true})); }")
+        self.assertTrue(self.wait_js("document.querySelector('.scrim .sheet .pkgsize').textContent.includes('Файл —')"))
+        self.sheet_click("Сохранить…")
+        self.assertTrue(self.wait_py(lambda: out.is_file() and not self.app.jobs.busy()))
+        self.assertEqual([n for n in zipfile.ZipFile(out).namelist() if n.startswith("lessons/")], ["lessons/A.json"])
+
     # ---------------------------------------------------------------- печать и PDF
+    def test_print_head_title_then_plan(self):
+        """1.1.4: PDF начинается с названия урока, под ним — план (время, этап, минуты) и полоса этапов; на экране шапки
+        печати не видно, а боковой список плана в печать не идёт."""
+        self.open_lesson("B")
+        self.assertTrue(self.wait_js("!!document.querySelector('#printHead h1')"))
+        self.assertEqual(self.js("document.querySelector('#printHead h1').textContent"), "По плану")
+        meta = self.js("document.querySelector('#printHead .phmeta').textContent")
+        self.assertIn("План «Онлайн 45»", meta)
+        self.assertIn("45 мин", meta)
+        rows = self.js("[...document.querySelectorAll('#printHead tbody tr')].map(r => [...r.cells].map(c => c.textContent.trim()))")
+        self.assertEqual(rows, [["0:00", "Начало", "10 мин"], ["0:10", "Практика", "35 мин"]])
+        self.assertEqual(self.js("document.querySelectorAll('#printHead .phbar i').length"), 2)
+        self.assertFalse(self.js("!!document.querySelector('#printHead table > tr')"))        # части — внутри таблицы
+        self.assertEqual(self.js("getComputedStyle(document.querySelector('#printHead')).display"), "none")
+        self.assertTrue(self.js("document.querySelector('#content .lcol').firstElementChild.id === 'printHead' || "
+                                "[...document.querySelector('#content .lcol').children].findIndex(x => x.id === 'printHead') < "
+                                "[...document.querySelector('#content .lcol').children].findIndex(x => x.id === 'main')"))
+
     def test_print_sheet_buttons(self):
         out = TMP / "cikly.pdf"
         pdf, printed = [], []

@@ -132,6 +132,43 @@ class WizardTest(AppPage):
         self.assertTrue(self.wait_js(f"location.hash === '#/lesson/{nid}'"))
         self.app.delete_lesson(self.store.get(nid))
 
+    def test_library_import_menu(self):
+        """1.1.4: «Импорт» в «Уроках» — на виду: файл урока или ответ нейросети (задание для своего чата — там же)."""
+        self.click("#importBtn")
+        self.assertTrue(self.wait_js("!!document.querySelector('.pop .menu')"))
+        self.assertEqual(self.js("[...document.querySelectorAll('.pop .menu .mi .ml')].map(x => x.textContent)"),
+                         ["Файл урока…", "Ответ нейросети…"])
+        self.js("[...document.querySelectorAll('.pop .menu .mi')].pop().click()")
+        self.assertTrue(self.wait_js("location.hash.startsWith('#/new/text') && !!document.querySelector('#copyTaskPaste')"))
+        self.assertEqual(self.js("document.querySelector('.wsrc[aria-pressed=true]').dataset.src"), "paste")
+        self.assertIn("Онлайн 90", self.js("document.querySelector('#planLine').textContent"))   # последний план
+
+    def test_library_import_file(self):
+        md = TMP / "из-уроков.md"
+        md.write_text("# Из уроков\n\nТекст\n", encoding="utf-8")
+        self.patch(self.app.commands, "call_pick_files", lambda d: [str(md)])
+        before = {t.id for t in self.store.templates}
+        self.click("#importBtn")
+        self.assertTrue(self.wait_js("!!document.querySelector('.pop .menu')"))
+        self.js("document.querySelector('.pop .menu .mi').click()")
+        self.assertTrue(self.wait_py(lambda: len(self.new_ids(before)) == 1))
+        self.app.delete_lesson(self.store.get(self.new_ids(before)[0]))
+
+    def test_step1_ai_answer_goes_to_paste(self):
+        """Шаг 1: «Уже есть урок?» — файл или ответ нейросети; ответ — шаг 2 с выбранным планом и заданием."""
+        self.go("#/new", "wizard")
+        self.click(".wplan[data-id=P1]")
+        self.click("#wizAnswer")
+        self.assertTrue(self.wait_js("location.hash.startsWith('#/new/text?plan=P1') && !!document.querySelector('#copyTaskPaste')"))
+        self.assertEqual(self.js("document.querySelector('.wsrc[aria-pressed=true]').dataset.src"), "paste")
+
+    def test_own_chat_open_without_ai(self):
+        """Нейросеть не подключена — «Спросить свой чат» (задание и поле ответа) раскрыто сразу, а не спрятано."""
+        self.step2()
+        self.source("ai")
+        self.assertTrue(self.wait_js("!!document.querySelector('details.ownchat')"))
+        self.assertTrue(self.js("document.querySelector('details.ownchat').open"))
+
     # ---------------------------------------------------------------- шаг 2
     def test_no_plan_shows_minutes_and_break(self):
         self.step2("none")

@@ -657,18 +657,28 @@ class App(QObject):
         files |= {p.resolve() for lk in looks for p in package.look_files(lk)}
         return sum(p.stat().st_size for p in files if p.is_file())
 
-    def export_package(self, templates: list[Template], path, include_plans: bool = True,
-                       include_looks: bool = True) -> dict:
+    def _package_snapshot(self, templates: list[Template], include_plans: bool, include_looks: bool):
+        """Копии уроков, планов и оформлений для записи в файл — запись может идти в фоне, пока урок правят."""
         import copy as _copy
-        from . import package
         lessons, plans_, looks = self._package_parts(templates, include_plans, include_looks)
+        lessons = [_copy.deepcopy(t) for t in lessons]
         if include_looks:                      # урок без своего оформления — с тем, что у него на экране сейчас
-            lessons = [_copy.copy(t) for t in lessons]
             for t in lessons:
                 lk = self.efir.lesson_look(t)
                 if lk is not None and not t.look:
                     t.look = lk.id
-        return package.export_package(path, lessons=lessons, plans=plans_, looks=looks)
+        return lessons, [_copy.deepcopy(p) for p in plans_], [_copy.deepcopy(lk) for lk in looks]
+
+    def export_package(self, templates: list[Template], path, include_plans: bool = True,
+                       include_looks: bool = True, include_media: bool = True) -> dict:
+        from . import package
+        lessons, plans_, looks = self._package_snapshot(templates, include_plans, include_looks)
+        return package.export_package(path, lessons=lessons, plans=plans_, looks=looks, media=include_media)
+
+    def _saved_text(self, s: dict, path) -> str:
+        mb = s["bytes"] / 1024 / 1024
+        return (f"Сохранено одним файлом: уроков — {s['lessons']}, планов — {s['plans']}, оформлений — "
+                f"{s['looks']}, файлов внутри — {s['files']} ({mb:.1f} МБ). {path}")
 
     def _package_to(self, templates, path, include_plans: bool, include_looks: bool) -> dict | None:
         try:
@@ -676,10 +686,33 @@ class App(QObject):
         except OSError as e:
             self._notify(f"Не сохранилось: {e}", warn=True)
             return None
-        mb = s["bytes"] / 1024 / 1024
-        self._notify(f"Сохранено одним файлом: уроков — {s['lessons']}, планов — {s['plans']}, оформлений — "
-                     f"{s['looks']}, файлов внутри — {s['files']} ({mb:.1f} МБ). {path}")
+        self._notify(self._saved_text(s, path))
         return s
+
+    def export_package_job(self, templates: list[Template], path: str, include_plans: bool = True,
+                           include_looks: bool = True, include_media: bool = True) -> str:
+        """Урок (или несколько) одним файлом — в фоне: окно не замирает, пока пишутся картинки и видео зарядок.
+        Ход — в «Уроках»; готово или не вышло — уведомлением. → id работы."""
+        from . import ai, package
+        lessons, plans_, looks = self._package_snapshot(templates, include_plans, include_looks)
+        name = Path(path).name
+
+        def work(job):
+            def progress(done: int, total: int) -> None:
+                if job.cancel_event.is_set():
+                    raise package.Cancelled()
+                job.progress("pack", done, f"{done / 1048576:.1f} из {total / 1048576:.1f} МБ")
+            try:
+                return package.export_package(path, lessons=lessons, plans=plans_, looks=looks, media=include_media,
+                                              progress=progress)
+            except package.Cancelled:
+                raise ai.Cancelled() from None
+            except OSError as e:                 # диск полон, нет прав — сообщение, а не след ошибки в журнале
+                raise ai.AIError(f"Не сохранилось: {e}") from None
+
+        return self.jobs.start("export", work, lambda s: self._notify(self._saved_text(s, path)),
+                               f"Сохраняю «{name}»",
+                               on_error=lambda err: err != "Отменено." and self._notify(err, warn=True))
 
     def export_template(self, t: Template, fmt: str, path: str) -> bool:
         """Урок в файл path (куда — спросил лист «Экспорт»): package | md | ipynb | students | json."""

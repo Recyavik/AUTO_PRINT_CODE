@@ -643,7 +643,8 @@ export function lessonView(root, r) {
   const banner = h("section", { id: "planbanner", hidden: true });
   const main = h("div", { id: "main" });
   const grips = ["l", "r"].map(textGrip);
-  const content = h("div", { id: "content", class: "lcontent" }, h("div", { class: "lcol" }, ...grips, banner, main));
+  const printHead = h("header", { id: "printHead", "aria-hidden": "true" });     // только на бумаге: название и план
+  const content = h("div", { id: "content", class: "lcontent" }, h("div", { class: "lcol" }, printHead, ...grips, banner, main));
   const nowbar = h("button", { id: "nowbar", type: "button", hidden: true });
   const viewer = h("div", { id: "viewer", hidden: true, role: "dialog", "aria-label": "Картинка" },
     h("button", { class: "vclose", type: "button", "aria-label": "Закрыть (Esc)" }, "×"), h("img", { alt: "" }),

@@ -184,6 +184,9 @@ function buildBlock(it) {
     if (it.place) {                       // место: картинку подставят из презентации или вставят
       n.classList.add("place");
       const box = el("div", "missing placebox");
+      const pico = el("span", "pico");                 // значок: здесь картинка (урок сохранили без картинок и т. п.)
+      pico.appendChild(icon("image"));
+      box.appendChild(pico);
       box.appendChild(el("div", "ptxt", it.place === "slide" ? "Слайд " + it.slide + " — картинки нет"
         : "Нужна картинка: " + (it.title || "без подписи")));
       const acts = el("div", "pacts");
@@ -590,11 +593,61 @@ export function renderMain() {
   }
 }
 
+// ---------------------------------------------------------------- шапка печати: название, план урока таблицей
+// На экране её нет (план — сбоку); на бумаге и в PDF урок начинается с названия, под ним — план: полоса этапов по
+// времени и таблица «время · этап · минуты» (перерыв и зарядка — пометкой). Дальше — текст урока, как на экране.
+function renderPrintHead(L, stages) {
+  const ph = $("printHead");
+  if (!ph) return;
+  ph.innerHTML = "";
+  if (!L) return;
+  ph.appendChild(el("h1", "", L.title || "Урок"));
+  const total = stages.reduce((a, s) => a + s.minutes, 0);
+  const bits = [];
+  if (L.plan && L.plan.title) bits.push("План «" + L.plan.title + "»");
+  if (stages.length) bits.push(durText(total), stages.length + " " + (stages.length % 10 === 1 && stages.length % 100 !== 11 ? "этап"
+    : [2, 3, 4].includes(stages.length % 10) && ![12, 13, 14].includes(stages.length % 100) ? "этапа" : "этапов"));
+  if (bits.length) ph.appendChild(el("div", "phmeta", bits.join(" · ")));
+  if (!stages.length) return;
+  const bar = el("div", "phbar");
+  for (const s of stages) {
+    const seg = el("i", s.item.kind ? "k-" + s.item.kind : "");
+    seg.style.flexGrow = String(Math.max(1, s.minutes));
+    bar.appendChild(seg);
+  }
+  ph.appendChild(bar);
+  const table = el("table", "phplan");
+  const tb = el("tbody");
+  const pn = partNumbers(stages);
+  let lastPart = null;
+  for (const s of stages) {
+    if (s.item.part && s.item.part !== lastPart) {
+      const pr = el("tr", "phpart");
+      const td = el("th", "", pn[s.id] + ". " + s.item.part);
+      td.colSpan = 3;
+      pr.appendChild(td);
+      tb.appendChild(pr);
+    }
+    lastPart = s.item.part || lastPart;
+    const tr = el("tr", s.item.kind ? "k-" + s.item.kind : "");
+    tr.appendChild(el("td", "t", hm(s.start)));
+    const name = el("td", "n", s.item.title || "Этап");
+    const word = s.item.kind === "break" ? "перерыв" : "зарядка";
+    if (s.item.kind && !(s.item.title || "").toLowerCase().includes(word)) name.appendChild(el("span", "kind", word));
+    tr.appendChild(name);
+    tr.appendChild(el("td", "m", s.minutes + " мин"));
+    tb.appendChild(tr);
+  }
+  table.appendChild(tb);
+  ph.appendChild(table);
+}
+
 // ---------------------------------------------------------------- план слева
 export function renderPlan() {
   const plan = $("plan");
   const L = A.S && A.S.lesson;
   const stages = L ? stagesOf(A.items) : [];
+  renderPrintHead(L, stages);
   plan.hidden = !stages.length;
   if (!stages.length) { plan.innerHTML = ""; return; }
   // не перерисовывать, только пока набирают минуты в поле плана (кнопка в фокусе — не повод ждать: «Закрепить сбоку»)

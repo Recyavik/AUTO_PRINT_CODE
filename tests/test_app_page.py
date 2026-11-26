@@ -210,6 +210,23 @@ class ShellTest(AppPage):
         self.assertTrue(self.js("document.querySelector('#rail a[href=\"#/settings\"]').classList.contains('on')"))
         self.go("#/lessons", "lessons")
 
+    def test_logo_links_images_not_dragged(self):
+        """Знак в углу, пункты меню, ссылки и картинки не тянутся «призраком»; свои переносы (ручка блока, строка
+        плана — draggable) и выделенный текст — как раньше."""
+        got = self.js("""(() => {
+          const fire = (n) => { const e = new DragEvent('dragstart', {bubbles: true, cancelable: true});
+            n.dispatchEvent(e); return e.defaultPrevented; };
+          const own = document.createElement('div'); own.draggable = true;
+          const ownImg = document.createElement('img'); own.append(ownImg);
+          const pic = document.createElement('img'); const txt = document.createTextNode('текст');
+          document.body.append(own, pic, txt);
+          const r = {logo: fire(document.querySelector('.tb-logo')), logoImg: fire(document.querySelector('.tb-logo img')),
+                     nav: fire(document.querySelector('#rail a.nav .nl')), pic: fire(pic),
+                     own: fire(own), ownImg: fire(ownImg), text: fire(txt)};
+          own.remove(); pic.remove(); txt.remove(); return r; })()""")
+        self.assertEqual(got, {"logo": True, "logoImg": True, "nav": True, "pic": True,
+                               "own": False, "ownImg": False, "text": False})
+
     def test_ctrl_n_opens_wizard(self):
         self.js("document.dispatchEvent(new KeyboardEvent('keydown', {key: 'n', code: 'KeyN', ctrlKey: true, bubbles: true}))")
         self.assertTrue(self.wait_js("location.hash === '#/new'"))

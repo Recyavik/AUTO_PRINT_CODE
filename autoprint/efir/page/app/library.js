@@ -1,7 +1,7 @@
 // «Уроки»: продолжить (или идущий урок), планы, все уроки по группам планов, поиск, импорт перетаскиванием.
 "use strict";
-import { S, on, send, call, now } from "./core.js";
-import { h, btn, iconBtn, clear, toast } from "./ui.js";
+import { S, on, send, call, now, go } from "./core.js";
+import { h, btn, iconBtn, clear, toast, menu } from "./ui.js";
 import { icon } from "./icons.js";
 import { setCrumbs, registerDrop } from "./shell.js";
 import { lessonMenuItems, menuAt, lessonById } from "./lessonmenu.js";
@@ -49,13 +49,33 @@ export async function pickAndImport() {
 on("shortcut", (k) => { if (k === "open") pickAndImport(); });
 registerDrop("lessons", (files) => importFiles(files.map((f) => f.path)));
 
+/** Ответ своего чата: «Новый урок» → «Тема и текст» с «Ответ нейросети» — задание для чата и поле ответа. plan — по
+ *  какому плану (по умолчанию — последний выбранный). */
+export function answerImport(plan) {
+  const wz = S.wizard || {};
+  const p = plan || ((S.plans || []).some((x) => x.id === wz.plan) ? wz.plan : "none");
+  go("#/new/text?plan=" + encodeURIComponent(p) + "&src=paste");
+}
+
+/** «Импорт»: файл урока или ответ нейросети — на виду, а не только перетаскиванием и Ctrl+O. */
+export function importMenu(anchor) {
+  menu(anchor, [
+    { label: "Файл урока…", icon: "file", hint: ".autoprint, презентация .pptx или .pdf, .md, .ipynb — или перетащите в окно",
+      on: () => pickAndImport() },
+    { label: "Ответ нейросети…", icon: "sparkles", hint: "скопировать задание для своего чата (ChatGPT, GigaChat…) и вставить ответ",
+      on: () => answerImport() },
+  ], { align: "right", cls: "stack2" });
+}
+
 // ---------------------------------------------------------------- экран
 export function lessonsView(root) {
   setCrumbs([{ label: "Уроки" }]);
   const search = h("input", { id: "libSearch", type: "search", placeholder: "Найти урок", "aria-label": "Найти урок",
     autocomplete: "off" });
-  const exportAll = iconBtn("download", "Все уроки одним файлом (.autoprint)", () => exportSheet(null, true), { kind: "ghost" });
+  const exportAll = iconBtn("download", "Уроки одним файлом (.autoprint) — все или отмеченные", () => exportSheet(null, true), { kind: "ghost" });
   exportAll.id = "exportAll";
+  const importBtn = btn("Импорт", { icon: "upload", onClick: () => importMenu(importBtn) });
+  importBtn.id = "importBtn";
   const newBtn = h("a", { class: "btn primary", id: "newLessonBtn", href: "#/new" }, icon("plus"), h("span", null, "Новый урок"));
   const cont = h("section", { id: "continueCard", class: "today", hidden: true });
   const jobs = jobsBox("libjobs");                // нейросеть составляет урок — ход виден и здесь
@@ -64,7 +84,7 @@ export function lessonsView(root) {
   const plansSect = h("section", { class: "sect" }, h("h2", null, "Планы", h("span", { class: "meta" }, "этапы и время, по которым строятся уроки")), plansGrid);
   const page = h("div", { class: "page" }, h("div", { class: "wrap" },
     h("div", { class: "pagehead" }, h("h1", null, "Уроки"),
-      h("div", { class: "phact" }, h("label", { class: "search" }, icon("search", "sm"), search), exportAll, newBtn)),
+      h("div", { class: "phact" }, h("label", { class: "search" }, icon("search", "sm"), search), exportAll, importBtn, newBtn)),
     jobs.el, cont, plansSect, h("section", { class: "sect" }, h("h2", null, "Все уроки"), list)));
   root.append(page);
 

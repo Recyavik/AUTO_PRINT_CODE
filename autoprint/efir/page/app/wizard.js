@@ -1,7 +1,7 @@
 // «Новый урок» по шагам (#/new):
 //  1 — «На чём построить урок?»: карточки планов, «Без плана», «Свой план» (#/new/plan), «Уже есть файл урока?»;
 //  2 — «Тема и текст» (#/new/text?plan=…): тема, класс (без плана — минуты и перерыв) и откуда взять текст этапов:
-//      «Составит нейросеть» (по теме или по файлу; Claude Code и Codex читают сам файл), «Вставить текст» (ответ
+//      «Составит нейросеть» (по теме или по файлу; Claude Code и Codex читают сам файл), «Ответ нейросети» (ответ
 //      своего чата, Markdown, тетрадка, код), «Заполню сам».
 // Нейросеть и картинки работают в фоне — ход виден здесь и в «Уроках»; готовый урок открывается сам.
 "use strict";
@@ -9,7 +9,7 @@ import { S, call, go } from "./core.js";
 import { h, btn, iconBtn, seg, toggle, field, numberField, select, toast, clear } from "./ui.js";
 import { icon } from "./icons.js";
 import { setCrumbs, registerDrop } from "./shell.js";
-import { pickAndImport, importFiles } from "./library.js";
+import { pickAndImport, importFiles, answerImport } from "./library.js";
 import { jobsBox } from "./jobsbox.js";
 import { durText, plural, hm } from "../lesson/state.js";
 
@@ -88,12 +88,15 @@ function step1(box) {
   draw();
   const pick = btn("Выбрать файл…", { icon: "upload", onClick: () => pickAndImport() });
   pick.id = "pickLessonFile";
+  const answer = btn("Ответ нейросети…", { icon: "sparkles", onClick: () => answerImport(W.plan || "none") });
+  answer.id = "wizAnswer";
   const nextBtn = btn("Далее", { kind: "primary", onClick: next });
   nextBtn.id = "wizNext";
   box.append(h("div", { class: "wrap wwrap" }, stepper(1), h("h1", null, "На чём построить урок?"),
     h("p", { class: "dim lead" }, "План — этапы и минуты урока. Выберите свой обычный формат: урок будет по нему."), cards,
-    h("div", { class: "wfile" }, icon("file"), h("span", null, "Уже есть файл урока?"), pick,
-      h("span", { class: "meta" }, "или перетащите его в окно: .autoprint, презентация .pptx или .pdf, .md, .ipynb")),
+    h("div", { class: "wfile" }, icon("file"), h("span", null, "Импорт: уже есть урок?"), pick, answer,
+      h("span", { class: "meta" }, "файл можно и перетащить в окно (.autoprint, .pptx, .pdf, .md, .ipynb); ответ нейросети — "
+        + "по заданию программы для своего чата, с выбранным планом")),
     foot(btn("Отмена", { kind: "ghost", onClick: () => go("#/lessons") }), h("span", { class: "spacer" }), nextBtn)));
   return { update: draw, onDrop: (paths) => importFiles(paths) };
 }
@@ -223,7 +226,7 @@ function step2(box, planId) {
   // ---- откуда взять текст
   const SRC = [
     { key: "ai", icon: "sparkles", title: "Составит нейросеть", sub: "по теме или по вашему файлу" },
-    { key: "paste", icon: "clipboard", title: "Вставить текст", sub: "ответ своего чата, Markdown, код" },
+    { key: "paste", icon: "clipboard", title: "Ответ нейросети", sub: "задание для своего чата — здесь; или Markdown, код" },
     { key: "manual", icon: "pencil", title: "Заполню сам", sub: "этапы из плана, внутри пусто" },
   ];
   const cards = h("div", { class: "wsrcs", role: "radiogroup", "aria-label": "Откуда взять текст этапов" });
@@ -280,7 +283,7 @@ function step2(box, planId) {
       h("div", { class: "mdrop" }, icon("upload"), h("div", { class: "mtext" }, h("b", null, "Материал — необязательно"),
         h("span", { class: "meta" }, "Перетащите методичку, презентацию или код (pdf, docx, pptx, txt, md, ipynb, py). Без материала — урок по теме.")), pick),
       files, mat, field("Что это", what), codeBox, whoLine(useCli),
-      h("details", { class: "ownchat" }, h("summary", null, "Спросить свой чат вместо этого"),
+      h("details", { class: "ownchat", open: !aiState().configured }, h("summary", null, "Спросить свой чат вместо этого"),
         h("div", { class: "wrow" }, copy, h("span", { class: "meta" }, "вставьте задание в свой чат, ответ — сюда:")), ans));
   }
   function pastePanel() {
@@ -381,6 +384,7 @@ export function wizardView(root, r) {
     if (cur && cur.destroy) cur.destroy();
     clear(box);
     const step = r2.parts[1] || "";
+    if (step === "text" && ["ai", "paste", "manual"].includes(r2.query.src)) W.src = r2.query.src;   // «Импорт → Ответ нейросети»
     cur = step === "plan" ? planEditor(box) : step === "text" ? step2(box, r2.query.plan || "") : step1(box);
   };
   show(r);

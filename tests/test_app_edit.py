@@ -723,6 +723,8 @@ class PlanTest(EditPage):
         self.assertTrue(self.wait_js("!!document.querySelector('[data-id=ph] .placebox')"))
         self.assertIn("Нужна картинка: Кот", self.js("document.querySelector('[data-id=ph]').textContent"))
         self.assertIn("Слайд 3 — картинки нет", self.js("document.querySelector('[data-id=ps]').textContent"))
+        # 1.1.4: на месте — значок картинки (урок, сохранённый без картинок, показывает, что картинка здесь была)
+        self.assertTrue(self.js("!!document.querySelector('[data-id=ps] .placebox .pico svg')"))
         self.assertTrue(self.js("!!document.querySelector('[data-id=ph] .find')"))
         self.assertTrue(self.js("!!document.querySelector('[data-id=ps] .fillslides')"))
         self.assertFalse(self.js("!!document.querySelector('[data-id=ps] .toscreen')"))
