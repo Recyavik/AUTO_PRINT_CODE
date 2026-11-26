@@ -64,7 +64,8 @@ class EfirController(QObject):
         self.video_dur = 0.0
         self.video_error = ""
         self.video_muted = False         # зарядка идёт без звука (браузер не дал звук без щелчка по вкладке)
-        self.video_waiting = False       # зарядка стоит до щелчка (браузер не дал запустить даже без звука)
+        self.video_waiting = False       # зарядка стоит до щелчка по вкладке учеников
+        self.video_ready = False         # …так и задумано (настройка «по щелчку»): встала на первый кадр — не беда
         # перерыв (время — time.time(), секунды)
         self.brk_seq = 0
         self.brk_ends = 0.0
@@ -124,6 +125,8 @@ class EfirController(QObject):
             return "Экран учеников выключен", "faint"
         if self.clients <= 0:
             return "Вкладка экрана учеников не открыта", "faint"
+        if self.mode == MODE_EXERCISE and self.video_ready:
+            return "Зарядка ждёт щелчка по вкладке учеников — щёлкните, и она начнётся со звуком", "accent"
         if self.blocked or not self.unlocked:
             return "Щёлкните по вкладке экрана учеников один раз — для звука", "accent"
         return "Вкладка экрана учеников на связи", "ok"
@@ -163,10 +166,16 @@ class EfirController(QObject):
                 pass
             self.video_muted = bool(d.get("muted"))
             if not d.get("paused"):
-                self.video_waiting = False
+                self.video_waiting = self.video_ready = False
             if not d.get("muted"):
                 self.blocked = False
             self.screen_changed.emit()
+        elif kind == "ready" and d.get("seq") == self.ex_seq and self.mode == MODE_EXERCISE:
+            self.video_waiting = self.video_ready = True     # встала на первый кадр, ждёт щелчка по вкладке
+            self.tab_changed.emit()
+            self.screen_changed.emit()
+        elif kind == "toggle" and d.get("seq") == self.ex_seq and self.mode == MODE_EXERCISE:
+            self.exercise_pause()                         # щелчок по идущей зарядке на вкладке — пауза / дальше
         elif kind == "ended" and d.get("seq") == self.ex_seq and self.mode == MODE_EXERCISE:
             self.show_background()           # зарядка доиграла — снова фон
         elif kind == "video_error" and d.get("seq") == self.ex_seq:
@@ -206,7 +215,8 @@ class EfirController(QObject):
         if self.mode == MODE_EXERCISE and 0 <= self.ex_index < len(w.exercises):
             ex = w.exercises[self.ex_index]
             st["exercise"] = {"seq": self.ex_seq, "restart": self.ex_restart, "paused": self.ex_paused,
-                              "title": ex.title, "url": self.server.media_url(ex.path), "volume": 1.0}
+                              "title": ex.title, "url": self.server.media_url(ex.path), "volume": 1.0,
+                              "gate": getattr(self.settings, "exercise_start", "click") != "auto"}
         if self.mode == MODE_SLIDE and self.slide:
             st["slide"] = {"src": self._media(self.slide["ref"]), "next": self._media(self.slide.get("next", "")),
                            "n": self.slide.get("n", 0)}
@@ -479,7 +489,7 @@ class EfirController(QObject):
         self.ex_paused = False
         self.video_pos = self.video_dur = 0.0
         self.video_error = ""
-        self.video_muted = self.video_waiting = False
+        self.video_muted = self.video_waiting = self.video_ready = False
         self.mode = MODE_EXERCISE
         self._forget_break()
         self._remember_exercise(w.exercises[index].title)

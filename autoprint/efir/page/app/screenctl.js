@@ -154,7 +154,7 @@ function thumbMenu(anchor) {
 function thumbText(e) {
   const tab = e.tab_open ? "" : " · вкладка не открыта";
   if (e.mode === "break") return "У учеников перерыв" + tab;
-  if (e.mode === "exercise") return "У учеников зарядка" + (e.ex_muted ? " без звука" : "") + tab;
+  if (e.mode === "exercise") return "У учеников зарядка" + (e.ex_ready ? " — ждёт щелчка по вкладке" : e.ex_muted ? " без звука" : "") + tab;
   if (e.mode === "slide") return "У учеников слайд " + (e.slide_n || "") + tab;
   if (e.mode === "black") return "У учеников чёрный экран" + tab;
   return "У учеников фон" + tab;
@@ -237,10 +237,12 @@ function updateStrip() {
     else if (mode === "slide" && !(sb && sb.url)) W.scr.append(icon("slide", "sm"));
   }
   W.open.hidden = !!e.tab_open;
-  // зарядка: без звука / ждёт щелчка
-  const exWarn = mode === "exercise" && (e.ex_muted || e.ex_waiting);
+  // зарядка: встала на первый кадр и ждёт щелчка по вкладке (так задумано — значок мигает) / без звука (беда — красный)
+  const exReady = mode === "exercise" && !!e.ex_ready;
+  const exWarn = mode === "exercise" && !exReady && (e.ex_muted || e.ex_waiting);
   W.ex.classList.toggle("warn", exWarn);
-  W.ex.dataset.tip = e.ex_waiting ? "Зарядка ждёт щелчка — щёлкните один раз по вкладке учеников"
+  W.ex.dataset.tip = exReady ? "Зарядка ждёт щелчка по вкладке учеников — щёлкните по ней, видео пойдёт со звуком"
+    : e.ex_waiting ? "Зарядка ждёт щелчка — щёлкните один раз по вкладке учеников"
     : exWarn ? "Зарядка идёт без звука — щёлкните один раз по вкладке учеников"
     : mode === "exercise" ? "Зарядка идёт · щелчок — пауза, сначала, другое видео" : exTip();
   // слайд
@@ -267,7 +269,7 @@ function tickStrip(info) {
   }
   const mode = ef().mode || "idle";
   W.brk.classList.toggle("pulse", pulseKind === "break" && mode !== "break");
-  W.ex.classList.toggle("pulse", pulseKind === "exercise" && mode !== "exercise");
+  W.ex.classList.toggle("pulse", pulseKind === "exercise" && mode !== "exercise" || mode === "exercise" && !!ef().ex_ready);
   const left = breakLeft();
   W.left.hidden = left === null;
   if (left !== null) set(W.left, mmss(left));

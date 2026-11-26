@@ -28,6 +28,7 @@ FIELDS: dict[str, tuple] = {
     "page_stage_timer": B,
     # урок
     "start_screen": B, "start_compact": B, "copy_media": B, "exercise_pick": ("choice", ("next", "random", "ask")),
+    "exercise_start": ("choice", ("click", "auto")),
     # набор кода
     "print_mode": ("choice", ("block", "lines", "steps")),
     "step_nav": ("choice", ("arrows", "home")),

@@ -414,6 +414,8 @@ function startScreen() {
   // подсказок на экране нет: его видят ученики. Про звук ведущему говорит таймер в программе
   const dot = document.getElementById('dot');
   let S = { mode: 'idle' }, offset = 0, unlocked = false, blocked = false, exSeq = -1, exRestart = -1, brkTimer = 0;
+  // зарядка «по щелчку» (настройка программы): видео встаёт на первый кадр и ждёт щелчка по вкладке — gateOpen
+  let gateOpen = true, readySent = -1;
   const fontsLoaded = new Set();
 
   // ?ch=preview — предпросмотр из редактора шаблона: своё состояние, в программу ничего не сообщает
@@ -478,7 +480,7 @@ function startScreen() {
   function showVideo(ex) {
     const isImg = /\.(png|jpe?g|gif|webp|bmp)$/i.test(ex.url.split('?')[0]);
     if (ex.seq !== exSeq) {
-      exSeq = ex.seq; exRestart = ex.restart; blocked = false;
+      exSeq = ex.seq; exRestart = ex.restart; blocked = false; gateOpen = !ex.gate;
       if (isImg) { video.pause(); video.removeAttribute('src'); video.load(); video.style.display = 'none'; img.style.display = 'block'; img.src = ex.url; }
       else { img.style.display = 'none'; video.style.display = 'block'; video.src = ex.url; video.currentTime = 0; }
     } else if (ex.restart !== exRestart && !isImg) { exRestart = ex.restart; video.currentTime = 0; }
@@ -486,6 +488,11 @@ function startScreen() {
     if (isImg) return;
     video.volume = Math.max(0, Math.min(1, ex.volume == null ? 1 : ex.volume));
     if (ex.paused) { video.pause(); return; }
+    if (!gateOpen) {                                    // ждёт щелчка по вкладке: первый кадр, учителю — «ждёт»
+      if (!video.paused) video.pause();
+      if (readySent !== exSeq) { readySent = exSeq; report({ type: 'ready', seq: exSeq }); }
+      return;
+    }
     if (video.paused && !video.ended) play();
   }
 
@@ -504,7 +511,7 @@ function startScreen() {
 
   // зарядка должна идти: вкладка не стоит, не на паузе в программе, не доиграла
   const wantsVideo = () => exSeq >= 0 && vidEl.classList.contains('on') && video.style.display !== 'none' &&
-    video.getAttribute('src') && video.paused && !video.ended && !(S.exercise && S.exercise.paused);
+    video.getAttribute('src') && video.paused && !video.ended && !(S.exercise && S.exercise.paused) && gateOpen;
   // вкладку открыли в фоне — в фоне браузер видео не запускает: стала видимой — запустить
   document.addEventListener('visibilitychange', () => { if (!document.hidden && wantsVideo()) play(); });
 
@@ -615,7 +622,19 @@ function startScreen() {
     if (blocked && !video.paused) { video.muted = false; blocked = false; }   // шла без звука — звук, без перезапуска
     report({ type: 'unlock' });
   };
-  window.addEventListener('pointerdown', unlock, true);
+  // щелчок по вкладке и зарядка «по щелчку»: ждёт — пошла (со звуком: это щелчок); идёт — пауза, на паузе — дальше
+  // (паузу держит программа — у неё та же «Пауза» в меню зарядки)
+  function tabClick() {
+    const shown = exSeq >= 0 && vidEl.classList.contains('on') && video.style.display !== 'none' && video.getAttribute('src');
+    if (shown && S.exercise && S.exercise.gate && !video.ended) {
+      if (!gateOpen) {
+        gateOpen = true; blocked = false;
+        if (S.exercise.paused) report({ type: 'toggle', seq: exSeq }); else play();
+      } else report({ type: 'toggle', seq: exSeq });
+    }
+    unlock();
+  }
+  window.addEventListener('pointerdown', tabClick, true);
   // кликер: вкладку учеников могли щёлкнуть мышью — клавиши всё равно листают слайды урока
   const KEYS = ['ArrowRight', 'ArrowLeft', 'PageDown', 'PageUp', 'b', 'B', '.', 'и', 'И', 'ю'];
   window.addEventListener('keydown', (e) => {
@@ -627,6 +646,9 @@ function startScreen() {
   if (navigator.userActivation && navigator.userActivation.hasBeenActive) unlocked = true;
 
   video.addEventListener('ended', () => report({ type: 'ended', seq: exSeq }));
+  // пошла — программа сразу узнаёт (не ждёт отчёта раз в секунду): «ждёт щелчка» гаснет
+  video.addEventListener('playing', () => { if (exSeq >= 0) report({ type: 'video', seq: exSeq, pos: video.currentTime || 0,
+    dur: isFinite(video.duration) ? video.duration : 0, paused: false, muted: video.muted }); });
   video.addEventListener('error', () => { if (exSeq >= 0 && video.getAttribute('src')) report({ type: 'video_error', seq: exSeq, message: 'Файл не открылся' }); });
   setInterval(() => {
     if (exSeq >= 0 && video.getAttribute('src') && video.style.display !== 'none')

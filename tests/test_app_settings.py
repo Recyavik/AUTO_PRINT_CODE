@@ -101,6 +101,16 @@ class SettingsTest(AppPage):
         self.click("#f-theme button[data-value=dark]")
         self.assertTrue(self.wait_js("!document.documentElement.classList.contains('light')"))
 
+    def test_exercise_start_setting(self):
+        """«Урок → Зарядка → Как начинается видео»: по щелчку по вкладке (по умолчанию) или сразу."""
+        self.section("lesson")
+        self.assertTrue(self.wait_js("document.querySelector('#f-exercise_start button[data-value=click]').getAttribute('aria-pressed') === 'true'"))
+        self.click("#f-exercise_start button[data-value=auto]")
+        try:
+            self.assertTrue(self.wait_py(lambda: self.app.settings.exercise_start == "auto"))
+        finally:
+            self.app.settings.exercise_start = "click"
+
     def test_start_compact(self):
         self.section("lesson")
         self.click("#f-start_compact")

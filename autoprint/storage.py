@@ -237,6 +237,8 @@ class Settings:
     exercise_pick: str = "next"        # какое видео зарядки включает щелчок: next — по очереди, random — случайное,
                                        # ask — меню видео (до 1.2.1 по умолчанию ask, migrations exercise_v121)
     exercise_last: str = ""            # название прошлого показанного видео зарядки — «по очереди» продолжает с него
+    exercise_start: str = "click"      # 1.2.4: click — видео встаёт на первый кадр и ждёт щелчка по вкладке учеников
+                                       # (звук всегда есть; щелчок по идущей — пауза), auto — начинается сразу
     start_timer: bool = False          # до 1.0: «Начать урок» открывал мини-таймер (migrations v1 → start_compact)
     start_compact: bool = False        # 1.0: «Начать урок» — окно в маленький режим поверх всех
     start_screen: bool = False         # «Начать урок» открывает экран учеников (вкладку)

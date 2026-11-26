@@ -441,6 +441,17 @@ class ScreenCtlTest(AppPage):
         self.assertIn("без звука", self.js("document.querySelector('#scrEx').dataset.tip"))
         self.app.efir.video_muted = False
 
+    def test_exercise_ready_cue(self):
+        """Зарядка встала и ждёт щелчка по вкладке учеников — значок мигает и подсказывает (без красного «беды»)."""
+        self.app.lesson.command({"cmd": "exercise", "index": 0})
+        self.app.efir._on_report({"type": "ready", "seq": self.app.efir.ex_seq})
+        self.app.lesson.publish()
+        self.assertTrue(self.wait_js("document.querySelector('#scrEx').dataset.tip.includes('ждёт щелчка')"),
+                        self.js("document.querySelector('#scrEx').dataset.tip"))
+        self.assertFalse(self.js("document.querySelector('#scrEx').classList.contains('warn')"))
+        self.assertTrue(self.js("document.querySelector('#scrEx').classList.contains('pulse')"))
+        self.assertIn("ждёт щелчка", self.js("document.querySelector('#screenThumb').dataset.tip"))
+
     ICONS = ("#scrBg", "#scrBlack", "#scrEx", "#scrBreak", "#scrSlide")
 
     def icon_x(self):
@@ -801,12 +812,15 @@ class ScreenImageTest(AppPage):
 
 
 class ScreenExerciseClickTest(AppPage):
-    """Зарядка во вкладке, по которой ещё не щёлкали (браузер не даёт звук без щелчка): видео не идёт без звука —
-    стоит в начале и ждёт щелчка по вкладке; щёлкнули — идёт с начала и со звуком."""
+    """Зарядка во вкладке учеников (браузер с обычным правилом звука: без щелчка по странице — только без звука).
+    По умолчанию (1.2.4) каждая зарядка встаёт на первый кадр и ждёт щелчка по вкладке — и в первый раз, и когда
+    по вкладке уже щёлкали, и когда на вкладку вернулись; щёлкнули — идёт со звуком; щелчок по идущей — пауза.
+    Настройка «Сразу» — начинается сама."""
     port = 18988
     route = "#/lesson/L1"
+    V = "document.querySelector('#vid video')"
 
-    def test_waits_for_click_then_plays_with_sound(self):
+    def setUp(self):
         from autoprint.efir.model import Exercise, Look
         from cdp import Edge
         video = Path(__file__).resolve().parent / "media" / "exercise-3s.webm"
@@ -814,25 +828,62 @@ class ScreenExerciseClickTest(AppPage):
         self.app.efir.save_look(look)
         self.app.printer.set_focus("L1")
         self.store.get("L1").look = look.id
+        self.app.settings.exercise_start = "click"
         self.app.lesson.publish()
-        screen = Edge.start(f"http://127.0.0.1:{self.app.efir.server.port}/", pump=lambda: pump(5), width=800, height=450,
-                            flags=("--autoplay-policy=document-user-activation-required",))
-        v = "document.querySelector('#vid video')"
-        try:
-            self.assertTrue(self.wait_py(lambda: self.app.efir.clients > 0, 10))
-            self.app.lesson.command({"cmd": "exercise", "index": 0})
-            self.assertTrue(screen.wait(f"!!{v}.getAttribute('src') && {v}.readyState >= 2", 10))
-            self.assertTrue(self.wait_py(lambda: self.app.efir.video_waiting, 6))        # учителю: «ждёт щелчка»
-            pump(1200)
-            self.assertEqual(screen.eval(f"[{v}.paused, {v}.currentTime]"), [True, 0])     # не пошло без звука
-            for kind in ("mousePressed", "mouseReleased"):                                # щелчок по вкладке (без окна)
-                screen.call("Input.dispatchMouseEvent", {"type": kind, "x": 200, "y": 200, "button": "left", "clickCount": 1})
-            self.assertTrue(screen.wait(f"!{v}.paused && !{v}.muted && {v}.currentTime > 0", 6),
-                            screen.eval(f"[{v}.paused, {v}.muted, {v}.currentTime]"))
-            self.assertTrue(self.wait_py(lambda: not self.app.efir.video_waiting and not self.app.efir.video_muted, 6))
-        finally:
-            screen.close()
-            self.app.efir.show_background()
+        self.screen = Edge.start(f"http://127.0.0.1:{self.app.efir.server.port}/", pump=lambda: pump(5), width=800,
+                                 height=450, flags=("--autoplay-policy=document-user-activation-required",))
+        self.assertTrue(self.wait_py(lambda: self.app.efir.clients > 0, 10))
+
+    def tearDown(self):
+        self.screen.close()
+        self.app.efir.show_background()
+        self.app.settings.exercise_start = "click"
+        super().tearDown()
+
+    def tab_click(self):
+        for kind in ("mousePressed", "mouseReleased"):                                # щелчок по вкладке (без окна)
+            self.screen.call("Input.dispatchMouseEvent", {"type": kind, "x": 200, "y": 200, "button": "left", "clickCount": 1})
+
+    def state(self):
+        return self.screen.eval(f"[{self.V}.paused, {self.V}.muted, {self.V}.currentTime]")
+
+    def assertWaits(self):
+        v = self.V
+        self.assertTrue(self.screen.wait(f"!!{v}.getAttribute('src') && {v}.readyState >= 2", 10))
+        self.assertTrue(self.wait_py(lambda: self.app.efir.video_waiting, 6))        # учителю: «ждёт щелчка»
+        pump(1200)
+        self.screen.eval("document.dispatchEvent(new Event('visibilitychange'))")     # ушли с вкладки и вернулись
+        pump(400)
+        self.assertEqual(self.screen.eval(f"[{v}.paused, {v}.currentTime]"), [True, 0])   # стоит на первом кадре
+
+    def assertPlays(self):
+        self.assertTrue(self.screen.wait(f"!{self.V}.paused && !{self.V}.muted && {self.V}.currentTime > 0", 6), self.state())
+
+    def test_every_exercise_waits_for_click_and_click_pauses(self):
+        self.app.lesson.command({"cmd": "exercise", "index": 0})
+        self.assertWaits()                                    # первый раз: вкладку ещё не щёлкали
+        self.tab_click()
+        self.assertPlays()
+        self.assertTrue(self.wait_py(lambda: not self.app.efir.video_waiting and not self.app.efir.video_muted, 6))
+        self.tab_click()                                      # щелчок по идущей — пауза (и в программе)
+        self.assertTrue(self.wait_py(lambda: self.app.efir.ex_paused, 6))
+        self.assertTrue(self.screen.wait(f"{self.V}.paused", 6))
+        self.tab_click()                                      # ещё щелчок — дальше
+        self.assertTrue(self.wait_py(lambda: not self.app.efir.ex_paused, 6))
+        self.assertPlays()
+        self.app.efir.show_background()
+        pump(700)
+        self.app.lesson.command({"cmd": "exercise", "index": 0})
+        self.assertWaits()                                    # второй раз: вкладку уже щёлкали — всё равно ждёт
+        self.tab_click()
+        self.assertPlays()
+
+    def test_auto_setting_plays_at_once(self):
+        self.app.settings.exercise_start = "auto"
+        self.tab_click()                                      # по вкладке уже щёлкали — браузер даёт звук
+        pump(300)
+        self.app.lesson.command({"cmd": "exercise", "index": 0})
+        self.assertPlays()
 
 
 def slide_lessons() -> list[Template]:

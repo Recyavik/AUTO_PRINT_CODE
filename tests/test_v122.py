@@ -16,6 +16,8 @@ import quiet  # noqa: E402,F401  — до PySide6: offscreen, своя папк�
 
 from test_v121 import close, lesson, videos, window  # noqa: E402
 
+from autoprint.storage import Settings  # noqa: E402
+
 
 class BlackScreenTest(unittest.TestCase):
     port = 18942
@@ -141,6 +143,77 @@ class BlackScreenTest(unittest.TestCase):
         self.win.lesson._last = None
         self.win.lesson.publish()
         self.assertEqual(self.win.efir.server._states["lesson"]["efir"]["mode"], "black")
+
+
+# ================================================================ 1.2.4: зарядка — по щелчку по вкладке учеников
+
+class ExerciseStartByClickTest(unittest.TestCase):
+    """Зарядка всегда встаёт на первый кадр и ждёт щелчка по вкладке учеников (настройка «Как начинается видео»:
+    по щелчку — по умолчанию, или сразу); щелчок по идущей — пауза, ещё щелчок — дальше."""
+    port = 18943
+
+    def setUp(self):
+        from autoprint.efir.model import Look
+        self.look = Look(title="Синий", exercises=videos("Глаза 1"))
+        self.win = window([lesson("A")], self.port)
+        self.win.efir.save_look(self.look)
+        self.win.store.get("A").look = self.look.id
+        self.win.printer.set_focus("A")
+        self.win.settings.exercise_start = "click"
+        self.said = []
+        self.win.efir.message.connect(lambda text, warn: self.said.append(text))
+
+    def tearDown(self):
+        close(self.win)
+
+    def start(self):
+        self.win.lesson.command({"cmd": "exercise", "index": 0})
+        self.assertEqual(self.win.efir.mode, "exercise")
+        return self.win.efir.ex_seq
+
+    def lesson_efir(self) -> dict:
+        self.win.lesson._last = None
+        self.win.lesson.publish()
+        return self.win.efir.server._states["lesson"]["efir"]
+
+    def test_setting_default_click(self):
+        from autoprint.settings_spec import FIELDS
+        self.assertEqual(Settings().exercise_start, "click")
+        self.assertEqual(FIELDS["exercise_start"], ("choice", ("click", "auto")))
+        self.start()
+        self.assertTrue(self.win.efir.state()["exercise"]["gate"])
+        self.win.settings.exercise_start = "auto"
+        self.start()
+        self.assertFalse(self.win.efir.state()["exercise"]["gate"])
+
+    def test_ready_is_not_a_warning(self):
+        """Вкладка сообщила «стою, жду щелчка» — это не беда (без красного и всплывающих предупреждений), но
+        учитель видит, что зарядка ждёт; пошла — больше не ждёт."""
+        seq = self.start()
+        self.win.efir._on_report({"type": "ready", "seq": seq})
+        st = self.lesson_efir()
+        self.assertEqual((st["ex_ready"], st["ex_muted"]), (True, False))
+        self.assertEqual(self.said, [])
+        self.assertIn("ждёт щелчка", self.win.efir.tab_status()[0])
+        self.win.efir._on_report({"type": "video", "seq": seq, "pos": 1, "dur": 60, "paused": False, "muted": False})
+        self.assertFalse(self.lesson_efir()["ex_ready"])
+
+    def test_click_on_playing_exercise_pauses_and_resumes(self):
+        seq = self.start()
+        self.win.efir._on_report({"type": "toggle", "seq": seq})
+        self.assertTrue(self.win.efir.ex_paused)
+        self.assertTrue(self.win.efir.state()["exercise"]["paused"])
+        self.win.efir._on_report({"type": "toggle", "seq": seq})
+        self.assertFalse(self.win.efir.ex_paused)
+        self.win.efir._on_report({"type": "toggle", "seq": seq - 1})        # от прошлой зарядки — не трогаем
+        self.assertFalse(self.win.efir.ex_paused)
+
+    def test_lesson_page_knows_setting(self):
+        self.assertEqual(self.lesson_efir() and self.win.efir.server._states["lesson"]["prefs"]["exercise_start"], "click")
+        self.win.lesson.command({"cmd": "prefs", "key": "exercise_start", "value": "auto"})
+        self.assertEqual(self.win.settings.exercise_start, "auto")
+        self.win.lesson.command({"cmd": "prefs", "key": "exercise_start", "value": "чепуха"})
+        self.assertEqual(self.win.settings.exercise_start, "auto")
 
 
 if __name__ == "__main__":

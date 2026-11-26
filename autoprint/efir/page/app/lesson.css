@@ -96,6 +96,7 @@ body.lw-drag, body.lw-drag * { cursor: col-resize !important; user-select: none 
 .scricons .scrbtn.pulse::after { content: ""; position: absolute; inset: -3px; border-radius: inherit; pointer-events: none;
   box-shadow: 0 0 0 2px var(--accent); animation: scrpulse 1.4s ease-out 4; }
 .scricons .scrbtn.pulse { color: var(--accent); }
+.scricons .scrbtn.pulse[aria-pressed="true"] { color: var(--on-accent); }   /* зарядка ждёт щелчка по вкладке — значок нажат */
 @keyframes scrpulse { 0% { opacity: 1; transform: scale(1); } 100% { opacity: 0; transform: scale(1.35); } }
 @media (prefers-reduced-motion: reduce) { .scricons .scrbtn.pulse::after { animation: none; opacity: 1; } }
 /* место справа от значков — оставлено заранее: стрелки слайдов с номером или отсчёт перерыва выезжают в него */

@@ -26,7 +26,8 @@ log = logging.getLogger(__name__)
 
 # «Мои настройки» экрана урока: поле Settings → допустимые значения
 PREFS = {"page_zoom": "zoom", "page_zoom_auto": "bool", "page_plan": ("side", "top", "hidden"),
-         "page_width": "width", "exercise_pick": ("next", "random", "ask"), "page_past": ("dim", "collapse"),
+         "page_width": "width", "exercise_pick": ("next", "random", "ask"), "exercise_start": ("click", "auto"),
+         "page_past": ("dim", "collapse"),
          "page_stage_timer": "bool", "start_compact": "bool", "start_screen": "bool"}
 EX_DOUBLE_S = 2.0           # «Зарядка» нажата второй раз так быстро — это двойной щелчок, а не «следующее видео»
 ANSWER_FETCH_LIMIT = 90     # «Вставить ответ нейросети»: фото качаются не дольше, потом урок добавляется со ссылками
@@ -138,7 +139,9 @@ class LessonController(QObject):
                         "ex_paused": self.efir.mode == "exercise" and self.efir.ex_paused,
                         # фон экрана учеников по оформлению урока — миниатюра в полосе показывает его
                         "screen_bg": self.efir._bg(preset.background) if preset is not None else None,
-                        "ex_muted": self.efir.mode == "exercise" and (self.efir.video_muted or self.efir.video_waiting),
+                        "ex_muted": self.efir.mode == "exercise" and (self.efir.video_muted or self.efir.video_waiting
+                                                                       and not self.efir.video_ready),
+                        "ex_ready": self.efir.mode == "exercise" and self.efir.video_ready,
                         "ex_waiting": self.efir.mode == "exercise" and self.efir.video_waiting},
             armed=t.active_block if t is not None else "",
             media_url=self.efir.server.media_url, presets=[(lk.id, lk.title) for lk in self.efir.store.looks],
