@@ -10,7 +10,6 @@ import logging
 from pathlib import Path
 
 from PySide6.QtCore import QObject, Signal
-from PySide6.QtWidgets import QFileDialog
 
 log = logging.getLogger(__name__)
 
@@ -92,9 +91,7 @@ class AppCommands(QObject):
 
     def cmd_window(self, d: dict) -> None:
         op = str(d.get("op") or "")
-        if op == "regions":
-            self.app.window.set_regions(d)
-        elif op == "compact":                      # маленький режим — и пункт трея меняется
+        if op == "compact":                      # маленький режим — и пункт трея меняется
             arg = d.get("arg")
             self.app.set_compact(not self.app.window.compact if arg is None else bool(arg))
         else:
@@ -178,11 +175,7 @@ class AppCommands(QObject):
         flt = str(d.get("filter") or flt or FILE_FILTER)
         if "multi" in d:
             multi = bool(d["multi"])
-        if multi:
-            paths, _ = QFileDialog.getOpenFileNames(self.app.window, title, str(d.get("dir") or ""), flt)
-            return [str(p) for p in paths]
-        path, _ = QFileDialog.getOpenFileName(self.app.window, title, str(d.get("dir") or ""), flt)
-        return [str(path)] if path else []
+        return self.app.window.pick_open(title, str(d.get("dir") or ""), flt, multi)
 
     # ------------------------------------------------------------ «Новый урок» (Task 11)
     def _wizard_plan(self, d: dict):
@@ -937,9 +930,8 @@ class AppCommands(QObject):
         name = "".join(c for c in str(d.get("name") or "") if c not in '\\/:*?"<>|').strip()
         if d.get("dir") and name:                         # папка по умолчанию (отчёт — на Рабочий стол)
             name = str(Path(str(d["dir"])) / name)
-        path, _ = QFileDialog.getSaveFileName(self.app.window, str(d.get("title") or "Сохранить"), name,
-                                              str(d.get("filter") or "Все файлы (*.*)"))
-        return str(path or "")
+        return self.app.window.pick_save(str(d.get("title") or "Сохранить"), name,
+                                         str(d.get("filter") or "Все файлы (*.*)"))
 
 
 def _desktop() -> Path:

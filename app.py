@@ -20,12 +20,12 @@ def main() -> int:
         print("AutoPrintCode работает только в Windows (использует WinAPI SendInput).")
         return 1
     if "--selftest" in sys.argv:
-        # проверка сборки: невидимо загрузить окно программы со встроенным браузером. Данные — во временной папке:
-        # storage ещё не импортирован, своя папка данных задаётся до него
+        # проверка сборки: невидимо открыть окно программы (Electron) и дождаться страницы. Данные — во временной
+        # папке: storage ещё не импортирован, своя папка данных задаётся до него
         import tempfile
         os.environ["QT_QPA_PLATFORM"] = "offscreen"
         os.environ["AUTOPRINT_DATA"] = tempfile.mkdtemp(prefix="autoprint-selftest-")
-        from autoprint.ui.app_window import selftest
+        from autoprint.ui.shell_window import selftest
         return selftest()
     from autoprint.storage import DATA_DIR, Settings, TemplateStore, migrate_legacy_data, user_data_dir
     from autoprint import taskbar
@@ -38,7 +38,6 @@ def main() -> int:
         os.environ.pop("QT_SCALE_FACTOR", None)
     os.environ.pop("AUTOPRINT_QT_SCALE", None)
 
-    import PySide6.QtWebEngineWidgets  # noqa: F401  — встроенный браузер окна: до QApplication (общий OpenGL)
     app = QApplication(sys.argv)
     app.setApplicationName(APP_NAME)
     # программа живёт и в трее (без окон): выходит только явно — из меню или кнопкой «Закрыть»
@@ -146,6 +145,7 @@ def main() -> int:
         server.newConnection.connect(on_second_instance)
     prog.start(tray="--tray" in sys.argv)   # автозапуск с Windows — сразу в трей, без окна
     code = app.exec()
+    prog.window.stop()                    # окно (Electron) закрывается вместе с программой
     # канал «один экземпляр» и блокировку освобождаем до перезапуска: новая версия стартует, пока этот
     # процесс ещё завершается, и должна сама занять канал (иначе её окно не покажется при повторном запуске)
     server.close()

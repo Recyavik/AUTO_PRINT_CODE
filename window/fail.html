@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<title>AutoPrintCode</title>
+<style>
+  :root { --bg: #161A22; --text: #E9EDF3; --dim: #9AA3B2; --btn: #232936; --line: #343B4A; --acc: #7DB3FF; }
+  :root.light { --bg: #EEF0F3; --text: #181C24; --dim: #5B6474; --btn: #FFFFFF; --line: #CDD2DA; --acc: #2563EB; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+    font: 15px/1.5 "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif; }
+  .bar { height: 44px; -webkit-app-region: drag; }
+  main { display: grid; place-items: center; height: calc(100% - 88px); padding: 0 24px; }
+  .box { max-width: 560px; text-align: center; }
+  p { margin: 0 0 6px; white-space: pre-wrap; }
+  .dim { color: var(--dim); font-size: 14px; }
+  .row { display: flex; gap: 10px; justify-content: center; margin-top: 18px; }
+  button { font: inherit; padding: 8px 16px; border-radius: 8px; border: 1px solid var(--line); background: var(--btn);
+    color: var(--text); cursor: pointer; }
+  button:focus-visible { outline: 2px solid var(--acc); outline-offset: 2px; }
+</style>
+</head>
+<body>
+<div class="bar"></div>
+<main>
+  <div class="box">
+    <p id="text">Не удалось запустить окно программы.</p>
+    <p class="dim">Подробности — в журнале работы.</p>
+    <div class="row">
+      <button id="retry" type="button">Повторить</button>
+      <button id="log" type="button">Журнал работы</button>
+    </div>
+  </div>
+</main>
+<script>
+  const q = new URLSearchParams(location.search);
+  if (q.get("text")) document.getElementById("text").textContent = q.get("text");
+  if (q.get("dark") === "0") document.documentElement.classList.add("light");
+  const shell = window.autoprintShell || {};
+  document.getElementById("retry").onclick = () => shell.retry && shell.retry();
+  document.getElementById("log").onclick = () => shell.openLog && shell.openLog();
+</script>
+</body>
+</html>

@@ -1,6 +1,6 @@
 """Программа без виджетов: уроки и планы, сохранение, импорт и экспорт, печать по хоткеям, эфир, обновления, сессия.
 
-Окно — одно (ui/app_window.py, встроенный браузер со страницей /app). Всё, что раньше делало главное окно Qt
+Окно — одно (ui/shell_window.py: окно Electron со страницей /app). Всё, что раньше делало главное окно Qt
 (список уроков, меню, тосты, вопросы), теперь показывает страница: App только сообщает об изменениях сигналом
 changed(тема) и просит открыть нужный экран (navigate) или лист (open_sheet). На имена методов опираются
 контроллеры урока и эфира (ui/lesson_control.py, ui/efir_control.py).
@@ -11,8 +11,8 @@ import logging
 import time
 from pathlib import Path
 
-from PySide6.QtCore import QByteArray, QObject, QTimer, Signal
-from PySide6.QtWidgets import QApplication, QFileDialog
+from PySide6.QtCore import QObject, QTimer, Signal
+from PySide6.QtWidgets import QApplication
 
 from . import APP_NAME, __version__, system, updater
 from .guard import InputGuard
@@ -131,11 +131,13 @@ class App(QObject):
         self.printer.live_id = self.efir.live_lesson_id
         self.lesson = LessonController(self)
 
-        from .ui.app_window import AppWindow
+        from .ui.shell_window import ShellWindow
         from .ui.tray import Tray
         self.tray = Tray(self)
-        self.window = AppWindow(self, web=web)
+        self.window = ShellWindow(self, launch=web)
         self.window.close_handler = self.on_window_close
+        self.window.state_changed.connect(lambda: self.changed.emit("window"))
+        self.window.geometry_changed.connect(self._on_window_places)
         from .app_cmd import AppCommands
         self.commands = AppCommands(self)   # команды страницы окна (/app/cmd, /app/call)
         self._pub_timer = QTimer(self, singleShot=True, interval=150, timeout=self.publish_now)
@@ -202,11 +204,8 @@ class App(QObject):
         self.show_window()
 
     def show_window(self) -> None:
-        w = self.window
-        if w.isMinimized() or not w.isVisible():
-            w.showMaximized() if w.isMaximized() else w.showNormal()
-        w.raise_()
-        w.activateWindow()
+        """Показать окно и вывести вперёд (свёрнутое — каким было, развёрнутым или обычным)."""
+        self.window.present()
 
     _show_window = show_window
 
@@ -399,10 +398,10 @@ class App(QObject):
         from . import slides
         t, warns, need = slides.from_pptx(path, pdf=pdf)
         if need:
-            pick, _ = QFileDialog.getOpenFileName(self.window, f"PDF презентации «{Path(path).stem}» — для картинок "
-                                                  "слайдов", str(Path(path).parent), "PDF (*.pdf)")
-            if pick:
-                t, warns, _need = slides.from_pptx(path, pdf=pick, export=False)
+            picked = self.window.pick_open(f"PDF презентации «{Path(path).stem}» — для картинок слайдов",
+                                           str(Path(path).parent), "PDF (*.pdf)")
+            if picked:
+                t, warns, _need = slides.from_pptx(path, pdf=picked[0], export=False)
         return t, warns
 
     def recognize_lesson(self, t: Template) -> bool:
@@ -831,10 +830,8 @@ class App(QObject):
         added = self._ensure_samples()
         if self._migrated:
             self._save_settings()
-        if s.window_geometry:
-            self.window.restoreGeometry(QByteArray.fromBase64(s.window_geometry.encode()))
-        else:
-            self.window.place_default()
+        # места окна: большое (и развёрнуто ли) и маленькое; прежние записи Qt (до 1.2) окно переводит само
+        self.window.restore_places(s.window_geometry, s.compact_geometry)
         # по умолчанию — первый урок, а не план (планы стоят над уроками)
         first = next((t for t in self.store.templates if t.kind != KIND_PLAN), None) or \
             (self.store.templates[0] if self.store.templates else None)
@@ -875,12 +872,20 @@ class App(QObject):
             return
         self.window.show()
 
+    def _on_window_places(self) -> None:
+        """Окно передвинули, растянули, развернули или сменили режим: места — в настройки (запись — с задержкой)."""
+        big, small = self.window.saved_places()
+        s = self.settings
+        if (big and big != s.window_geometry) or (small and small != s.compact_geometry):
+            s.window_geometry = big or s.window_geometry
+            s.compact_geometry = small or s.compact_geometry
+            self._settings_timer.start()
+
     def _save_session(self) -> None:
         s = self.settings
-        if not self.window.compact:
-            s.window_geometry = bytes(self.window.saveGeometry().toBase64()).decode()
-        else:                                 # вышли в маленьком режиме — маленькое окно там же в следующий раз
-            s.compact_geometry = bytes(self.window.saveGeometry().toBase64()).decode()
+        big, small = self.window.saved_places()
+        s.window_geometry = big or s.window_geometry         # окно ещё не сообщило — прежнее место остаётся
+        s.compact_geometry = small or s.compact_geometry
         s.current_tab = s.page_lesson = self.printer.focus_id
         s.save()
 
@@ -1122,6 +1127,7 @@ class App(QObject):
                 log.warning("Обновление при выходе не установлено: %s", err)
         if self.jobs is not None:
             self.jobs.cancel_all()
+        self.window.stop()              # окно закрывается и сообщает последние места на экране — до записи сессии
         self._save_session()
         self.lesson.shutdown()
         self.efir.shutdown()

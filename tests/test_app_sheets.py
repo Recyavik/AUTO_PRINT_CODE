@@ -543,62 +543,6 @@ class OldDialogsRemovedTest(unittest.TestCase):
         self.assertNotIn("class UpdateDialog", (ui / "updates.py").read_text(encoding="utf-8"))
 
 
-PDF_PROBE = r'''
-import os, sys, tempfile
-os.environ["QT_QPA_PLATFORM"] = "offscreen"
-os.environ["AUTOPRINT_DATA"] = tempfile.mkdtemp(prefix="autoprint-pdf-")
-sys.path.insert(0, sys.argv[1])
-import PySide6.QtWebEngineWidgets  # noqa — до QApplication
-from PySide6.QtCore import QTimer
-from PySide6.QtWidgets import QApplication
-from autoprint.efir.server import BroadcastServer
-from autoprint.storage import Settings
-from autoprint.ui.app_window import AppWindow
-qa = QApplication(sys.argv[:1])
-class E: pass
-class A:
-    settings = Settings()
-    efir = E()
-srv = BroadcastServer(18978); srv.start(); A.efir.server = srv
-w = AppWindow(A(), web=True)
-res = {}
-def go():
-    res["ok"] = w.print_pdf(sys.argv[2], open_after=False)
-    qa.quit()
-w.ready.connect(lambda: QTimer.singleShot(300, go))
-QTimer.singleShot(60000, qa.quit)
-w.load(); qa.exec(); srv.stop()
-print("pdf:", res.get("ok"))
-'''
-
-
-class PdfRealTest(unittest.TestCase):
-    """«Сохранить PDF…» во встроенном браузере по-настоящему (offscreen, отдельный процесс, файл не открывается)."""
-
-    def test_print_pdf_writes_file(self):
-        import os
-        import subprocess
-        import sys
-        out = TMP / "real.pdf"
-        root = str(Path(__file__).resolve().parent.parent)
-        r = subprocess.run([sys.executable, "-c", PDF_PROBE, root, str(out)], capture_output=True, text=True,
-                           encoding="utf-8", errors="replace", timeout=120,
-                           env={**os.environ, "PYTHONIOENCODING": "utf-8"})
-        self.assertIn("pdf: True", r.stdout, r.stdout + r.stderr[-2000:])
-        self.assertTrue(out.is_file())
-        self.assertEqual(out.read_bytes()[:5], b"%PDF-")
-        # 1.1: поля страницы (12 мм) — белые и в тёмной теме окна, а не чёрная рамка вокруг урока
-        from PySide6.QtCore import QSize
-        from PySide6.QtPdf import QPdfDocument
-        doc = QPdfDocument()
-        doc.load(str(out))
-        img = doc.render(0, QSize(420, 594))
-        for x, y in ((6, 6), (210, 4), (414, 300), (210, 590)):
-            c = img.pixelColor(x, y)                      # не закрашено (прозрачно) — белая бумага; иначе — почти белое
-            self.assertTrue(c.alpha() < 10 or min(c.red(), c.green(), c.blue()) > 240,
-                            f"поле страницы ({x},{y}) = {c.name()} α={c.alpha()}")
-
-
 class ExportModuleRemovedTest(unittest.TestCase):
     def test_old_export_dialog_removed(self):
         self.assertFalse((Path(storage.__file__).parent / "ui" / "export_package.py").exists())

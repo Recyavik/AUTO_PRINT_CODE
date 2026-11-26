@@ -147,29 +147,6 @@ class LessonViewTest(AppPage):
             self.js("document.dispatchEvent(new KeyboardEvent('keydown', {key: '0', ctrlKey: true, bubbles: true}))")
             self.assertTrue(self.wait_py(lambda: self.app.settings.page_zoom == 100))
 
-    def test_no_relayout_while_window_dragged(self):
-        """Окно тянут за край — урок не перестраивается на каждый кадр (стоит как был), один раз — когда отпустили."""
-        geo = "[document.querySelector('.lcol').offsetWidth, document.querySelector('.lcontent').offsetWidth]"
-        try:
-            self.edge.call("Emulation.setDeviceMetricsOverride", {"width": 1280, "height": 860, "deviceScaleFactor": 1, "mobile": False})
-            pump(300)
-            before = self.js(geo)
-            vh = self.js("getComputedStyle(document.documentElement).getPropertyValue('--vh')")
-            self.js("window.__sizemove(true)")
-            for w in (1180, 1060, 940):
-                self.edge.call("Emulation.setDeviceMetricsOverride", {"width": w, "height": 700, "deviceScaleFactor": 1, "mobile": False})
-                pump(120)
-                self.assertEqual(self.js(geo), before, w)                     # колонка и поля — те же
-            self.assertEqual(self.js("getComputedStyle(document.documentElement).getPropertyValue('--vh')"), vh)
-            self.js("window.__sizemove(false)")
-            self.assertTrue(self.wait_js(f"document.querySelector('.lcontent').offsetWidth < {before[1]} - 200"),
-                            self.js(geo))                                        # отпустили — перестроился
-            self.assertFalse(self.js("document.body.classList.contains('sizemove')"))
-        finally:
-            self.js("window.__sizemove && window.__sizemove(false)")
-            self.edge.call("Emulation.clearDeviceMetricsOverride")
-            pump(200)
-
     def lcol_width(self):
         return self.js("getComputedStyle(document.querySelector('.lcol')).maxWidth")
 

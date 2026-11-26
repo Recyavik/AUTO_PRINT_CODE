@@ -3,13 +3,14 @@
     .venv\\Scripts\\python.exe tools\\build_exe.py       (или build_exe.bat)
 
 Что получается в dist\\:
-    AutoPrintCode\\                          — программа: AutoPrintCode.exe + _internal\\
+    AutoPrintCode\\                          — программа: AutoPrintCode.exe + _internal\\ + window\\ (окно, Electron)
     AutoPrintCode-<версия>-win64.zip         — этот архив и .sha256 к нему прикладываются к релизу,
     AutoPrintCode-<версия>-win64.zip.sha256    по ним собранная программа обновляется сама
     AutoPrintCode-<версия>-Setup.exe (+ .sha256) — установщик, если найден Inno Setup 6 (ISCC.exe)
 
 Номер версии — __version__ из autoprint/__init__.py. Значок рисуется autoprint.ui.logo.save_ico.
-Нужен PyInstaller: pip install -r requirements-dev.txt
+Нужен PyInstaller: pip install -r requirements-dev.txt; для окна программы — Node.js 22 (npm ci в window\\,
+@electron/packager собирает window\\AutoPrintCodeWindow.exe).
 """
 from __future__ import annotations
 
@@ -29,6 +30,10 @@ DIST = ROOT / "dist"
 NAME = "AutoPrintCode"
 APP_DIST = DIST / NAME
 ISS = ROOT / "installer" / f"{NAME}.iss"
+WINDOW_SRC = ROOT / "window"                # окно программы: Electron (main.js, preload.js, geometry.js, fail.html)
+WINDOW_EXE = "AutoPrintCodeWindow.exe"
+WINDOW_LOCALES = ("ru.pak", "en-US.pak")    # переводы Chromium: остальные не нужны (~40 МБ)
+NPM = "npm.cmd" if os.name == "nt" else "npm"
 
 # Модули Python, которые программе не нужны (tkinter — только тестовое окно в tests/)
 EXCLUDES = [
@@ -37,16 +42,15 @@ EXCLUDES = [
     "PyInstaller", "sqlite3", "_sqlite3", "xmlrpc", "curses",
     "PySide6.QtMultimediaWidgets",   # хук QtMultimedia добавляет его «на всякий случай»
 ]
-# Нужны обязательно: QtMultimedia (QSoundEffect), QtSvg (значки), QtNetwork (QLocalServer —
-# второй запуск активирует уже открытое окно)
-HIDDEN = ["PySide6.QtMultimedia", "PySide6.QtSvg", "PySide6.QtNetwork", "PySide6.QtPdf",   # QtPdf — материал урока из PDF
-          "PySide6.QtWebEngineWidgets", "PySide6.QtWebEngineCore", "PySide6.QtPrintSupport"]   # 1.0: окно — встроенный браузер
+# Нужны обязательно: QtMultimedia (QSoundEffect), QtSvg (значки), QtNetwork (QLocalServer — второй запуск
+# активирует уже открытое окно, канал с окном программы). С 1.2 окно — Electron (window\\): QtWebEngine не нужен
+HIDDEN = ["PySide6.QtMultimedia", "PySide6.QtSvg", "PySide6.QtNetwork", "PySide6.QtPdf"]   # QtPdf — материал урока из PDF
 
 # Лишние двоичные файлы Qt (имена в сборке, без учёта регистра), всего ~60 МБ:
 # - FFmpeg и его плагин (~20 МБ): QSoundEffect играет WAV через windowsmediaplugin — проверено;
 # - opengl32sw.dll (~20 МБ): программный OpenGL, программе на виджетах он не нужен;
-# - экранная клавиатура (platforminputcontexts, Qt6VirtualKeyboard). Qt Quick/QML/OpenGL с 1.0 остаются: на них
-#   стоит встроенный браузер (QtWebEngine) окна программы;
+# - экранная клавиатура (platforminputcontexts, Qt6VirtualKeyboard);
+# - встроенный браузер Qt (QtWebEngine) и Qt Quick/QML, на которых он стоял: с 1.2 окно программы — Electron;
 # - у встроенного браузера — инструменты разработчика (*devtools*.pak, *.debug.pak, *.debug.bin) и переводы,
 #   кроме русского и английского;
 # - OpenSSL для Qt (*-x64.dll и qopensslbackend): QtNetwork нужен лишь для QLocalServer, а HTTPS
@@ -71,10 +75,16 @@ DROP_PATTERNS = [
     r"/plugins/imageformats/qpdf\.dll$",
     r"/translations/(?!.*_ru\.qm$)[^/]+\.qm$",
     r"/translations/qt_help_[^/]+\.qm$",
-    # 1.0: модули QML (папка qml/) и привязка Python к QtOpenGL — встроенному браузеру окна не нужны
-    # (его библиотеки Qt6Quick/Qt6Qml/Qt6OpenGL остаются); проверяет --selftest собранной программы
+    # модули QML (папка qml/) и привязка Python к QtOpenGL
     r"(^|/)PySide6/qml/",
     r"(^|/)PySide6/QtOpenGL\.pyd$",
+    # 1.2: встроенный браузер Qt и то, на чём он стоял (окно программы — Electron): если хук PyInstaller их притащит
+    r"(^|/)PySide6/(Qt6)?QtWebEngine[^/]*$",
+    r"(^|/)PySide6/Qt6WebEngine[^/]*\.dll$",
+    r"(^|/)PySide6/resources/qtwebengine[^/]*$",
+    r"(^|/)PySide6/translations/qtwebengine_locales/",
+    r"(^|/)PySide6/Qt6(Quick|Qml|QmlModels|QmlMeta|QmlWorkerScript|WebChannel|PrintSupport)\.dll$",
+    r"(^|/)PySide6/Qt(Quick|Qml|WebChannel|PrintSupport|QuickWidgets)\.pyd$",
     # и библиотеки Qt, которые нужны только модулям QML (3D, графики, Quick Controls…): ни .pyd, ни плагины, ни
     # QtWebEngineProcess.exe их не импортируют (проверено по таблицам импорта), ~57 МБ
     r"(^|/)PySide6/Qt6(3D|Charts|Concurrent|DataVisualization|Graphs|Labs|Location|MultimediaQuick|OpenGLWidgets"
@@ -94,7 +104,8 @@ REQUIRED = [
     "_internal/autoprint/samples/lesson-example.md", "_internal/autoprint/samples/lesson-example_files/func-scheme.png",
     "_internal/autoprint/efir/page/lang/python.svg",
     "_internal/autoprint/efir/page/lesson/render.js", "_internal/autoprint/efir/page/lesson/richtext.js",
-    "_internal/PySide6/Qt6Pdf.dll", "_internal/PySide6/Qt6WebEngineCore.dll", "_internal/autoprint/efir/page/app.html",
+    "_internal/PySide6/Qt6Pdf.dll", "_internal/autoprint/efir/page/app.html",
+    f"window/{WINDOW_EXE}", "window/resources/app.asar", "window/locales/ru.pak", "window/locales/en-US.pak",
 ]
 
 SPEC = '''# -*- mode: python ; coding: utf-8 -*-
@@ -253,6 +264,40 @@ def run_pyinstaller(version: str, icon: Path) -> None:
         sys.exit("PyInstaller завершился с ошибкой")
 
 
+def build_window(version: str, icon: Path) -> None:
+    """Окно программы (Electron): npm ci в window\\ (если ещё нет), @electron/packager → dist\\AutoPrintCode\\window\\
+    (AutoPrintCodeWindow.exe со значком и версией программы, app.asar). Лишние переводы Chromium — убрать."""
+    if not shutil.which(NPM):
+        sys.exit("Нет Node.js (npm): окно программы не собрать. Поставьте Node.js 22 и повторите сборку.")
+    if not (WINDOW_SRC / "node_modules" / "@electron" / "packager").is_dir():
+        say("npm ci в window\\")
+        if subprocess.run([NPM, "ci", "--no-audit", "--no-fund"], cwd=str(WINDOW_SRC)).returncode != 0:
+            sys.exit("npm ci в window\\ не прошёл")
+    out = BUILD / "window"
+    shutil.rmtree(out, ignore_errors=True)
+    # node напрямую, не npx.cmd: cmd.exe разобрал бы «|» и «^» в --ignore по-своему
+    cli = WINDOW_SRC / "node_modules" / "@electron" / "packager" / "bin" / "electron-packager.mjs"
+    cmd = ["node", str(cli), ".", "AutoPrintCodeWindow", "--platform=win32", "--arch=x64",
+           f"--out={out}", "--overwrite", "--asar", f"--icon={icon}", "--executable-name=AutoPrintCodeWindow",
+           f"--app-version={version}", f"--build-version={'.'.join(map(str, numeric_version(version)))}",
+           "--win32metadata.FileDescription=AutoPrintCode — окно программы", f"--win32metadata.ProductName={NAME}",
+           f"--win32metadata.CompanyName={NAME}", "--win32metadata.InternalName=AutoPrintCodeWindow",
+           "--ignore=^/tests($|/)", "--ignore=^/package-lock\\.json$", "--quiet"]
+    say("Окно программы: @electron/packager " + " ".join(cmd[2:]))
+    if subprocess.run(cmd, cwd=str(WINDOW_SRC)).returncode != 0:
+        sys.exit("@electron/packager завершился с ошибкой — окно программы не собрано")
+    built = out / "AutoPrintCodeWindow-win32-x64"
+    if not (built / WINDOW_EXE).is_file():
+        sys.exit(f"@electron/packager не создал {built / WINDOW_EXE}")
+    dest = APP_DIST / "window"
+    shutil.rmtree(dest, ignore_errors=True)
+    shutil.copytree(built, dest)
+    for pak in (dest / "locales").glob("*.pak"):
+        if pak.name not in WINDOW_LOCALES:
+            pak.unlink()
+    say(f"Окно программы собрано: {mb(dir_size(dest))}")
+
+
 def check_dist() -> None:
     missing = [r for r in REQUIRED if not (APP_DIST / r).exists()]
     if missing:
@@ -264,7 +309,11 @@ def check_dist() -> None:
         sys.exit("В сборку попали исключённые файлы:\n  " + "\n  ".join(map(str, dropped)))
     if (APP_DIST / "data").exists():
         sys.exit(f"В {APP_DIST} есть папка data — это чьи-то образцы и настройки, в релиз их класть нельзя")
-    say(f"Сборка проверена: {len(wavs)} звуков, Qt Multimedia/Network/Svg на месте")
+    web = [p.relative_to(APP_DIST).as_posix() for p in (APP_DIST / "_internal").rglob("*")
+           if re.search(r"webengine|qt6quick|qt6qml", p.name, re.IGNORECASE)]
+    if web:
+        sys.exit("В сборку попал встроенный браузер Qt (с 1.2 окно — Electron):\n  " + "\n  ".join(web[:20]))
+    say(f"Сборка проверена: {len(wavs)} звуков, Qt Multimedia/Network/Svg на месте, окно программы (Electron) на месте")
 
 
 def dir_size(path: Path) -> int:
@@ -347,13 +396,13 @@ def use_out_dir(argv: list[str]) -> bool:
 
 
 def selftest_dist() -> None:
-    """Собранная программа невидимо (offscreen) загружает своё окно — встроенный браузер в сборке работает."""
+    """Собранная программа невидимо открывает своё окно (Electron, --autoprint-hidden) и ждёт страницу."""
     exe = APP_DIST / f"{NAME}.exe"
     env = {**os.environ, "QT_QPA_PLATFORM": "offscreen"}
     env.pop("AUTOPRINT_DATA", None)
     r = subprocess.run([str(exe), "--selftest"], env=env, timeout=120)
     if r.returncode != 0:
-        sys.exit(f"Собранная программа не прошла --selftest (код {r.returncode}): окно со встроенным браузером не "
+        sys.exit(f"Собранная программа не прошла --selftest (код {r.returncode}): окно программы (Electron) не "
                  "загрузилось. Смотрите журнал во временной папке autoprint-selftest-*.")
     say("Проверка --selftest: окно программы загружается")
 
@@ -368,6 +417,7 @@ def main() -> int:
     icon = BUILD / "icon.ico"
     make_icon(icon)
     run_pyinstaller(version, icon)
+    build_window(version, icon)
     check_dist()
     selftest_dist()
 

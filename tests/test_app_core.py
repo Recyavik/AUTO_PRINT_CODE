@@ -228,7 +228,7 @@ class RegressTest(unittest.TestCase):
             """Виджет, показанный самостоятельным окном (до вставки в родителя), мелькает на панели задач."""
             def eventFilter(self, obj, ev) -> bool:
                 if ev.type() == QEvent.Type.Show and isinstance(obj, QWidget) and obj.isWindow() \
-                        and type(obj).__name__ not in ("AppWindow", "QTipLabel", "QComboBoxPrivateContainer") \
+                        and type(obj).__name__ not in ("QTipLabel", "QComboBoxPrivateContainer") \
                         and not isinstance(obj, QMenu):
                     spy_list.append(f"{type(obj).__name__} «{obj.objectName()}»")
                 return False
@@ -238,8 +238,6 @@ class RegressTest(unittest.TestCase):
         self._hook = sys.excepthook
         sys.excepthook = lambda t, v, tb: self.errors.append(f"{t.__name__}: {v}")
         self.a = make_app([plan, foreign])
-        from PySide6.QtCore import Qt
-        self.a.window.setAttribute(Qt.WidgetAttribute.WA_DontShowOnScreen, True)
         self.a.window.show()
         pump()
 
@@ -408,12 +406,16 @@ class SessionTest(unittest.TestCase):
         """Вышли в маленьком режиме — маленькое окно там же, где его поставили."""
         a = self.start([lesson("A", "LA")])
         a.set_compact(True)
-        a.window.move(223, 150)
-        pump()
-        pos = a.window.pos()
+        # окно (Electron) сообщает, где оно: большое — где было, маленькое — где его поставили
+        a.window.on_message({"ev": "geometry", "big": {"x": 40, "y": 30, "w": 1100, "h": 760, "max": False},
+                             "small": {"x": 223, "y": 150, "w": 360, "h": 600}})
+        pump(500)
         b = self.restart(a)
         self.assertTrue(b.window.compact)
-        self.assertEqual((b.window.pos().x(), b.window.pos().y()), (pos.x(), pos.y()))
+        init = b.window._init_msg()
+        self.assertEqual(init["small"], {"x": 223, "y": 150, "w": 360, "h": 600})
+        self.assertEqual(init["big"], {"x": 40, "y": 30, "w": 1100, "h": 760, "max": False})
+        self.assertTrue(init["compact"])
         b.set_compact(False)
 
     def test_tray_start_in_compact_stays_hidden(self):
@@ -442,10 +444,10 @@ class SessionTest(unittest.TestCase):
         s.window_geometry, s.compact = "", False          # как после миграции v1
         b = App(s, TemplateStore(), web=False)
         self.apps.append(b)
-        scr = b.window.screen().availableGeometry()
-        g = b.window.frameGeometry()
-        self.assertTrue(scr.contains(g), (scr, g))
-        self.assertLessEqual(abs(g.center().x() - scr.center().x()), 2)
+        # места нет — окно (Electron) ставит себя само: не больше рабочей области и по центру
+        # (window/geometry.js defaultBig, проверки — window/tests/geometry.test.js)
+        self.assertIsNone(b.window._init_msg()["big"])
+        self.assertFalse(b.window.compact)
 
     def test_tray_flag_starts_hidden(self):
         a = self.start([lesson("A", "LA")])

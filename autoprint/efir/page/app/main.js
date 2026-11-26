@@ -11,14 +11,7 @@ const ZOOM_MIN = 80, ZOOM_MAX = 200;
 const AUTO_BASE = 1500, AUTO_MIN = 90, AUTO_MAX = 150;
 let pendingZoom = null, pendingUntil = 0;       // свой шаг масштаба, пока программа его не подтвердила
 
-let sizemove = false;                // окно тянут: размеры страницы стоят до отпускания
-let sizemoveGuard = 0;               // «отпустили» не пришло (сбой связи) — не застрять: 1,5 с без растягивания
 function setVh() {
-  if (sizemove) {                    // тянут дальше — подстраховку отложить
-    clearTimeout(sizemoveGuard);
-    sizemoveGuard = setTimeout(() => window.__sizemove(false), 1500);
-    return;
-  }
   const z = parseFloat(document.documentElement.style.zoom) || 1;
   document.documentElement.style.setProperty("--vh", (innerHeight / z / 100).toFixed(3) + "px");
 }
@@ -58,25 +51,6 @@ addEventListener("resize", () => {
   clearTimeout(autoTimer);
   autoTimer = setTimeout(applyLook, 200);
 });
-
-// окно тянут за край или за шапку (программа сообщает о начале и конце): страница держит прежний размер, урок не
-// перестраивается на каждый кадр; когда отпустили — одна перестройка под новый размер
-window.__sizemove = (on) => {
-  on = !!on;
-  if (on === sizemove) return;
-  sizemove = on;
-  document.body.classList.toggle("sizemove", on);
-  const shell = document.getElementById("shell");
-  clearTimeout(sizemoveGuard);
-  if (on) {
-    if (shell) { shell.style.width = shell.offsetWidth + "px"; shell.style.height = shell.offsetHeight + "px"; }
-    sizemoveGuard = setTimeout(() => window.__sizemove(false), 1500);
-    return;
-  }
-  if (shell) shell.style.width = shell.style.height = "";
-  setVh();
-  dispatchEvent(new Event("resize"));            // области окна, маленький режим, масштаб под окно — под новый размер
-};
 
 // ---------------------------------------------------------------- масштаб: Ctrl+колесо, Ctrl+= / − / 0
 // шаги подряд (колесо, Ctrl+=) — одна перестройка за кадр и одна запись в программу, когда перестали

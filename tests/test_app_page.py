@@ -62,14 +62,12 @@ class BridgeTest(AppPage):
         self.assertTrue(self.wait_js("location.hash === '#/settings'"))
 
     def test_cmd_reaches_window(self):
-        # страница сама шлёт свои области (после отрисовки) — наша команда может прийти раньше неё; шлём, пока не дойдёт
-        want = [(0.0, 0.0, 100.0, 40.0)]
-
-        def sent():
-            self.js("window.appCore.send({cmd: 'window', op: 'regions', drag: [[0, 0, 100, 40]], holes: [], zoom: 1})")
-            pump(150)
-            return self.app.window.regions.drag == want
-        self.assertTrue(self.wait_py(sent))
+        try:
+            self.js("window.appCore.send({cmd: 'window', op: 'max'})")
+            self.assertTrue(self.wait_py(lambda: self.app.window.isMaximized()))
+            self.assertEqual(self.app.window.sent[-1], {"op": "max"})
+        finally:
+            self.app.window.showNormal()
 
 
 CONTRAST_JS = """(() => {
@@ -160,34 +158,19 @@ class ShellTest(AppPage):
     port = 18994
     route = "#/lessons"
 
-    def regions(self):
-        return self.app.window.regions
+    def region(self, sel):
+        return self.js("(() => { const e = document.querySelector(" + repr(sel) + "); if (!e) return null;"
+                       " const c = getComputedStyle(e);"
+                       " return c.getPropertyValue('-webkit-app-region') || c.getPropertyValue('app-region') || ''; })()")
 
-    def test_titlebar_regions(self):
-        self.assertTrue(self.wait_py(lambda: bool(self.regions().drag), 5), "страница не прислала области окна")
-        r = self.regions()
-        x, y, w, h = r.drag[0]
-        self.assertEqual((x, y), (0, 0))
-        self.assertAlmostEqual(h * r.zoom, 44, delta=2)
-        self.assertGreaterEqual(len(r.holes), 6)            # знак, «Аа», поверх, маленький, свернуть, развернуть, закрыть
-        from autoprint.ui.regions import HTCAPTION, HTCLIENT
-        hole = r.holes[-1]
-        cx, cy = (hole[0] + hole[2] / 2) * r.zoom, (hole[1] + hole[3] / 2) * r.zoom
-        self.assertEqual(self.app.window.client_hit(cx, cy), HTCLIENT)      # кнопка нажимается
-        gap = self.js("(() => { const r = document.querySelector('#titlebar .tb-fill').getBoundingClientRect();"
-                      " return [r.left + r.width / 2, r.top + r.height / 2]; })()")
-        self.assertEqual(self.app.window.client_hit(gap[0], gap[1]), HTCAPTION)  # пустое место тянет окно
-
-    def test_regions_resent_on_zoom(self):
-        try:
-            self.app.settings.page_zoom = 150
-            self.app.publish_now()
-            self.assertTrue(self.wait_py(lambda: abs(self.regions().drag[0][3] * self.regions().zoom - 66) < 3
-                                         if self.regions().drag else False, 6))
-        finally:
-            self.app.settings.page_zoom = 100
-            self.app.publish_now()
-            self.wait_py(lambda: abs(self.regions().drag[0][3] * self.regions().zoom - 44) < 3, 6)
+    def test_titlebar_drags_buttons_press(self):
+        """Окно Electron тянется за пустое место шапки (app-region), кнопки окна в ней нажимаются;
+        настоящую проверку по WM_NCHITTEST делает test_app_shell."""
+        self.assertTrue(self.js("!!document.querySelector('#titlebar[data-drag] .tb-fill')"))
+        self.assertEqual(self.region("#titlebar"), "drag")
+        for sel in ("#closeBtn", "#maxBtn", "#minBtn", "#pinBtn", "#zoomBtn", ".tb-logo"):
+            self.assertEqual(self.region(sel), "no-drag", sel)
+        self.assertFalse(self.js("'__sizemove' in window"))                 # заплатка окна Qt (1.1.3) убрана
 
     def test_window_buttons_send_cmds(self):
         self.app.settings.always_on_top = False
@@ -251,13 +234,14 @@ class ShellTest(AppPage):
         self.app.window.window_cmd("pin")
 
     def test_pick_files_call(self):
-        import autoprint.app_cmd as C
-        old = C.QFileDialog.getOpenFileNames
-        C.QFileDialog.getOpenFileNames = staticmethod(lambda *a, **k: (["C:/x/урок.md"], ""))
+        asked = []
+        old = self.app.window.pick_open
+        self.app.window.pick_open = lambda title, folder="", flt="", multi=False: asked.append((title, multi)) or ["C:/x/урок.md"]
         try:
             self.assertEqual(self.js("window.appCore.call({cmd: 'pick_files', purpose: 'import'})"), ["C:/x/урок.md"])
         finally:
-            C.QFileDialog.getOpenFileNames = old
+            self.app.window.pick_open = old
+        self.assertEqual(asked, [("Импорт урока", True)])
 
 
 if __name__ == "__main__":

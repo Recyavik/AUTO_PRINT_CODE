@@ -4,7 +4,8 @@
     ...
     quiet.patch()  # после создания QApplication
 
-- QT_QPA_PLATFORM=offscreen — окна рисуются в памяти, на экран не попадает ничего;
+- QT_QPA_PLATFORM=offscreen — окна рисуются в памяти, на экран не попадает ничего; окно Electron —
+  с --autoprint-hidden=1 (AUTOPRINT_WINDOW_HIDDEN);
 - своя временная папка данных — рабочая data/ не трогается;
 - без значка в трее и без уведомлений Windows;
 - глобальные хоткеи и перехват клавиатуры — заглушки (не мешают настоящей программе и человеку);
@@ -19,6 +20,8 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 # у offscreen своих шрифтов нет (вместо букв — квадраты): берём шрифты Windows — размеры текста как в жизни
 os.environ.setdefault("QT_QPA_FONTDIR", os.path.join(os.environ.get("WINDIR", r"C:\Windows"), "Fonts"))
 os.environ.setdefault("AUTOPRINT_DATA", tempfile.mkdtemp(prefix="autoprint-test-"))
+# окно программы (Electron) в проверках не показывается никогда: видно/свёрнуто — «как будто»
+os.environ.setdefault("AUTOPRINT_WINDOW_HIDDEN", "1")
 
 
 def patch() -> None:

@@ -246,6 +246,11 @@ input[type=checkbox]:not(.sw) { accent-color: var(--accent); width: 16px; height
 /* ---------------------------------------------------------------- оболочка: шапка, меню разделов, экран */
 #app { height: 100%; }
 #shell { height: calc(var(--vh) * 100); display: flex; flex-direction: column; }
+/* где тянуть окно (Electron, 1.2): шапка и табло маленького режима; кнопки, поля и всплывающее поверх — нажимаются.
+   В обычном браузере (экран урока в Edge, проверки) app-region ничего не делает */
+[data-drag] { -webkit-app-region: drag; app-region: drag; }
+[data-drag] :is(button, a, input, select, textarea, [contenteditable], [data-nodrag], .seg, label),
+.pop, .sheet, .toast, .scrim { -webkit-app-region: no-drag; app-region: no-drag; }
 #titlebar { height: 44px; flex: none; display: flex; align-items: center; gap: 6px; padding-left: 10px;
   background: var(--ground); border-bottom: 1px solid var(--line); user-select: none; min-width: 0; }
 .tb-logo { width: 30px; height: 30px; display: grid; place-items: center; border-radius: var(--r-sm); flex: none; }

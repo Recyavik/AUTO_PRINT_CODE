@@ -226,7 +226,6 @@ def main() -> int:
     s.sound_enabled = False
     theme.setup(app, "dark")
     win = App(s, TemplateStore(), web=False)
-    win.window.setAttribute(Qt.WidgetAttribute.WA_DontShowOnScreen, True)
     win.window.show()
     pump(0.5)
     which = set(sys.argv[1:]) or {"block", "steps", "lines"}

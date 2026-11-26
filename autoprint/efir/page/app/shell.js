@@ -1,5 +1,5 @@
 // Оболочка окна: своя шапка (знак, «хлебные крошки», «Аа», поверх всех, маленький режим, свернуть / развернуть /
-// закрыть), меню разделов, области перетаскивания окна для программы, клавиши окна, файлы, перетащенные в окно.
+// закрыть), меню разделов, клавиши окна, файлы, перетащенные в окно. Где тянуть окно — [data-drag] (app.css).
 "use strict";
 import { S, on, send, go, emit } from "./core.js";
 import { h, iconBtn, clear, popover, seg, btn, toggle, $ } from "./ui.js";
@@ -40,10 +40,7 @@ export function mountShell(root) {
   root.append(h("div", { id: "shell" }, bar, h("div", { id: "frame" }, railEl, viewEl)));
 
   on("app", update);
-  on("view", (name) => { markRail(name); queueRegions(); });
-  on("zoom", queueRegions);
-  addEventListener("resize", queueRegions);
-  setInterval(() => sendRegions(false), 2000);
+  on("view", markRail);
   update();
   return viewEl;
 }
@@ -59,7 +56,6 @@ export function setCrumbs(items, extra = null) {
   });
   clear(extraEl);
   if (extra) extraEl.append(extra);
-  queueRegions();
 }
 
 function markRail(name) {
@@ -144,47 +140,6 @@ function widthSeg() {
     { value: "full", label: "Во всё окно" }], document.body.dataset.lw || "normal", setWidth, { size: "sm", label: "Ширина текста урока" });
   s.id = "lessonWidth";
   return s;
-}
-
-// ---------------------------------------------------------------- области окна (где тянуть)
-let regionsQueued = false, lastRegions = "";
-function queueRegions() {
-  if (regionsQueued) return;
-  regionsQueued = true;
-  requestAnimationFrame(() => requestAnimationFrame(() => { regionsQueued = false; sendRegions(true); }));
-}
-
-const INTERACTIVE = "button, a, input, select, textarea, [contenteditable], [data-nodrag], .seg, label";
-
-function rectOf(el) {
-  const r = el.getBoundingClientRect();
-  return [Math.round(r.left * 10) / 10, Math.round(r.top * 10) / 10, Math.round(r.width * 10) / 10, Math.round(r.height * 10) / 10];
-}
-
-/** Ручки — [data-drag] (шапка, табло маленького режима); дырки — кнопки и поля внутри них. Масштаб — во сколько
- * раз пиксель прямоугольника больше пикселя окна (в разных Chromium getBoundingClientRect с CSS zoom считает по-разному). */
-export function sendRegions(force) {
-  const drag = [], holes = [];
-  const shown = (el) => el.getClientRects().length > 0;           // fixed-элементы (табло) без offsetParent — тоже видны
-  for (const d of document.querySelectorAll("[data-drag]")) {
-    if (!shown(d)) continue;
-    if (d.parentElement && d.parentElement.closest("[data-drag]")) continue;   // вложенная ручка — внутри внешней
-    drag.push(rectOf(d));
-    for (const x of d.querySelectorAll(INTERACTIVE)) {
-      if (!shown(x)) continue;
-      const outer = x.parentElement && x.parentElement.closest(INTERACTIVE);
-      if (outer && d.contains(outer)) continue;                   // внутри другой кнопки или поля — уже дырка
-      holes.push(rectOf(x));
-    }
-  }
-  const html = document.documentElement.getBoundingClientRect();
-  const k = html.width > 0 ? innerWidth / html.width : 1;
-  const zoom = Math.abs(k - 1) < 0.02 ? 1 : Math.round(k * 1000) / 1000;
-  const data = { drag, holes, zoom };
-  const key = JSON.stringify(data);
-  if (!force && key === lastRegions) return;
-  lastRegions = key;
-  send({ cmd: "window", op: "regions", ...data }).catch(() => {});
 }
 
 // ---------------------------------------------------------------- клавиши окна

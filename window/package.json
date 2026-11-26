@@ -1,0 +1,16 @@
+{
+  "name": "autoprintcode-window",
+  "productName": "AutoPrintCode",
+  "version": "1.2.0",
+  "private": true,
+  "description": "Окно программы AutoPrintCode (Electron): страница /app с локального сервера программы",
+  "main": "main.js",
+  "scripts": {
+    "postinstall": "node node_modules/electron/install.js",
+    "test": "node --test tests/geometry.test.js"
+  },
+  "devDependencies": {
+    "electron": "45.3.0",
+    "@electron/packager": "20.3.0"
+  }
+}

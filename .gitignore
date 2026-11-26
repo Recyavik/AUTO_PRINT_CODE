@@ -53,3 +53,6 @@ info.txt
 # --- Сборка CodeMirror для экрана урока ---
 tools/page_vendor/node_modules/
 tools/page_vendor/package-lock.json
+
+# --- Окно программы (Electron): npm install в window\ ---
+window/node_modules/

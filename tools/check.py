@@ -40,6 +40,7 @@ def main() -> int:
         ("Python: тесты ядра и интерфейса (unittest)", [py, "-m", "unittest", "tests.test_core"], ROOT),
         # остальные тесты — сценарии со своим main(): каждый в своём процессе (свои заглушки и папка данных)
         *[(f"Python: {name}", [py, f"tests/{name}.py"], ROOT) for name in SCRIPT_TESTS],
+        ("Окно программы (Electron): места окна на экране", ["node", "--test", "window/tests/geometry.test.js"], ROOT),
         ("Эталоны веб-версии совпадают с Python", [sys.executable, "tools/make_web_fixtures.py", "--check"], ROOT),
         ("Веб: типы", [NPM, "run", "typecheck"], WEB),
         ("Веб: тесты (паритет с Python, движок, текстовые блоки)", [NPM, "test"], WEB),

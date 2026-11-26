@@ -268,7 +268,6 @@ def make_window(profile: str):
     store = TemplateStore()
     win = M.App(s, store, web=False)
     win.tray.message = lambda *a, **k: None       # без всплывающих уведомлений Windows
-    win.window.setAttribute(Qt.WidgetAttribute.WA_DontShowOnScreen, True)
     win.window.show()
     pump()
     return win, s, store

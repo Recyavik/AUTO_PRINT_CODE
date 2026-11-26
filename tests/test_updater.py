@@ -186,6 +186,16 @@ def test_stage_exe() -> None:
     root = updater.stage_exe(flat, rel)
     check("сборка без общей папки: корень — staging", root == updater.UPDATES_DIR / "staging-0.5.0")
 
+    rel12 = Release("1.2.0", "v1.2.0", "n", "", "page", "zip", "")      # с 1.2 в сборке — окно программы (Electron)
+    no_win = make_zip(TMP / "zips" / "no_window.zip", {"AutoPrintCode/AutoPrintCode.exe": b"MZ",
+                                                       "AutoPrintCode/_internal/a": b"a"})
+    err = error_of(updater.stage_exe, no_win, rel12)
+    check("сборка 1.2 без окна программы: ошибка", err is not None and "окна программы" in err, str(err))
+    with_win = make_zip(TMP / "zips" / "with_window.zip", {"AutoPrintCode/AutoPrintCode.exe": b"MZ",
+                                                           "AutoPrintCode/_internal/a": b"a",
+                                                           "AutoPrintCode/window/AutoPrintCodeWindow.exe": b"MZ"})
+    check("сборка 1.2 с окном: распакована", (updater.stage_exe(with_win, rel12) / "window").is_dir())
+
     bad = make_zip(TMP / "zips" / "no_internal.zip", {"AutoPrintCode/AutoPrintCode.exe": b"MZ"})
     err = error_of(updater.stage_exe, bad, rel)
     check("сборка без _internal: ошибка", err is not None and "_internal" in err, str(err))
@@ -334,9 +344,11 @@ def test_program_files() -> None:
 
 OLD_APP = {"AutoPrintCode.exe": b"old exe 0.4.0", "_internal/old.dll": b"old dll",
            "_internal/common.txt": b"old common", "_internal/sub/x.pyd": b"old pyd",
+           "window/AutoPrintCodeWindow.exe": b"old window", "window/locales/de.pak": b"old locale",
            "data/settings.json": b'{"keep": true}', "data/templates.json": b"[]", "unins000.exe": b"uninstaller"}
 NEW_BUILD = {"AutoPrintCode.exe": b"NEW EXE 0.5.0 -- longer", "_internal/common.txt": b"new common!!",
              "_internal/new.dll": b"new dll", "_internal/sub/x.pyd": b"new pyd 0.5.0",
+             "window/AutoPrintCodeWindow.exe": b"new window 0.5.0", "window/resources/app.asar": b"asar",
              "data/evil.json": b"must not be copied"}
 
 
@@ -386,7 +398,8 @@ def test_helper_text() -> None:
           and 'ren "%APP%\\%OLDNAME%" "_internal"' in text and 'Robocopy.exe" "%BAK%" "%APP%"' in text)
     check("скрипт: перезапуск с --updated", '"%APP%\\%EXE%" --updated' in text and 'set "EXE=AutoPrintCode.exe"' in text)
     check("скрипт: журнал", f'set "LOG={logf}"' in text)
-    allowed = ('"%BAK%"', '"%APP%\\%OLDNAME%"', '"%APP%\\_internal"', '"%~f0"')
+    allowed = ('"%BAK%"', '"%APP%\\%OLDNAME%"', '"%APP%\\_internal"', '"%APP%\\%WOLD%"', '"%APP%\\window"',
+               '"%~f0"')
     deletes = [ln.strip() for ln in text.splitlines() if ln.lstrip().startswith(("rmdir", "del ", "(goto)"))
                or " rmdir " in ln]
     check("скрипт: удаляет только копию, отложенные и новые библиотеки (не data)",
@@ -411,6 +424,10 @@ def test_helper_run() -> None:
           and (app / "_internal/new.dll").exists()
           and (app / "_internal/sub/x.pyd").read_bytes() == NEW_BUILD["_internal/sub/x.pyd"])
     check("прогон: устаревшие библиотеки убраны", not (app / "_internal/old.dll").exists())
+    check("прогон: окно программы новое целиком", (app / "window/AutoPrintCodeWindow.exe").read_bytes()
+          == NEW_BUILD["window/AutoPrintCodeWindow.exe"] and (app / "window/resources/app.asar").exists()
+          and not (app / "window/locales/de.pak").exists())
+    check("прогон: отложенное окно удалено", not list(app.glob("window.old*")))
     check("прогон: data программы не тронута", (app / "data/settings.json").read_bytes() == b'{"keep": true}'
           and (app / "data/templates.json").read_bytes() == b"[]")
     check("прогон: data из сборки не скопирована", not (app / "data/evil.json").exists())
@@ -441,6 +458,8 @@ def test_helper_run() -> None:
     check("откат: прежняя версия на месте (exe, _internal, data)", old_untouched(app),
           str(sorted(p.relative_to(app).as_posix() for p in app.rglob("*"))))
     check("откат: отложенная папка возвращена", not list(app.glob("_internal.old*")))
+    check("откат: окно программы — прежнее целиком", not (app / "window/resources/app.asar").exists()
+          and not list(app.glob("window.old*")))
     check("откат: в журнале", "возвращаем прежнюю версию" in log_text and "Прежняя версия возвращена" in log_text,
           log_text[-800:])
 

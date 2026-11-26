@@ -65,6 +65,8 @@ MODE_FROZEN = "frozen"   # собранный .exe — сборка из рел�
 # собранная программа (PyInstaller, onedir): AutoPrintCode.exe + папка библиотек _internal
 EXE_NAME = f"{APP_NAME}.exe"
 INTERNAL_DIR = "_internal"
+WINDOW_DIR = "window"                       # с 1.2: окно программы (Electron) — window\AutoPrintCodeWindow.exe
+WINDOW_EXE = "AutoPrintCodeWindow.exe"
 HELPER_NAME = f"{APP_NAME}-update.cmd"
 PID_WAIT_S = 30          # сколько скрипт ждёт выхода программы
 _EXE_ZIP_RE = re.compile(rf"^{re.escape(APP_NAME)}-(.+)-win64\.zip$", re.IGNORECASE)
@@ -477,6 +479,9 @@ def stage_exe(zip_path: Path, rel: Release) -> Path:
     root = _extract(zip_path, UPDATES_DIR / f"staging-{rel.version}", test=False)
     if not (root / EXE_NAME).is_file() or not (root / INTERNAL_DIR).is_dir():
         raise UpdateError(f"В архиве нет файлов программы ({EXE_NAME} и папки {INTERNAL_DIR}).")
+    ver = parse_version(rel.version)
+    if ver is not None and ver[0][:3] >= (1, 2, 0) and not (root / WINDOW_DIR / WINDOW_EXE).is_file():
+        raise UpdateError(f"В архиве нет окна программы ({WINDOW_DIR}\\{WINDOW_EXE}) — обновление отменено.")
     found = exe_version(root / EXE_NAME)
     key, want = parse_version(found) if found else None, parse_version(rel.version)
     if key is not None and want is not None and key[:3] != want[:3]:
@@ -669,6 +674,7 @@ set "LOG={log}"
 set "WAIT={wait}"
 set "RETRIES={retries}"
 set "OLDNAME={internal}.old"
+set "WOLD={window}.old"
 set "SYS=%SystemRoot%\System32"
 set "MODE=%~1"
 set "OK="
@@ -707,6 +713,19 @@ if %N% geq 15 (call :log "Папка {internal} занята — обновле�
 goto rename
 
 :renamed
+rem окно программы (с 1.2) — тоже в сторону: при ошибке вернётся целиком, а не наполовину новым
+if not exist "%APP%\{window}" goto wrenamed
+if exist "%APP%\%WOLD%" rmdir /s /q "%APP%\%WOLD%"
+if exist "%APP%\%WOLD%" set "WOLD=%WOLD%-%RANDOM%"
+set /a N=0
+:wrename
+ren "%APP%\{window}" "%WOLD%" 2>nul && goto wrenamed
+set /a N+=1
+if %N% geq 15 (call :log "Папка {window} занята — обновление отменено" & goto restore)
+"%SYS%\PING.EXE" -n 2 127.0.0.1 >nul
+goto wrename
+
+:wrenamed
 call :log "Прежние библиотеки отложены в %OLDNAME%, копируем новые файлы"
 "%SYS%\Robocopy.exe" "%SRC%" "%APP%" /E /XD "%SRC%\data" /R:%RETRIES% /W:1 /NP /NDL /NFL /NJH >>"%LOG%" 2>&1
 if errorlevel 8 (call :log "Ошибка копирования (robocopy %ERRORLEVEL%) — возвращаем прежнюю версию" & goto restore)
@@ -717,6 +736,10 @@ goto finish
 :restore
 if exist "%APP%\{internal}" rmdir /s /q "%APP%\{internal}"
 ren "%APP%\%OLDNAME%" "{internal}" || call :log "ОШИБКА: не удалось вернуть папку {internal} из %OLDNAME%"
+if not exist "%APP%\%WOLD%" goto restore_files
+if exist "%APP%\{window}" rmdir /s /q "%APP%\{window}"
+ren "%APP%\%WOLD%" "{window}" || call :log "ОШИБКА: не удалось вернуть папку {window} из %WOLD%"
+:restore_files
 "%SYS%\Robocopy.exe" "%BAK%" "%APP%" /R:%RETRIES% /W:1 /NP /NDL /NFL /NJH >>"%LOG%" 2>&1
 if errorlevel 8 (call :log "ОШИБКА: не удалось вернуть файлы из копии") else call :log "Прежняя версия возвращена"
 goto finish
@@ -728,6 +751,7 @@ if /i "%MODE%"=="restart" (
 )
 if defined OK (
   rmdir /s /q "%APP%\%OLDNAME%" 2>nul
+  rmdir /s /q "%APP%\%WOLD%" 2>nul
   rmdir /s /q "%BAK%" 2>nul
 )
 
@@ -766,7 +790,7 @@ def write_update_helper(src: Path, app: Path, pid: int, new_version: str, *, old
     text = _HELPER.format(
         app_name=APP_NAME, old=old_version, new=new_version, pid=int(pid), app=_bat_value(app), exe=EXE_NAME,
         src=_bat_value(src), bak=_bat_value(backup), log=_bat_value(log_file), wait=int(wait_s),
-        retries=int(retries), internal=INTERNAL_DIR)
+        retries=int(retries), internal=INTERNAL_DIR, window=WINDOW_DIR)
     script.parent.mkdir(parents=True, exist_ok=True)
     # UTF-8 без BOM: первой строкой скрипт сам переключает консоль на UTF-8 (chcp 65001)
     with open(script, "w", encoding="utf-8", newline="\r\n") as f:
@@ -883,7 +907,7 @@ def run_setup(setup: Path, restart: bool) -> None:
 def cleanup() -> None:
     """Удаляет скачанные архивы, распакованные папки и временную копию старых файлов."""
     if getattr(sys, "frozen", False):   # отложенные скриптом библиотеки прежней сборки
-        for p in app_dir().glob(INTERNAL_DIR + ".old*"):
+        for p in [*app_dir().glob(INTERNAL_DIR + ".old*"), *app_dir().glob(WINDOW_DIR + ".old*")]:
             shutil.rmtree(p, ignore_errors=True)
     if not UPDATES_DIR.is_dir():
         return

@@ -625,6 +625,10 @@ def save_zip(report: dict, path) -> Path:
                 z.writestr(f"logs/{f.name}", sanitize(_read_text(f), private))
             if updater.APPLY_LOG.is_file():
                 z.writestr(f"logs/{updater.APPLY_LOG.name}", sanitize(_read_text(updater.APPLY_LOG), private))
+            from .logs import LOG_DIR
+            window_log = LOG_DIR / "window.log"           # сообщения окна программы (Electron, Chromium) — с 1.2
+            if window_log.is_file():
+                z.writestr("logs/window.log", sanitize(_read_text(window_log)[-200_000:], private))
         os.replace(tmp, path)
     except BaseException:
         Path(tmp).unlink(missing_ok=True)

@@ -10,7 +10,6 @@
 import { S, L as LC, on, send, now } from "./core.js";
 import { h, btn, iconBtn, menu, clear, zoom, tip } from "./ui.js";
 import { icon } from "./icons.js";
-import { sendRegions } from "./shell.js";
 import { cmd, mmss, clockAt, durText } from "../lesson/state.js";
 
 const BUSY = ["running", "countdown", "paused", "line_wait"];
@@ -165,7 +164,7 @@ function renderAgenda(b, size) {
 function tick() {
   if (!B || !document.body.classList.contains("compact")) return;
   const size = sizeOf(innerWidth / zoom(), innerHeight / zoom());     // в пикселях страницы: 150 % — места меньше
-  if (document.body.dataset.size !== size) { document.body.dataset.size = size; queueRegions(); }
+  if (document.body.dataset.size !== size) document.body.dataset.size = size;
   const b = board();
   const lv = S.live || {};
   B.time.classList.toggle("red", b.kind === "live" && b.left <= 60);
@@ -207,13 +206,6 @@ function tick() {
   }
 }
 
-let regionsQueued = false;
-function queueRegions() {
-  if (regionsQueued) return;
-  regionsQueued = true;
-  requestAnimationFrame(() => requestAnimationFrame(() => { regionsQueued = false; sendRegions(true); }));
-}
-
 let timer = 0;
 function apply() {
   const on_ = !!(S.window && S.window.compact);
@@ -223,7 +215,6 @@ function apply() {
   if (on_) {
     if (!timer) { timer = setInterval(tick, 1000); offset = 0; }
     tick();
-    queueRegions();
   } else {
     if (timer) { clearInterval(timer); timer = 0; }
     delete document.body.dataset.size;
@@ -232,4 +223,4 @@ function apply() {
 
 on("app", apply);
 on("lesson", () => { if (timer) tick(); });
-window.addEventListener("resize", () => { if (timer) { tick(); queueRegions(); } });
+window.addEventListener("resize", () => { if (timer) tick(); });

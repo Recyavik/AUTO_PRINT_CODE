@@ -350,12 +350,13 @@ class WindowTest(unittest.TestCase):
         pump()
 
     def test_one_window(self):
-        """1.0: одно окно со встроенным браузером; старого списка уроков и строки печати Qt нет."""
-        from autoprint.ui.app_window import AppWindow
-        self.assertIsInstance(self.win.window, AppWindow)
+        """1.0: одно окно (с 1.2 — Electron); старого списка уроков, строки печати и окна Qt со встроенным
+        браузером нет."""
+        from autoprint.ui.shell_window import ShellWindow
+        self.assertIsInstance(self.win.window, ShellWindow)
         import importlib.util
         for gone in ("control_strip", "template_view", "blocks", "prompter_window", "prompter_control",
-                     "code_editor", "prompter", "main_window", "library"):
+                     "code_editor", "prompter", "main_window", "library", "app_window", "regions"):
             self.assertIsNone(importlib.util.find_spec(f"autoprint.ui.{gone}"), gone)
 
     def test_open_lesson_sets_focus(self):

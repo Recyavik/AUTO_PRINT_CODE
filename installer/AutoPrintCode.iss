@@ -123,6 +123,8 @@ Name: "removetimer"; Description: "{cm:RemoveTimer}"; GroupDescription: "{cm:Old
 ; библиотеки прежней версии убираются целиком, чтобы не смешались с новыми; data\ не трогается
 Type: filesandordirs; Name: "{app}\_internal"
 Type: filesandordirs; Name: "{app}\_internal.old*"
+; окно программы (Electron, с 1.2) — тоже целиком
+Type: filesandordirs; Name: "{app}\window"
 
 [Files]
 Source: "{#SourceDir}\*"; DestDir: "{app}"; Excludes: "\data"; Flags: ignoreversion recursesubdirs createallsubdirs
@@ -142,6 +144,7 @@ Filename: "{app}\{#AppExe}"; Parameters: "--updated"; WorkingDir: "{app}"; Flags
 ; data\ с образцами и настройками остаётся
 Type: filesandordirs; Name: "{app}\_internal"
 Type: filesandordirs; Name: "{app}\_internal.old*"
+Type: filesandordirs; Name: "{app}\window"
 
 [Code]
 var

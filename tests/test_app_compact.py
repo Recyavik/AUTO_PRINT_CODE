@@ -101,9 +101,9 @@ class CompactTest(AppPage):
         self.assertEqual(items, ["Табло", "Табло и этапы", "Полоса", "Только время"])
         self.assertTrue(self.js("[...document.querySelectorAll('.pop .mi')][0].getAttribute('aria-checked') === 'true'"))
         self.js("[...document.querySelectorAll('.pop .mi')].find(b => b.textContent.includes('Полоса')).click()")
-        want = (min(980, self.app.window.screen().availableGeometry().width()), 160)    # offscreen: экран 800 px
-        self.assertTrue(self.wait_py(lambda: (self.app.window.width(), self.app.window.height()) == want),
-                        (self.app.window.width(), self.app.window.height()))
+        # размер окна считает окно (Electron): правый верхний угол на месте, в пределах экрана — window/geometry.js
+        want = {"op": "compact_size", "w": 980, "h": 160, "k": 1.0}
+        self.assertTrue(self.wait_py(lambda: want in self.app.window.sent), self.app.window.sent[-3:])
 
     def test_strip_has_screen_icons(self):
         """Полоса урока — со значками экрана учеников (без подписей, с подсказками), как в большом окне."""
@@ -204,14 +204,10 @@ class CompactTest(AppPage):
     def test_compact_drag_regions(self):
         self.size(360, 600)
         self.assertTrue(self.wait_js("!!document.querySelector('#compact[data-drag]')"))
-        r = self.js("(() => { const b = document.querySelector('#compact').getBoundingClientRect(); return [b.left, b.top, b.width, b.height]; })()")
-
-        def covered():
-            for x, y, w, h in self.app.window.regions.drag:
-                if x <= r[0] + 1 and y <= r[1] + 1 and x + w >= r[0] + r[2] - 1 and y + h >= r[1] + r[3] - 1:
-                    return True
-            return False
-        self.assertTrue(self.wait_py(covered, 6), self.app.window.regions.drag)
+        st = ("(s) => { const e = document.querySelector(s); const c = e && getComputedStyle(e);"
+              " return c ? (c.getPropertyValue('-webkit-app-region') || c.getPropertyValue('app-region') || '') : null; }")
+        self.assertEqual(self.js("(" + st + ")('#compact')"), "drag")             # табло тянет окно
+        self.assertEqual(self.js("(" + st + ")('#compact button')"), "no-drag")   # кнопки на нём нажимаются
 
     def test_expand_returns_big(self):
         self.click("#compactExpand")
