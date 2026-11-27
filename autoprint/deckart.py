@@ -1,5 +1,6 @@
-"""Кнопки пульта картинками (1.3): SVG в стиле окна программы — тёмная плитка, значок линией, подпись; нажатое —
-янтарным, выключенный звук и микрофон — красным. Текст раскладывает программа (переносит по словам, уменьшает,
+"""Кнопки пульта картинками (1.3): SVG — тёмная плитка, значок линией, подпись под ним; нажатое подсвечено,
+выключенный звук и микрофон — красным. Виды: «Стекло» (по умолчанию: тёмное стекло, нажатое — синим), «Плитки»
+(как окно программы, нажатое — янтарным), «Контур». Текст раскладывает программа (переносит по словам, уменьшает,
 обрезает многоточием), поэтому ничего не вылезает за край кнопки, какого бы размера ни была сетка.
 
 tile(...) → SVG-строка; data_url(svg) → «data:image/svg+xml;base64,…» для Macro Deck (imageUrl из переменной).
@@ -18,9 +19,19 @@ GROUND, PANEL, RAISED, RAISED2 = "#161A22", "#1C212B", "#242A36", "#2D3442"
 TEXT, DIM, FAINT, OFF = "#E9EDF3", "#A6AFBE", "#858FA0", "#4A5160"
 ACCENT, ON_ACCENT, LIVE, ON_LIVE, OK = "#F2B54D", "#1E1606", "#FF6B5E", "#2A0B08", "#6AD3A0"
 
-# Стили страницы: tiles — плитки как в программе (нажатое залито янтарным); outline — контуром (нажатое — янтарная
+# «Стекло» (по макету владельца): плитка — тёмное стекло с переливом сверху вниз и светлой кромкой; значки и подписи
+# белые; нажатое — синяя рамка и синий свет из угла; идущий этап — синяя панель с бликом. Без SVG-фильтров
+# (размытие и тени телефон может не нарисовать) — только переливы и полупрозрачность.
+GLASS_TOP, GLASS_BOT, GLASS_FG, GLASS_DIM = "#2B313D", "#181C24", "#F4F7FB", "#9AA4B5"
+GLASS_OFF_FG, GLASS_ON, GLASS_ON_TOP, GLASS_ON_BOT = "#4E5767", "#3D8BFF", "#162036", "#1C4795"
+GLASS_ALERT_TOP, GLASS_ALERT_BOT, GLASS_ALERT_FG = "#2A1719", "#5A1E1B", "#FFE1DD"
+
+# Стили страницы: glass — «Стекло» (выше); tiles — плитки как в программе (нажатое залито янтарным); outline — контуром (нажатое — янтарная
 # рамка и значок); icons — крупные значки без плашек (нажатое — янтарный круг под значком).
 STYLES = {
+    "glass": {"ground": "#11151C", "btn": GLASS_BOT, "btn_line": "", "fg": GLASS_FG, "info": GLASS_BOT,
+              "info_line": "", "on": GLASS_ON, "on_fg": GLASS_FG, "alert": LIVE, "alert_fg": GLASS_ALERT_FG,
+              "off_fg": GLASS_OFF_FG, "off": GLASS_BOT, "shape": "glass", "radius": 16, "label": 14.5, "icon": 42},
     "tiles": {"ground": GROUND, "btn": RAISED, "btn_line": RAISED2, "fg": TEXT, "info": PANEL, "info_line": RAISED2,
               "on": ACCENT, "on_fg": ON_ACCENT, "alert": LIVE, "alert_fg": ON_LIVE, "off_fg": OFF, "off": PANEL,
               "shape": "fill", "radius": 14, "label": 15, "icon": 34},
@@ -31,7 +42,7 @@ STYLES = {
               "on": ACCENT, "on_fg": ON_ACCENT, "alert": LIVE, "alert_fg": ON_LIVE, "off_fg": OFF, "off": GROUND,
               "shape": "dot", "radius": 50, "label": 12.5, "icon": 40},
 }
-DEFAULT_STYLE = "tiles"
+DEFAULT_STYLE = "glass"
 
 
 def _st(style: str) -> dict:
@@ -58,6 +69,8 @@ ICONS = {
     "timer": '<circle cx="12" cy="13.5" r="7.5"/><path d="M12 9.5v4l2.6 1.8M9.5 2.8h5M12 2.8v3.2M18.6 6.4l1.4-1.4"/>',
     "task": '<rect x="5" y="4.5" width="14" height="16" rx="2.5"/><path d="M9 4.5V3.2h6v1.3M8.5 10h7M8.5 13.5h7M8.5 17h4"/>',
     "mic-off": '<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3M4 4l16 16"/>',
+    "cap": '<path d="M2.5 9.5L12 5l9.5 4.5L12 14z"/><path d="M6.5 11.6v4.2c0 1.5 2.5 2.7 5.5 2.7s5.5-1.2 5.5-2.7v-4.2"/>'
+           '<path d="M21.5 9.5v5.5"/><circle cx="21.5" cy="16.3" r="1" fill="currentColor"/>',
 }
 
 
@@ -159,11 +172,65 @@ def _plate(w: float, h: float, fill: str, line: str = "", rx: float = 14, lw: fl
             f'fill="{fill}"{stroke}/>')
 
 
-def _icon(name: str, cx: float, cy: float, size: float, color: str) -> str:
+def _icon(name: str, cx: float, cy: float, size: float, color: str, sw: float = 1.8) -> str:
     k = size / 24
     return (f'<g transform="translate({cx - size / 2:.1f} {cy - size / 2:.1f}) scale({k:.3f})" fill="none" '
-            f'stroke="{color}" color="{color}" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">'
+            f'stroke="{color}" color="{color}" stroke-width="{sw}" stroke-linecap="round" stroke-linejoin="round">'
             f'{ICONS[name]}</g>')
+
+
+# ---------------------------------------------------------------- «Стекло»
+def _grad(gid: str, stops: list[tuple[float, str, float]], x2: float = 0, y2: float = 1, x1: float = 0,
+          y1: float = 0) -> str:
+    st = "".join(f'<stop offset="{o}" stop-color="{c}"' + (f' stop-opacity="{a}"' if a < 1 else "") + "/>"
+                 for o, c, a in stops)
+    return f'<linearGradient id="{gid}" x1="{x1}" y1="{y1}" x2="{x2}" y2="{y2}">{st}</linearGradient>'
+
+
+def _glass(w: float, h: float, mode: str = "", rx: float = 16) -> str:
+    """Плашка «Стекла»: mode "" — обычная, "on" — нажата (синяя рамка, синий свет из нижнего левого угла),
+    "alert" — красная, "off" — погашена, "panel" — синяя панель идущего этапа (с бликом справа снизу)."""
+    o = 1.2
+    box = f'x="{o}" y="{o}" width="{w - 2 * o:.1f}" height="{h - 2 * o:.1f}" rx="{rx}"'
+    defs = [_grad("sheen", [(0, "#FFFFFF", 0.07), (0.55, "#FFFFFF", 0.0)])]
+    if mode in ("on", "panel"):                           # кнопка — свет из нижнего левого угла, панель — справа
+        a = (1, 0, 0, 1) if mode == "on" else (0, 0, 1, 1)
+        defs.append(_grad("fill", [(0, GLASS_ON_TOP, 1), (1, GLASS_ON_BOT, 1)], x1=a[0], y1=a[1], x2=a[2], y2=a[3]))
+        defs.append(f'<radialGradient id="glow" cx="{0.08 if mode == "on" else 0.92}" cy="1" r="0.95"><stop offset="0" stop-color="{GLASS_ON}" '
+                    f'stop-opacity="0.55"/><stop offset="1" stop-color="{GLASS_ON}" stop-opacity="0"/></radialGradient>')
+        line, lw = GLASS_ON, 2.0 if mode == "on" else 1.5
+    elif mode == "alert":
+        defs.append(_grad("fill", [(0, GLASS_ALERT_TOP, 1), (1, GLASS_ALERT_BOT, 1)]))
+        line, lw = LIVE, 2.0
+    else:
+        top, bot = (GLASS_TOP, GLASS_BOT) if mode != "off" else ("#20252F", "#15181F")
+        defs.append(_grad("fill", [(0, top, 1), (1, bot, 1)]))
+        defs.append(_grad("edge", [(0, "#FFFFFF", 0.20 if mode != "off" else 0.10), (0.45, "#FFFFFF", 0.05),
+                                   (1, "#FFFFFF", 0.09 if mode != "off" else 0.04)]))
+        line, lw = "url(#edge)", 1.2
+    if mode == "panel":
+        defs.append(_grad("swoosh", [(0, GLASS_ON, 0), (1, "#4F9BFF", 0.55)], x2=1, y2=0))
+        defs.append(_grad("swline", [(0, "#8FC2FF", 0), (1, "#BFDCFF", 0.95)], x2=1, y2=0))
+    parts = [f'<defs>{"".join(defs)}</defs>', f'<rect {box} fill="url(#fill)"/>']
+    if mode == "panel":                                   # блик: светлая дуга и свет под ней в правом нижнем углу
+        x0, y1 = w * 0.52, h * 0.38
+        curve = f"M{x0:.1f} {h - o:.1f}Q{w * 0.86:.1f} {h * 0.97:.1f} {w - o:.1f} {y1:.1f}"
+        parts.append(f'<path d="{curve}L{w - o:.1f} {h - o - rx:.1f}A{rx} {rx} 0 0 1 {w - o - rx:.1f} {h - o:.1f}Z" '
+                     f'fill="url(#swoosh)"/>')
+        parts.append(f'<path d="{curve}" fill="none" stroke="url(#swline)" stroke-width="1.4"/>')
+    if mode in ("on", "panel"):
+        parts.append(f'<rect {box} fill="url(#glow)"/>')
+    parts.append(f'<rect {box} fill="url(#sheen)"/>')
+    parts.append(f'<rect {box} fill="none" stroke="{line}" stroke-width="{lw}"/>')
+    if mode == "on":                                      # мягкий свет вдоль рамки внутрь
+        i = o + 2.6
+        parts.append(f'<rect x="{i:.1f}" y="{i:.1f}" width="{w - 2 * i:.1f}" height="{h - 2 * i:.1f}" '
+                     f'rx="{rx - 1.6:.1f}" fill="none" stroke="{GLASS_ON}" stroke-opacity="0.28" stroke-width="3"/>')
+    return "".join(parts)
+
+
+def _glass_fg(mode: str) -> str:
+    return {"alert": GLASS_ALERT_FG, "off": GLASS_OFF_FG}.get(mode, GLASS_FG)
 
 
 def width_of(cells: int) -> float:
@@ -192,6 +259,8 @@ def button(icon: str, label: str, mode: str = "", sub: str = "", cells: int = 1,
     недоступна, "alert" — красная (выключен звук / микрофон). sub — вторая строка мельче (номер слайда)."""
     S = _st(style)
     w, h = width_of(cells), 100.0
+    if S["shape"] == "glass":
+        return _glass_button(icon, label, mode, sub, w, h, S)
     fill, fg, line, lw = _look(mode, S)
     parts = [_plate(w, h, fill, line, S["radius"] if S["shape"] != "dot" else 14, lw)]
     isz = S["icon"]
@@ -211,14 +280,32 @@ def button(icon: str, label: str, mode: str = "", sub: str = "", cells: int = 1,
     return _svg(w, h, "".join(parts))
 
 
+def _glass_button(icon: str, label: str, mode: str, sub: str, w: float, h: float, S: dict) -> str:
+    fg = _glass_fg(mode)
+    parts = [_glass(w, h, mode, S["radius"])]
+    if label:
+        parts.append(_icon(icon, w / 2, 39 if not sub else 33, S["icon"] if not sub else S["icon"] - 4, fg, 1.5))
+        lines, size = fit(label, w - 14, S["label"], lines=1, min_size=10)
+        parts.append(_text(lines, w / 2, 80 if not sub else 69, size, fg, weight=400))
+        if sub:
+            sl, ss = fit(sub, w - 14, 12, lines=1, min_size=9)
+            parts.append(_text(sl, w / 2, 87, ss, GLASS_DIM if mode != "on" else "#C9DCFF", weight=500))
+    else:
+        parts.append(_icon(icon, w / 2, h / 2, S["icon"] + 12, fg, 1.4))
+    return _svg(w, h, "".join(parts))
+
+
 def time_color(warn: bool, style: str = DEFAULT_STYLE) -> str:
-    """Цвет крупного времени этапа: последняя минута — красным; «Контур» — янтарным."""
-    return LIVE if warn else (ACCENT if _st(style)["shape"] == "line" else TEXT)
+    """Цвет крупного времени этапа: последняя минута — красным; «Контур» — янтарным; «Стекло» — белым."""
+    S = _st(style)
+    return LIVE if warn else (ACCENT if S["shape"] == "line" else GLASS_FG if S["shape"] == "glass" else TEXT)
 
 
 def timer_color(style: str = DEFAULT_STYLE) -> str:
     """Цвет отсчёта на кнопке «Перерыв» (она нажата)."""
     S = _st(style)
+    if S["shape"] == "glass":
+        return GLASS_FG
     return S["on"] if S["shape"] == "dot" else _look("on", S)[1]
 
 
@@ -227,6 +314,12 @@ def timer(label: str, cells: int = 1, style: str = DEFAULT_STYLE, draw_text: boo
     пустой: отсчёт пишет Macro Deck подписью."""
     S = _st(style)
     w, h = width_of(cells), 100.0
+    if S["shape"] == "glass":
+        parts = [_glass(w, h, "on", S["radius"]), _icon(icon, w / 2, 30, 26, GLASS_FG, 1.6)]
+        if draw_text:
+            lines, size = fit(label, w - 12, 30, lines=1, min_size=16)
+            parts.append(_text(lines, w / 2, 70, size, GLASS_FG, weight=600))
+        return _svg(w, h, "".join(parts))
     fill, fg, line, lw = _look("on", S)
     parts = [_plate(w, h, fill, line, S["radius"] if S["shape"] != "dot" else 14, lw)]
     if S["shape"] == "dot":
@@ -245,6 +338,14 @@ def stage(name: str, cells: int = 2, align: str = "left", style: str = DEFAULT_S
     """Прошедший или следующий этап: название бледнее, до трёх строк; без слов «предыдущий / следующий»."""
     S = _st(style)
     w, h = width_of(cells), 100.0
+    if S["shape"] == "glass":                             # прошедший — бледнее, следующий — ярче
+        parts = [_glass(w, h, "", S["radius"])]
+        if name:
+            lines, size = fit(name, w - 36, 17, lines=3, min_size=11)
+            x, anchor = (18, "start") if align == "left" else (w - 18, "end")
+            color = GLASS_DIM if align == "left" else "#E3E8F0"
+            parts.append(_text(lines, x, h / 2, size, color, weight=500, anchor=anchor))
+        return _svg(w, h, "".join(parts))
     parts = [_plate(w, h, S["info"], S["info_line"], S["radius"] if S["shape"] != "dot" else 14)]
     if name:
         lines, size = fit(name, w - 28, 15, lines=3, min_size=11)
@@ -260,6 +361,8 @@ def now(name: str, left: str, frac: float = 0.0, warn: bool = False, sub: str = 
     Macro Deck подписью (картинку он не меняет каждую секунду, подпись — меняет)."""
     S = _st(style)
     w, h = width_of(cells), 100.0
+    if S["shape"] == "glass":
+        return _glass_now(name, left, frac, warn, sub, w, h, S, draw_left)
     parts = [_plate(w, h, S["info"], S["info_line"] or (S["btn_line"] if S["shape"] == "line" else ""),
                     S["radius"] if S["shape"] != "dot" else 14)]
     if left:
@@ -279,6 +382,34 @@ def now(name: str, left: str, frac: float = 0.0, warn: bool = False, sub: str = 
     else:
         lines, size = fit(name, w - 32, 18, lines=3, min_size=12)
         parts.append(_text(lines, w / 2, h / 2, size, TEXT, weight=600))
+    return _svg(w, h, "".join(parts))
+
+
+def _glass_now(name: str, left: str, frac: float, warn: bool, sub: str, w: float, h: float, S: dict,
+               draw_left: bool) -> str:
+    """«Стекло»: синяя панель. Этап идёт — название сверху, время крупно (обычно его пишет Macro Deck), полоса хода.
+    Урок не идёт — шапочка, черта и название урока слева, до трёх строк (как на макете)."""
+    parts = [_glass(w, h, "panel", S["radius"])]
+    if left:
+        nl, ns = fit(name, w - 40, 14, lines=1, min_size=10.5)
+        parts.append(_text(nl, w / 2, 20, ns, "#C6D6F2", weight=500))
+        if draw_left:
+            tl, ts = fit(left, w - 40, 46, lines=1, min_size=26)
+            parts.append(_text(tl, w / 2, 55, ts, LIVE if warn else GLASS_FG, weight=600))
+        if sub:
+            sl, ss = fit(sub, w - 40, 11, lines=1, min_size=9)
+            parts.append(_text(sl, w / 2, 79, ss, "#AFC3E6", weight=500))
+        bw = w - 48
+        f = max(0.0, min(1.0, frac))
+        parts.append(f'<rect x="24" y="88" width="{bw:.1f}" height="4" rx="2" fill="#FFFFFF" fill-opacity="0.14"/>')
+        if f > 0:
+            parts.append(f'<rect x="24" y="88" width="{bw * f:.1f}" height="4" rx="2" '
+                         f'fill="{LIVE if warn else "#7DB4FF"}"/>')
+    else:
+        parts.append(_icon("cap", 46, h / 2, 40, GLASS_FG, 1.5))
+        parts.append(f'<rect x="86" y="24" width="1.2" height="52" fill="#FFFFFF" fill-opacity="0.28"/>')
+        lines, size = fit(name, w - 102 - 14, 17, lines=3, min_size=11)
+        parts.append(_text(lines, 102, h / 2, size, GLASS_FG, weight=500, anchor="start"))
     return _svg(w, h, "".join(parts))
 
 

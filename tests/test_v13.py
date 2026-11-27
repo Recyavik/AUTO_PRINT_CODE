@@ -671,11 +671,44 @@ class MacroDeckPageTest(unittest.TestCase):
         self.assertTrue(lines[0].endswith("…"))
         self.assertLessEqual(a.text_w(lines[0], size), 100.5)
 
-    def test_both_styles_differ(self):
+    def test_styles_differ(self):
+        from autoprint import deckart as a
         from autoprint import macrodeck as md
         st = {"screen": "black"}
-        self.assertNotEqual(md.images(st, "tiles")["black"], md.images(st, "outline")["black"])
-        self.assertEqual(md.images(st, "nonsense")["black"], md.images(st, "tiles")["black"])
+        looks = {style: md.images(st, style)["black"] for style in md.STYLES}
+        self.assertEqual(set(md.STYLES), {"glass", "tiles", "outline"})
+        self.assertEqual(len(set(looks.values())), 3)
+        self.assertEqual(md.images(st, "nonsense")["black"], md.images(st, a.DEFAULT_STYLE)["black"])
+
+    def test_glass_style(self):
+        """«Стекло» (по макету владельца): тёмное стекло с переливом, белые значки, нажатое — синей рамкой
+        и синим светом; идущий этап — синей панелью; урок не идёт — шапочка и название урока слева."""
+        from autoprint import deckart as a
+        from autoprint import macrodeck as md
+        from autoprint.settings_spec import FIELDS
+        from autoprint.storage import Settings
+        self.assertEqual(a.DEFAULT_STYLE, "glass")
+        self.assertEqual(Settings().deck_style, "glass")                 # новый человек — сразу «Стекло»
+        self.assertIn("glass", FIELDS["deck_style"][1])
+        st = {"phase": "live", "prev": "Опрос", "now": "Тренажёры", "left": "12:40", "left_s": 760, "frac": 0.4,
+              "next": "Разбор множеств", "screen": "idle", "mic_muted": True, "slides": True}
+        img = md.images(st, "glass")
+        self.assertIn("linearGradient", img["black"])                     # стекло — переливом
+        self.assertIn(a.GLASS_FG, img["black"])                           # значок и подпись — белые
+        self.assertNotIn(a.GLASS_ON, img["black"])
+        self.assertIn(a.GLASS_ON, img["bg"])                              # у учеников фон — синим
+        self.assertIn(a.LIVE, img["mic"])                                 # микрофон выключен — красным
+        self.assertIn(a.GLASS_OFF_FG, img["prev_s"])                      # слайда нет — стрелки погашены
+        self.assertIn(a.GLASS_ON, img["now"])                             # идущий этап — синей панелью
+        self.assertNotIn(a.ICONS["cap"], img["now"])
+        for k, svg in img.items():
+            self.assertNotIn("<filter", svg, k)                           # без фильтров: телефон рисует не всё
+            self.assertNotIn("12:40", svg, k)                             # время — подписью Macro Deck
+        self.assertEqual(md.page(st, "glass")["now"]["labelColor"], a.GLASS_FG)
+        idle = md.images({"now": "ФУ 1.6 · Занятие 6 — практика: журнал, настройки и чёрный список"}, "glass")
+        self.assertIn(a.ICONS["cap"], idle["now"])                        # урок не идёт — шапочка
+        self.assertIn('text-anchor="start"', idle["now"])                 # и название слева от неё
+        self.assertNotIn("Предыдущий", img["prev"] + img["next"])         # без слов «предыдущий / следующий»
 
     def test_every_template_variable_is_declared(self):
         """Каждая {{ vars.… }} в кнопках — среди переменных, которые программа создаёт и шлёт."""
@@ -839,7 +872,7 @@ class MacroDeckConnectTest(unittest.TestCase):
                        for batch in self.fake.applied[since:] for c in batch)
 
         self.win.lesson.command({"cmd": "black"})
-        self.assertTrue(wait(lambda: updated("black", lambda d: deckart.ACCENT in svg_of(d["imageUrl"]))))
+        self.assertTrue(wait(lambda: updated("black", lambda d: deckart.GLASS_ON in svg_of(d["imageUrl"]))))   # «Стекло»: синим
         n0 = len(self.fake.applied)
         self.win.commands.call({"cmd": "set", "key": "deck_style", "value": "outline"})     # другой вид — сразу
         self.assertTrue(wait(lambda: updated("bg", since=n0)))
@@ -1058,7 +1091,7 @@ class TimerTest(unittest.TestCase):
         self.assertEqual(pg["task"]["label"], "")
         self.assertIn("api/timer?key=K", json.dumps(pg["timer"]["flows"]))
         self.assertEqual(md.values(st)["apc_timer_left"], "02:41")
-        img = md.images({"screen": "idle", "has_task": False})
+        img = md.images({"screen": "idle", "has_task": False}, "tiles")
         from autoprint import deckart
         self.assertIn(deckart.OFF, img["task"])                         # заданий в уроке нет — погашено
 

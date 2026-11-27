@@ -7,7 +7,7 @@
     ◀ ▶; ещё ниже Подготовка, Звук, Микрофон. Кнопки шлют команды пульту программы (/api/<команда>?key=…).
     Повторно — только свои кнопки (помечены "apc") заново; кнопки, которые человек добавил сам, не трогаем. После
     сборки телефоны переключаются на этот профиль.
-  • Каждая кнопка — картинка (deckart: стиль «Плитки» или «Контур», текст раскладывает программа). values() →
+  • Каждая кнопка — картинка (deckart: «Стекло», «Плитки» или «Контур», текст раскладывает программа). values() →
     переменные apc_img_* (картинки) и apc_* (текст — для своих кнопок); Sync шлёт изменившиеся в своём потоке
     (действие «Задать переменную»): нажатая кнопка подсвечена, время идёт.
 """
@@ -32,7 +32,7 @@ FOLDER_NAME = "Урок"
 COLS, ROWS = 7, 3
 PREFIX = "apc_"
 MARK = "apc"                    # пометка в данных кнопки: её собрала программа (пересборка заменяет только такие)
-STYLES = ("tiles", "outline")   # «Плитки», «Контур»
+STYLES = ("glass", "tiles", "outline")   # «Стекло», «Плитки», «Контур»
 LAYOUT = 3                      # устройство страницы: сменили (кнопки, данные) — программа пересоберёт её сама
 
 # кнопки: ключ → (x, y, команда пульта, значок, подпись)
@@ -180,7 +180,7 @@ def _cmd_url(base: str, cmd: str) -> str:
     return f"{root}{cmd}" + ("?" + q if q else "")
 
 
-def page(st: dict, style: str = "tiles", base: str = "") -> dict[str, dict]:
+def page(st: dict, style: str = "glass", base: str = "") -> dict[str, dict]:
     """Данные каждой кнопки страницы целиком (Macro Deck заменяет данные кнопки целиком): картинка нынешнего вида
     (подсветка, этапы) и, у кнопок, команда пульта. Время этапа и отсчёт перерыва — подписью из переменной (её
     Macro Deck обновляет сам каждую секунду), в пустой середине картинки."""
@@ -208,7 +208,7 @@ def page(st: dict, style: str = "tiles", base: str = "") -> dict[str, dict]:
     return out
 
 
-def layout(base: str, st: dict | None = None, style: str = "tiles") -> list[dict]:
+def layout(base: str, st: dict | None = None, style: str = "glass") -> list[dict]:
     """Кнопки страницы (без folderId) в нынешнем виде. base — «http://127.0.0.1:8791/api/?key=…»."""
     out = []
     for cid, data in page(st or {}, style, base).items():
@@ -222,7 +222,7 @@ def variables() -> list[tuple[str, str, str]]:
     return [(PREFIX + k, "text", "") for k in TEXT_VARS]
 
 
-def images(st: dict, style: str = "tiles") -> dict[str, str]:
+def images(st: dict, style: str = "glass") -> dict[str, str]:
     """Состояние пульта (DeckControl.state()) → картинки кнопок (SVG) по ключам IMAGE_KEYS. Время этапа и отсчёт
     перерыва на картинке не рисуются (их пишет Macro Deck подписью) — ход этапа полосой, с шагом 5 %."""
     style = style if style in deckart.STYLES else deckart.DEFAULT_STYLE
@@ -267,7 +267,7 @@ def images(st: dict, style: str = "tiles") -> dict[str, str]:
     return out
 
 
-def values(st: dict, style: str = "tiles") -> dict[str, str]:
+def values(st: dict, style: str = "glass") -> dict[str, str]:
     """Состояние пульта → текстовые переменные страницы (время, отсчёт перерыва, этапы — и для своих кнопок)."""
     v = {PREFIX + k: str(st.get(k) or "") for k in ("prev", "now", "left", "next")}
     v[PREFIX + "stage"] = str(st.get("stage_text") or "")
@@ -285,7 +285,7 @@ def _home_folder(client: Client, pid: str) -> dict | None:
 
 
 def setup(client: Client, base: str, profile_id: str = "", dry: bool = False, st: dict | None = None,
-          style: str = "tiles") -> dict:
+          style: str = "glass") -> dict:
     """Собрать страницу: профиль (свой — по id, иначе по имени, иначе новый), на его главной странице — свои
     кнопки заново в нынешнем виде (чужие не трогаем), переменные (недостающие — создать); телефоны — на этот
     профиль. → {"profile": id, "folder": id, "widgets": {ключ: id кнопки}, "created": n}."""

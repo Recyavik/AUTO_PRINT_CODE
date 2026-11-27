@@ -320,7 +320,7 @@ class DeckControl(QObject):
             self.md_sync = None
 
     def _style(self) -> str:
-        return getattr(self.app.settings, "deck_style", "tiles") or "tiles"
+        return getattr(self.app.settings, "deck_style", "glass") or "glass"
 
     def md_info(self) -> dict:
         sync = self.md_sync
