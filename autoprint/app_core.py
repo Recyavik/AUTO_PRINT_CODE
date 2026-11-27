@@ -140,6 +140,8 @@ class App(QObject):
         self.window.geometry_changed.connect(self._on_window_places)
         from .app_cmd import AppCommands
         self.commands = AppCommands(self)   # команды страницы окна (/app/cmd, /app/call)
+        from .ui.deck_control import DeckControl
+        self.deck = DeckControl(self)       # пульт: Macro Deck, Stream Deck (/api/…) и файлы для кнопок
         self._pub_timer = QTimer(self, singleShot=True, interval=150, timeout=self.publish_now)
         self.changed.connect(self._schedule_publish)
         self.navigate.connect(self._on_navigate)
@@ -275,6 +277,9 @@ class App(QObject):
             if not system.set_autostart(s.autostart):
                 s.autostart = system.autostart_enabled()   # переключатель — как на самом деле
                 self._notify("Не удалось изменить автозапуск (нет доступа к реестру).", warn=True)
+            return
+        if key == "deck_on":
+            self.deck.apply()
             return
         if key in ("close_to_tray", "samples_seen"):
             return
@@ -1130,6 +1135,7 @@ class App(QObject):
         self.window.stop()              # окно закрывается и сообщает последние места на экране — до записи сессии
         self._save_session()
         self.lesson.shutdown()
+        self.deck.shutdown()
         self.efir.shutdown()
         self.engine.stop()
         self._save_timer.stop()

@@ -239,6 +239,13 @@ class Settings:
     exercise_last: str = ""            # название прошлого показанного видео зарядки — «по очереди» продолжает с него
     exercise_start: str = "click"      # 1.2.4: click — видео встаёт на первый кадр и ждёт щелчка по вкладке учеников
                                        # (звук всегда есть; щелчок по идущей — пауза), auto — начинается сразу
+    deck_on: bool = False              # 1.3: пульт — команды /api/<команда>?key=… (Macro Deck, Stream Deck) и файлы
+                                       # deck\*.txt со временем и этапами для кнопок
+    deck_key: str = ""                 # 1.3: ключ пульта (появляется при включении; «Новый ключ» — старые ссылки не работают)
+    deck_prepare: list = field(default_factory=list)   # 1.3: «Подготовка» — какие вкладки открыть (адреса http(s))
+    deck_prepare_screen: bool = True   # 1.3: «Подготовка» открывает и вкладку экрана учеников
+    md_token: str = ""                 # 1.3: ключ Macro Deck (Настройки → AI clients) — зашифрован Windows, «dpapi:…»
+    md_profile: str = ""               # 1.3: профиль «AutoPrintCode», который программа собрала в Macro Deck
     start_timer: bool = False          # до 1.0: «Начать урок» открывал мини-таймер (migrations v1 → start_compact)
     start_compact: bool = False        # 1.0: «Начать урок» — окно в маленький режим поверх всех
     start_screen: bool = False         # «Начать урок» открывает экран учеников (вкладку)

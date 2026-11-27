@@ -15,6 +15,7 @@ const P = {
   cup: '<path d="M4.5 9h12v5a5 5 0 0 1-5 5h-2a5 5 0 0 1-5-5z"/><path d="M16.5 10.5h1.3a2.3 2.3 0 0 1 0 4.6h-1.3"/><path d="M8.5 3.5v2.5M12.5 3.5v2.5"/>',
   slide: '<rect x="3" y="4.5" width="18" height="13" rx="2.5"/><path d="M10.5 8.5v5l4-2.5z"/><path d="M9 21h6"/>',
   monitor: '<rect x="2.5" y="4" width="19" height="13" rx="2.2"/><path d="M8 20.5h8M12 17v3.5"/>',
+  deck: '<rect x="2.5" y="5.5" width="19" height="13" rx="2.5"/><path d="M6.5 9.5h3M10.5 9.5h3M14.5 9.5h3M6.5 12h3M10.5 12h3M14.5 12h3M6.5 14.5h3"/>',
   blackout: '<rect x="3" y="4.5" width="18" height="15" rx="2.5"/><rect x="6.5" y="8" width="11" height="8" rx="1" fill="currentColor" stroke="none"/>',
   stop: '<rect x="6.5" y="6.5" width="11" height="11" rx="2"/>',
   play: '<path d="M7 4.5v15l12-7.5z"/>',

@@ -1,0 +1,796 @@
+"""1.3 — пульт: управление уроком снаружи (Macro Deck, Stream Deck, curl) — GET/POST /api/<команда>?key=…
+и файлы со временем и этапами для кнопок. Без окон на экране.
+
+    python tests/test_v13.py
+"""
+from __future__ import annotations
+
+import json
+import sys
+import threading
+import unittest
+import urllib.error
+import urllib.request
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+import quiet  # noqa: E402,F401  — до PySide6: offscreen, своя папка данных
+
+from test_v10 import pump, stage  # noqa: E402
+from test_v121 import close, videos, window  # noqa: E402
+
+from autoprint.storage import BLOCK_IMAGE, Block, Template  # noqa: E402
+
+
+class FakeEp:
+    def __init__(self, dev_id, muted=False):
+        self.id, self._m = dev_id, muted
+
+    def muted(self):
+        return self._m
+
+    def set_muted(self, on):
+        self._m = bool(on)
+
+
+class FakeAudio:
+    """Подставные устройства: настоящие звук и микрофон тесты не трогают никогда."""
+
+    def __init__(self):
+        from autoprint.audio import CAPTURE, RENDER
+        self.eps = {CAPTURE: [FakeEp("mic-usb"), FakeEp("broadcast"), FakeEp("spare", muted=True)],
+                    RENDER: [FakeEp("speakers"), FakeEp("tv")]}
+        self.defaults = {CAPTURE: {"broadcast"}, RENDER: {"speakers"}}
+
+    def endpoints(self, flow):
+        return list(self.eps[flow])
+
+    def default_ids(self, flow):
+        return set(self.defaults[flow])
+
+    def state(self, flow):
+        return {e.id: e.muted() for e in self.eps[flow]}
+
+
+def deck_lesson() -> Template:
+    t = Template("Урок пульта", [
+        stage("Зарядка для глаз", 5, id="d1", stage_kind="exercise"),
+        stage("Тренажёры", 10, id="d2"),
+        Block(BLOCK_IMAGE, "s1.png", id="i1", slide=1), Block(BLOCK_IMAGE, "s2.png", id="i2", slide=2),
+        Block(BLOCK_IMAGE, "s3.png", id="i3", slide=3),
+        stage("Перерыв", 7, id="d3", stage_kind="break"),
+        stage("Итоги первой части", 5, id="d4"),
+    ], id="D")
+    return t
+
+
+class DeckTest(unittest.TestCase):
+    port = 18950
+
+    def setUp(self):
+        from autoprint.efir.model import Look
+        self.win = window([deck_lesson()], self.port)
+        self.look = Look(title="Пульт", background="color:#123456", exercises=videos("Глаза 1", "Глаза 2"))
+        self.win.efir.save_look(self.look)
+        self.win.store.get("D").look = self.look.id
+        self.win.printer.set_focus("D")
+        self.win.settings.exercise_pick = "next"
+        self.win.settings.deck_on = True
+        self.win.deck.apply()
+        self.key = self.win.deck.ensure_key()
+        from autoprint.audio import Mute
+        self.fake = FakeAudio()
+        self.win.deck.audio = Mute(self.fake)       # настоящие звук и микрофон не трогаем
+
+    def tearDown(self):
+        if self.win.efir.live_webinar() is not None:
+            self.win.efir.stop_live()
+        close(self.win)
+
+    # ---------------------------------------------------------------- запрос как от Macro Deck
+    def api(self, cmd: str, key: str | None = None, method: str = "GET", headers: dict | None = None,
+            query: str = "", host: str = "") -> tuple[int, dict]:
+        """Запрос в потоке (сервер ждёт поток интерфейса — его крутим здесь)."""
+        k = self.key if key is None else key
+        qs = "&".join(x for x in ((f"key={k}" if k else ""), query) if x)
+        url = f"http://127.0.0.1:{self.win.efir.server.port}/api/{cmd}" + ("?" + qs if qs else "")
+        h = dict(headers or {})
+        if host:
+            h["Host"] = host
+        req = urllib.request.Request(url, data=b"" if method == "POST" else None, method=method, headers=h)
+        out: dict = {}
+
+        def go():
+            try:
+                with urllib.request.urlopen(req, timeout=5) as r:
+                    out["r"] = (r.status, json.loads(r.read().decode("utf-8")))
+            except urllib.error.HTTPError as e:
+                body = e.read().decode("utf-8") or "{}"
+                e.close()
+                out["r"] = (e.code, json.loads(body) if body.startswith("{") else {})
+
+        th = threading.Thread(target=go)
+        th.start()
+        while th.is_alive():
+            pump(10)
+        return out["r"]
+
+    def ok(self, cmd: str, **kw) -> dict:
+        code, st = self.api(cmd, **kw)
+        self.assertEqual(code, 200, st)
+        self.assertTrue(st.get("ok"), st)
+        return st
+
+    def start_at(self, index: int):
+        self.win.lesson.command({"cmd": "start", "force": True})
+        self.win.lesson.command({"cmd": "start_at", "index": index})
+
+    # ---------------------------------------------------------------- доступ
+    def test_off_by_default(self):
+        from autoprint.storage import Settings
+        self.assertFalse(Settings().deck_on)
+        self.win.settings.deck_on = False
+        code, st = self.api("state")
+        self.assertEqual(code, 403)
+        self.assertIn("Пульт", st.get("error", ""))
+
+    def test_key_required(self):
+        self.assertEqual(self.api("black", key="")[0], 403)
+        self.assertEqual(self.api("black", key="wrong-key")[0], 403)
+        self.assertEqual(self.win.efir.mode, "idle")          # без ключа ничего не нажалось
+        self.ok("state", key="", headers={"X-AutoPrint-Key": self.key})
+        self.ok("state", method="POST")
+
+    def test_foreign_host_refused(self):
+        """Чужой сайт под своим именем на 127.0.0.1 (DNS-подмена) — не нажмёт, даже зная адрес."""
+        self.assertEqual(self.api("black", host="evil.example")[0], 403)
+        self.assertEqual(self.win.efir.mode, "idle")
+
+    def test_unknown_command(self):
+        code, st = self.api("format_disk")
+        self.assertEqual(code, 404)
+        self.assertFalse(st.get("ok"))
+
+    def test_head_does_not_press(self):
+        """HEAD (проверка «жив ли адрес») ничего не нажимает."""
+        self.assertEqual(self.api("black", method="HEAD")[0], 405)
+        self.assertEqual(self.win.efir.mode, "idle")
+
+    def test_rejected_body_does_not_press(self):
+        """POST со слишком большим телом — отказ, кнопка не нажата."""
+        from autoprint.efir.server import BODY_LIMIT
+        url = f"http://127.0.0.1:{self.win.efir.server.port}/api/black?key={self.key}"
+        req = urllib.request.Request(url, data=b"x" * (BODY_LIMIT + 10), method="POST")
+        out = {}
+
+        def go():
+            try:
+                with urllib.request.urlopen(req, timeout=10) as r:
+                    out["code"] = r.status
+            except urllib.error.HTTPError as e:
+                out["code"] = e.code
+                e.close()
+            except OSError as e:
+                out["code"] = repr(e)
+
+        th = threading.Thread(target=go)
+        th.start()
+        while th.is_alive():
+            pump(10)
+        self.assertEqual(out["code"], 413)
+        pump(50)
+        self.assertEqual(self.win.efir.mode, "idle")
+
+    def test_busy_program_does_not_press_twice(self):
+        """Программа не ответила вовремя (поток окна занят) — «нажмите ещё раз», и запоздалое нажатие не
+        выполняется: иначе повтор переключил бы «Чёрный» дважды."""
+        from autoprint.ui import deck_control
+        old = deck_control.CALL_TIMEOUT_S
+        deck_control.CALL_TIMEOUT_S = 0.2
+        try:
+            out = {}
+            th = threading.Thread(target=lambda: out.update(r=self.win.deck._from_server("black", {}, self.key)))
+            th.start()
+            th.join(5)                                     # окно не крутим — программа «занята»
+            self.assertEqual(out["r"][0], 503)
+            self.assertTrue(out["r"][1].get("retry"))
+            pump(100)
+            self.assertEqual(self.win.efir.mode, "idle")
+        finally:
+            deck_control.CALL_TIMEOUT_S = old
+
+    def test_port_moved_shown(self):
+        """8791 был занят — сервер на другом порту: в настройках об этом сказано (ссылки до перезапуска)."""
+        srv = self.win.efir.server
+        self.assertFalse(self.win.deck.info()["port_moved"])
+        want = srv.want_port
+        srv.want_port = srv.port - 1
+        try:
+            info = self.win.deck.info()
+            self.assertTrue(info["port_moved"])
+            self.assertIn(f":{srv.port}/api/", info["links"][0]["url"])
+        finally:
+            srv.want_port = want
+
+    def test_new_key_stops_old_links(self):
+        old = self.key
+        self.key = self.win.deck.new_key()
+        self.assertNotEqual(old, self.key)
+        self.assertEqual(self.api("state", key=old)[0], 403)
+        self.ok("state")
+
+    # ---------------------------------------------------------------- экран учеников
+    def test_black_toggles_and_background(self):
+        st = self.ok("black")
+        self.assertEqual(self.win.efir.mode, "black")
+        self.assertEqual(st["screen"], "black")
+        self.assertTrue(st["black"])
+        st = self.ok("black")                                 # ещё раз — снова фон, как значок в программе
+        self.assertEqual(self.win.efir.mode, "idle")
+        self.assertFalse(st["black"])
+        self.ok("black")
+        self.ok("background")
+        self.assertEqual(self.win.efir.mode, "idle")
+
+    def test_exercise_starts_then_pauses(self):
+        st = self.ok("exercise")
+        ef = self.win.efir
+        self.assertEqual(ef.mode, "exercise")
+        self.assertTrue(st["exercise"])
+        self.assertFalse(st["exercise_paused"])
+        self.ok("exercise")                                   # сразу второй раз (двойное нажатие) — не пауза
+        self.assertFalse(ef.ex_paused)
+        ef.ex_started -= 10
+        st = self.ok("exercise")                              # идёт — пауза
+        self.assertTrue(ef.ex_paused)
+        self.assertTrue(st["exercise_paused"])
+        self.ok("exercise")                                   # ещё раз — дальше
+        self.assertFalse(ef.ex_paused)
+        self.assertEqual(ef.mode, "exercise")
+
+    def test_exercise_ask_setting_plays_in_turn(self):
+        """«Спросить, какое видео» — на пульте меню нет: видео по очереди."""
+        self.win.settings.exercise_pick = "ask"
+        self.ok("exercise")
+        self.assertEqual(self.win.efir.mode, "exercise")
+
+    def test_break_by_plan_during_break_stage(self):
+        """Идёт этап «Перерыв» на 7 минут — перерыв ученикам на все 7 минут с этой минуты; второе нажатие его не
+        начинает заново."""
+        self.start_at(2)
+        st = self.ok("break")
+        ef = self.win.efir
+        self.assertEqual(ef.mode, "break")
+        self.assertEqual(ef.brk_total, 7 * 60)
+        self.assertTrue(st["break"])
+        self.assertRegex(st["break_left"], r"^0[67]:\d\d$")
+        seq = ef.brk_seq
+        self.ok("break")
+        self.assertEqual(ef.brk_seq, seq)
+
+    def test_break_before_its_stage_uses_plan_minutes(self):
+        """Этап-перерыв ещё не наступил — перерыв всё равно его минут (как «По плану» в программе)."""
+        self.start_at(1)
+        self.ok("break")
+        self.assertEqual(self.win.efir.brk_total, 7 * 60)
+
+    def test_break_add(self):
+        self.start_at(2)
+        self.ok("break")
+        ef = self.win.efir
+        ends = ef.brk_ends
+        self.ok("break_add")
+        self.assertAlmostEqual(ef.brk_ends - ends, 300, delta=2)
+        self.ok("break_add", query="min=1")
+        self.assertAlmostEqual(ef.brk_ends - ends, 360, delta=2)
+
+    def test_break_add_odd_values(self):
+        self.start_at(2)
+        self.ok("break")
+        ef = self.win.efir
+        ends = ef.brk_ends
+        self.ok("break_add", query="min=0")               # ноль — ничего
+        self.assertAlmostEqual(ef.brk_ends, ends, delta=1)
+        self.ok("break_add", query="min=abc")             # не число — как без него, +5
+        self.assertAlmostEqual(ef.brk_ends - ends, 300, delta=2)
+        st = self.ok("break_add", query="min=1e400")      # огромное — не ошибка
+        self.assertTrue(st["break"])
+
+    def test_slide_toggle_and_arrows(self):
+        st = self.ok("slide_next")                            # слайд не показан — стрелки ничего не делают
+        self.assertEqual(self.win.efir.mode, "idle")
+        self.assertTrue(st["slides"])
+        self.assertEqual(st["slides_total"], 3)
+        st = self.ok("slide")
+        self.assertEqual(self.win.efir.mode, "slide")
+        self.assertEqual(st["slide_text"], "1 / 3")
+        st = self.ok("slide_next")
+        self.assertEqual(st["slide_text"], "2 / 3")
+        self.ok("slide_next")
+        st = self.ok("slide_next")                            # последний — дальше некуда
+        self.assertEqual(st["slide_text"], "3 / 3")
+        st = self.ok("slide_prev")
+        self.assertEqual(st["slide_text"], "2 / 3")
+        st = self.ok("slide")                                 # ещё раз «Слайд» — снова фон
+        self.assertEqual(self.win.efir.mode, "idle")
+        self.assertFalse(st["slide"])
+        self.assertEqual(st["slide_text"], "")
+        st = self.ok("slide")                                 # и снова тот же слайд, а не первый
+        self.assertEqual(st["slide_text"], "2 / 3")
+
+    def test_slide_number_is_position(self):
+        """Номера слайдов с пропусками (картинку удалили) — «2 / 3», а не «5 / 3»."""
+        t = self.win.store.get("D")
+        for b, n in zip([b for b in t.blocks if b.type == BLOCK_IMAGE], (1, 5, 9)):
+            b.slide = n
+        self.ok("slide")
+        st = self.ok("slide_next")
+        self.assertEqual(st["slide_text"], "2 / 3")
+
+    def test_no_slides_in_lesson(self):
+        t = self.win.store.get("D")
+        t.blocks = [b for b in t.blocks if b.type != BLOCK_IMAGE]
+        st = self.ok("slide")
+        self.assertEqual(self.win.efir.mode, "idle")
+        self.assertFalse(st["slides"])
+
+    # ---------------------------------------------------------------- звук и микрофон
+    def test_mic_toggle(self):
+        from autoprint.audio import CAPTURE
+        st = self.ok("state")
+        self.assertFalse(st["mic_muted"])
+        st = self.ok("mic")
+        self.assertTrue(st["mic_muted"])
+        self.assertTrue(all(self.fake.state(CAPTURE).values()))
+        st = self.ok("mic")
+        self.assertFalse(st["mic_muted"])
+        self.ok("mic_off")
+        self.ok("mic_off")                                    # «выключить» дважды — всё ещё выключено
+        self.assertTrue(self.ok("state")["mic_muted"])
+        self.assertFalse(self.ok("mic_on")["mic_muted"])
+
+    def test_sound_toggle(self):
+        from autoprint.audio import RENDER
+        st = self.ok("sound")
+        self.assertTrue(st["sound_muted"])
+        self.assertEqual(self.fake.state(RENDER), {"speakers": True, "tv": True})
+        self.assertFalse(self.ok("sound_on")["sound_muted"])
+        self.win.deck.write_files()
+        self.assertEqual(self.read("sound_muted.txt"), "false")
+        self.ok("sound_off")
+        self.win.deck.write_files()
+        self.assertEqual(self.read("sound_muted.txt"), "true")
+
+    # ---------------------------------------------------------------- подготовка
+    def test_prepare_opens_tabs(self):
+        """«Подготовка» — вкладки из настроек в браузере; вкладка учеников уже на связи — её второй раз не открывать."""
+        from autoprint import app_cmd
+        opened = []
+        old = app_cmd.open_url
+        app_cmd.open_url = lambda url: opened.append(url) or True
+        tabs = []
+        self.win.efir.open_tab = lambda: tabs.append(1)
+        try:
+            self.win.settings.deck_prepare = ["https://lms.example/course", "https://meet.example/room"]
+            self.ok("prepare")
+            self.assertEqual(opened, ["https://lms.example/course", "https://meet.example/room"])
+            self.assertEqual(tabs, [])                       # вкладка учеников уже открыта (clients = 1)
+            self.win.efir.clients = 0
+            self.ok("prepare")
+            self.assertEqual(tabs, [1])
+            self.win.settings.deck_prepare_screen = False
+            self.ok("prepare")
+            self.assertEqual(tabs, [1])
+            self.win.settings.deck_prepare = ["javascript:alert(1)", "file:///C:/Windows/win.ini"]
+            opened.clear()
+            self.ok("prepare")                               # не сайты — не открываем (на случай правки файла руками)
+            self.assertEqual(opened, [])
+        finally:
+            app_cmd.open_url = old
+            self.win.efir.clients = 1
+
+    # ---------------------------------------------------------------- этапы и время
+    def test_stages_around_current(self):
+        """Идёт «Тренажёры»: слева «Зарядка для глаз», справа «Итоги…» не сразу — следующий «Перерыв»."""
+        self.start_at(1)
+        st = self.ok("state")
+        self.assertEqual(st["phase"], "live")
+        self.assertEqual(st["prev"], "Зарядка для глаз")
+        self.assertEqual(st["now"], "Тренажёры")
+        self.assertEqual(st["next"], "Перерыв")
+        self.assertEqual((st["stage"], st["stages"]), (2, 4))
+        self.assertRegex(st["left"], r"^(09:5\d|10:00)$")
+        self.assertGreater(st["left_s"], 590)
+
+    def test_first_and_last_stage(self):
+        self.start_at(0)
+        st = self.ok("state")
+        self.assertEqual((st["prev"], st["now"], st["next"]), ("", "Зарядка для глаз", "Тренажёры"))
+        self.start_at(3)
+        st = self.ok("state")
+        self.assertEqual((st["prev"], st["now"], st["next"]), ("Перерыв", "Итоги первой части", ""))
+
+    def test_before_lesson(self):
+        """Урок не начат — в центре название урока, справа первый этап, времени нет."""
+        st = self.ok("state")
+        self.assertEqual(st["phase"], "none")
+        self.assertEqual(st["now"], "Урок пульта")
+        self.assertEqual(st["next"], "Зарядка для глаз")
+        self.assertEqual(st["left"], "")
+
+    def test_after_lesson(self):
+        from datetime import datetime, timedelta
+        self.win.lesson.command({"cmd": "start", "force": True})
+        live = self.win.efir.store.live
+        self.win.efir.store.set_live(live.webinar_id, datetime.now() - timedelta(minutes=40))
+        st = self.ok("state")
+        self.assertEqual(st["phase"], "after")
+        self.assertEqual(st["now"], "Урок закончен")
+        self.assertEqual(st["prev"], "Итоги первой части")
+        self.assertEqual(st["left"], "")
+
+    # ---------------------------------------------------------------- файлы для кнопок
+    def read(self, name: str) -> str:
+        return (self.win.deck.folder / name).read_text(encoding="utf-8")
+
+    def test_files_for_buttons(self):
+        self.start_at(1)
+        self.win.deck.write_files()
+        self.assertEqual(self.read("prev.txt"), "Зарядка для глаз")
+        self.assertEqual(self.read("now.txt"), "Тренажёры")
+        self.assertEqual(self.read("next.txt"), "Перерыв")
+        self.assertRegex(self.read("left.txt"), r"^(09:5\d|10:00)$")
+        self.assertEqual(self.read("screen.txt"), "idle")
+        self.assertEqual(self.read("black.txt"), "false")
+        raw = (self.win.deck.folder / "now.txt").read_bytes()
+        self.assertFalse(raw.startswith(b"\xef\xbb\xbf"))      # без BOM и без перевода строки — ровно текст
+        self.assertFalse(raw.endswith(b"\n"))
+        self.ok("black")
+        self.win.deck.write_files()
+        self.assertEqual(self.read("black.txt"), "true")
+        self.assertEqual(self.read("screen.txt"), "black")
+        st = json.loads(self.read("state.json"))
+        self.assertEqual(st["now"], "Тренажёры")
+
+    def test_files_follow_screen_without_waiting(self):
+        """Нажали «Чёрный» в программе — файл кнопки меняется сразу, а не через секунду."""
+        self.win.deck.write_files()
+        self.win.lesson.command({"cmd": "black"})
+        pump(50)
+        self.assertEqual(self.read("black.txt"), "true")
+
+    def test_files_neutral_when_turned_off(self):
+        """Пульт выключили — в файлах не застывшее время и не подсвеченный «Чёрный», а «выключено»."""
+        self.start_at(1)
+        self.ok("black")
+        self.win.deck.write_files()
+        self.assertEqual(self.read("black.txt"), "true")
+        self.win.settings.deck_on = False
+        self.win.deck.apply()
+        self.assertEqual(self.read("black.txt"), "false")
+        self.assertEqual(self.read("left.txt"), "")
+        self.assertEqual(self.read("screen.txt"), "off")
+        self.assertEqual(self.read("now.txt"), "Пульт выключен")
+
+    def test_no_files_when_off(self):
+        import shutil
+        shutil.rmtree(self.win.deck.folder, ignore_errors=True)
+        self.win.settings.deck_on = False
+        self.win.deck.apply()
+        self.win.deck.write_files()
+        self.assertFalse((self.win.deck.folder / "now.txt").exists())
+
+
+class MuteTest(unittest.TestCase):
+    """Выключить все микрофоны / весь звук и включить обратно — только то, что выключили сами."""
+
+    def setUp(self):
+        from autoprint.audio import Mute
+        self.fake = FakeAudio()
+        self.m = Mute(self.fake)
+
+    def test_mic_off_mutes_every_microphone(self):
+        from autoprint.audio import CAPTURE
+        self.assertFalse(self.m.muted(CAPTURE))
+        self.assertTrue(self.m.toggle(CAPTURE))
+        self.assertEqual(self.fake.state(CAPTURE), {"mic-usb": True, "broadcast": True, "spare": True})
+        self.assertTrue(self.m.muted(CAPTURE))
+
+    def test_mic_on_keeps_spare_muted(self):
+        """Запасной микрофон был выключен ещё до нас — после «включить» он так и выключен."""
+        from autoprint.audio import CAPTURE
+        self.m.toggle(CAPTURE)
+        self.assertFalse(self.m.toggle(CAPTURE))
+        self.assertEqual(self.fake.state(CAPTURE), {"mic-usb": False, "broadcast": False, "spare": True})
+
+    def test_on_after_restart_turns_on_default(self):
+        """Выключили, программу перезапустили (что выключали — забыто): «включить» — устройство по умолчанию."""
+        from autoprint.audio import CAPTURE, Mute
+        self.m.set(CAPTURE, True)
+        fresh = Mute(self.fake)
+        fresh.set(CAPTURE, False)
+        self.assertEqual(self.fake.state(CAPTURE), {"mic-usb": True, "broadcast": False, "spare": True})
+
+    def test_sound_separate_from_mic(self):
+        from autoprint.audio import CAPTURE, RENDER
+        self.m.set(RENDER, True)
+        self.assertEqual(self.fake.state(RENDER), {"speakers": True, "tv": True})
+        self.assertFalse(self.m.muted(CAPTURE))
+
+    def test_no_devices(self):
+        from autoprint.audio import CAPTURE
+        self.fake.eps[CAPTURE] = []
+        self.assertIsNone(self.m.muted(CAPTURE))
+        self.assertEqual(self.m.set(CAPTURE, True), 0)
+
+
+class CoreAudioReadTest(unittest.TestCase):
+    """Настоящие устройства Windows — только ЧИТАЕМ (выключено ли): ничего не меняем."""
+
+    def test_read_real_devices(self):
+        from autoprint.audio import CAPTURE, RENDER, CoreAudio, Mute
+        ca = CoreAudio()
+        for flow in (RENDER, CAPTURE):
+            eps = ca.endpoints(flow)
+            try:
+                for ep in eps:
+                    self.assertTrue(ep.id)
+                    self.assertIn(ep.muted(), (True, False))
+            finally:
+                for ep in eps:
+                    ep.close()
+            self.assertIsInstance(ca.default_ids(flow), set)
+            self.assertIn(Mute(ca).muted(flow), (True, False, None))
+
+
+class FakeMD:
+    """Подставной Macro Deck: что программа создаёт и какие значения шлёт (настоящий не трогаем)."""
+
+    def __init__(self, pending=0, profiles=None, folders=None, variables=None):
+        self.pending = pending
+        self.profiles = profiles or []
+        self.folders = folders or []
+        self.vars_ = variables or []
+        self.applied = []
+        self.sets = []
+        self.down = False
+
+    def items(self, entity, **kw):
+        if self.down:
+            from autoprint.macrodeck import MacroDeckError
+            raise MacroDeckError("Macro Deck не отвечает — он запущен на этом компьютере?")
+        return {"profiles": self.profiles, "folders": self.folders, "variables": self.vars_}[entity]
+
+    def apply(self, changes, dry=False):
+        from autoprint.macrodeck import MacroDeckError
+        if self.pending:
+            self.pending -= 1
+            raise MacroDeckError("An error occurred: CONFIRMATION_PENDING: Macro Deck is asking the user")
+        self.applied.append(changes)
+        return {"valid": True, "applied": True, "createdIds": {"p": "prof-1", "f": "fold-1"}, "confirmations": []}
+
+    def set_var(self, name, value):
+        if self.down:
+            from autoprint.macrodeck import MacroDeckError
+            raise MacroDeckError("Macro Deck не отвечает")
+        self.sets.append((name, value))
+
+
+class MacroDeckPageTest(unittest.TestCase):
+    """Страница «Урок» для Macro Deck: раскладка 7 × 3, кнопки — команды пульта, значения — подписи и подсветка."""
+
+    def test_layout_fits_phone_grid(self):
+        from autoprint import macrodeck as md
+        w = md.layout("http://127.0.0.1:8791/api/?key=K")
+        cells = set()
+        for x in w:
+            for dx in range(x["width"]):
+                cell = (x["positionX"] + dx, x["positionY"])
+                self.assertNotIn(cell, cells)                 # кнопки не налезают друг на друга
+                self.assertLess(cell[0], md.COLS)
+                self.assertLess(cell[1], md.ROWS)
+                cells.add(cell)
+        top = sorted((x["positionX"], x["width"], x["data"]["label"]) for x in w if x["positionY"] == 0)
+        self.assertEqual(top, [(0, 2, "{{ vars.apc_prev }}"), (2, 3, "{{ vars.apc_now }}\n{{ vars.apc_left }}"),
+                               (5, 2, "{{ vars.apc_next }}")])
+        urls = [x["data"]["flows"][0]["children"][0]["parameters"][1]["value"] for x in w if x["data"].get("flows")]
+        for c in ("background", "black", "exercise", "break", "slide", "slide_prev", "slide_next", "prepare", "sound", "mic"):
+            self.assertIn(f"http://127.0.0.1:8791/api/{c}?key=K", urls)
+        self.assertTrue(all(x["data"]["imageUrl"].startswith("data:image/svg+xml;base64,") for x in w if x["data"].get("flows")))
+
+    def test_values_highlight_what_students_see(self):
+        from autoprint import macrodeck as md
+        v = md.values({"phase": "live", "prev": "Зарядка для глаз", "now": "Тренажёры", "left": "12:40", "left_s": 760,
+                       "next": "Итоги первой части", "screen": "black", "mic_muted": True})
+        self.assertEqual((v["apc_prev"], v["apc_now"], v["apc_left"], v["apc_next"]),
+                         ("Зарядка для глаз", "Тренажёры", "12:40", "Итоги первой части"))
+        self.assertEqual(v["apc_c_black"], md.ACCENT)
+        self.assertEqual(v["apc_c_bg"], md.RAISED)
+        self.assertEqual(v["apc_c_mic"], md.LIVE)
+        self.assertEqual(v["apc_mic_label"], "Микрофон выкл.")
+        self.assertEqual(v["apc_c_prev_s"], md.PANEL)                     # слайда нет — стрелки погашены
+        self.assertEqual(v["apc_f_left"], md.TEXT)
+        v = md.values({"phase": "live", "left": "00:40", "left_s": 40, "screen": "slide", "slide": True,
+                       "slide_text": "2 / 12"})
+        self.assertEqual(v["apc_f_left"], md.LIVE)                        # последняя минута — красным
+        self.assertEqual(v["apc_slide_label"], "Слайд 2/12")
+        self.assertEqual(v["apc_c_next_s"], md.RAISED)
+        v = md.values({"screen": "break", "break_left": "08:12"})
+        self.assertEqual(v["apc_break_label"], "08:12")
+        self.assertEqual(v["apc_c_break"], md.ACCENT)
+
+    def test_every_template_variable_is_declared(self):
+        """Каждая {{ vars.… }} в кнопках — среди переменных, которые программа создаёт и шлёт."""
+        import re
+        from autoprint import macrodeck as md
+        used = set(re.findall(r"vars\.(apc_\w+)", json.dumps(md.layout("http://x/api/?key=K"))))
+        declared = {n for n, _, _ in md.variables()}
+        self.assertEqual(used - declared, set())
+        self.assertEqual(used - set(md.values({})), set())
+
+    def test_setup_new_profile(self):
+        from autoprint import macrodeck as md
+        fake = FakeMD()
+        r = md.setup(fake, "http://127.0.0.1:8791/api/?key=K")
+        self.assertEqual(r["profile"], "prof-1")
+        ch = fake.applied[0]
+        self.assertEqual(ch[0]["entity"], "profile")
+        self.assertEqual(ch[0]["data"]["name"], "AutoPrintCode")
+        self.assertEqual(sum(c["entity"] == "widget" for c in ch), 13)
+        self.assertEqual(sum(c["entity"] == "variable" for c in ch), len(md.variables()))
+
+    def test_setup_again_rebuilds_only_our_folder(self):
+        """Повторно: тот же профиль, папка «Урок» заново, чужие папки и уже созданные переменные — как есть."""
+        from autoprint import macrodeck as md
+        fake = FakeMD(profiles=[{"id": "P", "name": "AutoPrintCode"}],
+                      folders=[{"id": "F1", "name": "Урок"}, {"id": "F2", "name": "Свет"}],
+                      variables=[{"name": n} for n, _, _ in md.variables()])
+        r = md.setup(fake, "http://127.0.0.1:8791/api/?key=K", profile_id="P")
+        ch = fake.applied[0]
+        self.assertEqual(r["profile"], "P")
+        self.assertIn({"op": "delete", "entity": "folder", "id": "F1"}, ch)
+        self.assertNotIn({"op": "delete", "entity": "folder", "id": "F2"}, ch)
+        self.assertFalse(any(c["entity"] == "profile" for c in ch))
+        self.assertFalse(any(c["entity"] == "variable" for c in ch))
+
+    def test_sync_sends_only_changes_and_survives_macro_deck_closed(self):
+        from autoprint import macrodeck as md
+        fake = FakeMD()
+        sync = md.Sync(fake)
+        sync.RETRY_S = 0.2
+        try:
+            sync.push({"apc_left": "12:40", "apc_now": "Тренажёры"})
+            self.assertTrue(wait(lambda: len(fake.sets) == 2))
+            sync.push({"apc_left": "12:39", "apc_now": "Тренажёры"})
+            self.assertTrue(wait(lambda: len(fake.sets) == 3))
+            self.assertEqual(fake.sets[-1], ("apc_left", "12:39"))
+            fake.down = True                                   # Macro Deck закрыли
+            sync.push({"apc_left": "12:38"})
+            self.assertTrue(wait(lambda: bool(sync.error)))
+            fake.down = False                                  # снова запущен — всё заново, а не только изменения
+            sync.push({"apc_left": "12:37", "apc_now": "Тренажёры"})
+            self.assertTrue(wait(lambda: ("apc_now", "Тренажёры") in fake.sets[3:] and ("apc_left", "12:37") in fake.sets))
+            self.assertEqual(sync.error, "")
+        finally:
+            sync.stop()
+
+
+def wait(pred, timeout=5.0):
+    import time
+    end = time.time() + timeout
+    while time.time() < end:
+        pump(20)
+        if pred():
+            return True
+    return False
+
+
+class MacroDeckConnectTest(unittest.TestCase):
+    """«Настройки → Пульт → Macro Deck»: ключ вставили — страница собрана (ждёт разрешения), ключ зашифрован,
+    значения идут; отключили — не идут."""
+    port = 18952
+
+    def setUp(self):
+        from autoprint.audio import Mute
+        self.win = window([deck_lesson()], self.port)
+        self.win.printer.set_focus("D")
+        self.win.deck.audio = Mute(FakeAudio())
+        self.fake = FakeMD(pending=2)
+        self.win.deck.md_client = lambda token: self.fake
+        self.win.deck.PENDING_WAIT_S = 30
+
+    def tearDown(self):
+        self.win.deck._md_stop_sync()
+        close(self.win)
+
+    def test_connect_builds_page_and_streams(self):
+        from autoprint import macrodeck as md
+        from autoprint.macrodeck import Sync
+        Sync.RETRY_S = 0.2
+        self.win.commands.call({"cmd": "deck_md_connect", "token": "mdmcp_secret_token"})
+        self.assertTrue(self.win.settings.deck_on)                    # пульт включился сам
+        info = self.win.deck.info()["md"]
+        self.assertTrue(info["busy"])
+        self.assertTrue(wait(lambda: not self.win.deck.md_busy, 20))
+        s = self.win.settings
+        self.assertTrue(s.md_token.startswith(("dpapi:", "plain:")))
+        self.assertNotIn("mdmcp_secret_token", s.md_token if s.md_token.startswith("dpapi:") else "")
+        self.assertEqual(s.md_profile, "prof-1")
+        self.assertIn("AutoPrintCode", self.win.deck.md_status)
+        widgets = [c for c in self.fake.applied[0] if c["entity"] == "widget"]
+        urls = json.dumps(widgets)
+        self.assertIn(f"http://127.0.0.1:{self.win.efir.server.want_port}/api/black?key={s.deck_key}", urls)
+        self.win.lesson.command({"cmd": "black"})
+        self.assertTrue(wait(lambda: ("apc_c_black", md.ACCENT) in self.fake.sets))
+        self.win.commands.call({"cmd": "deck_md_forget"})
+        self.assertEqual(self.win.settings.md_token, "")
+        n = len(self.fake.sets)
+        self.win.lesson.command({"cmd": "background"})
+        pump(300)
+        self.assertEqual(len(self.fake.sets), n)
+
+    def test_bad_token_reported(self):
+        from autoprint.macrodeck import MacroDeckError
+
+        class Refuses(FakeMD):
+            def items(self, entity, **kw):
+                raise MacroDeckError("Macro Deck не принял ключ — создайте новый: Macro Deck → Настройки → AI clients")
+
+        self.win.deck.md_client = lambda token: Refuses()
+        self.win.deck.md_connect("mdmcp_wrong")
+        self.assertTrue(wait(lambda: not self.win.deck.md_busy, 10))
+        self.assertIn("не принял ключ", self.win.deck.md_status)
+        self.assertEqual(self.win.settings.md_token, "")              # неверный ключ не запоминаем
+
+
+class DeckSettingsTest(unittest.TestCase):
+    port = 18951
+
+    def setUp(self):
+        self.win = window([deck_lesson()], self.port)
+
+    def tearDown(self):
+        close(self.win)
+
+    def test_turn_on_makes_key_and_links(self):
+        self.assertEqual(self.win.settings.deck_key, "")
+        self.win.commands.call({"cmd": "set", "key": "deck_on", "value": True})
+        info = self.win.commands.call({"cmd": "deck_info"})["result"]
+        key = self.win.settings.deck_key
+        self.assertGreaterEqual(len(key), 16)
+        self.assertEqual(info["key"], key)
+        urls = {x["cmd"]: x["url"] for x in info["links"]}
+        base = f"http://127.0.0.1:{self.win.efir.server.port}/api/"
+        self.assertEqual(urls["black"], base + "black?key=" + key)
+        for c in ("background", "black", "exercise", "break", "slide", "slide_prev", "slide_next", "state"):
+            self.assertIn(c, urls)
+        self.assertTrue(info["folder"].endswith("deck"))
+        new = self.win.commands.call({"cmd": "deck_new_key"})["result"]
+        self.assertNotEqual(new["key"], key)
+        self.assertEqual(self.win.settings.deck_key, new["key"])
+
+    def test_prepare_list_setting(self):
+        """Список вкладок в настройках: строкой по адресу; без https:// — допишется; не адрес — ошибка."""
+        from autoprint.settings_spec import clean
+        self.assertEqual(clean("deck_prepare", "lms.example/course\n\n https://meet.example/room \nlms.example/course"),
+                         ["https://lms.example/course", "https://meet.example/room"])
+        with self.assertRaises(ValueError):
+            clean("deck_prepare", "javascript:alert(1)")
+        with self.assertRaises(ValueError):
+            clean("deck_prepare", "file:///C:/Windows/win.ini")
+        r = self.win.commands.call({"cmd": "set", "key": "deck_prepare", "value": "a.example\nb.example"})
+        self.assertEqual(r["result"]["value"], ["https://a.example", "https://b.example"])
+        self.assertEqual(self.win.settings.deck_prepare, ["https://a.example", "https://b.example"])
+
+    def test_key_saved_with_settings(self):
+        from autoprint.storage import Settings
+        s = Settings(deck_on=True, deck_key="abc")
+        s.save()                                  # папка данных тестов (quiet), не настоящая
+        s2 = Settings.load()
+        self.assertTrue(s2.deck_on)
+        self.assertEqual(s2.deck_key, "abc")
+
+
+if __name__ == "__main__":
+    unittest.main(verbosity=2)

@@ -343,6 +343,41 @@ class AppCommands(QObject):
         self.app.publish_now()
         return {"value": getattr(s, key)}
 
+    def call_deck_info(self, _d: dict) -> dict:
+        """«Настройки → Пульт»: ключ, ссылки для кнопок Macro Deck / Stream Deck, папка файлов со временем."""
+        return self.app.deck.info()
+
+    def call_deck_new_key(self, _d: dict) -> dict:
+        """«Новый ключ»: старые ссылки перестают работать."""
+        self.app.deck.new_key()
+        return self.app.deck.info()
+
+    def call_deck_md_connect(self, d: dict) -> dict:
+        """Ключ Macro Deck вставили — собрать страницу «Урок» (в фоне; ход — в deck_info().md)."""
+        self.app.deck.md_connect(str(d.get("token") or ""))
+        return self.app.deck.info()
+
+    def call_deck_md_setup(self, _d: dict) -> dict:
+        self.app.deck.md_setup()
+        return self.app.deck.info()
+
+    def call_deck_md_forget(self, _d: dict) -> dict:
+        self.app.deck.md_forget()
+        return self.app.deck.info()
+
+    def call_deck_copy(self, d: dict) -> bool:
+        """Ссылку или ключ пульта — в буфер обмена (вставить в кнопку Macro Deck)."""
+        from PySide6.QtGui import QGuiApplication
+        QGuiApplication.clipboard().setText(str(d.get("text") or "")[:2000])
+        return True
+
+    def cmd_deck_open_folder(self, _d: dict) -> None:
+        from PySide6.QtCore import QUrl
+        from PySide6.QtGui import QDesktopServices
+        self.app.deck.folder.mkdir(parents=True, exist_ok=True)
+        self.app.deck.write_files()
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(self.app.deck.folder)))
+
     def call_set_hotkey(self, d: dict) -> dict:
         """Хоткей: подходит ли, не занят ли другим, «Старт / пауза» — обязателен. → {ok, error}."""
         from .hotkeys import parse_hotkey

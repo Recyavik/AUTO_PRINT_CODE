@@ -27,6 +27,16 @@
 .srow select.sel { min-width: 220px; max-width: 100%; }
 .snote { color: var(--faint); font-size: 13.5px; line-height: 1.5; max-width: 72ch; padding: 0 4px; }
 
+/* пульт (1.3): ссылка кнопки — моноширинно, выделяется целиком, длинная переносится по любому знаку */
+.deckbox { display: flex; flex-direction: column; gap: 16px; }
+.snote.warn { color: var(--imp); }
+.deckprep { width: 100%; min-height: 96px; resize: vertical; font-family: var(--mono); font-size: 13px; margin: 6px 0 4px; padding: 8px 12px; line-height: 1.5; }
+.deckrow .src { flex: 1 1 360px; flex-wrap: nowrap; }
+.deckurl { flex: 1 1 auto; min-width: 0; font-size: 12.5px; padding: 6px 10px; border-radius: var(--r-sm);
+  background: var(--sunken); border: 1px solid var(--line); color: var(--text); overflow-wrap: anywhere; user-select: all; }
+.deckfiles { margin: 4px 0 12px; padding-left: 18px; color: var(--faint); font-size: 13.5px; line-height: 1.7; columns: 2 320px; }
+.deckfiles b { color: var(--text); font-weight: 500; }
+
 /* громкость */
 #f-sound_volume { width: 180px; accent-color: var(--accent); }
 .vval { min-width: 48px; text-align: right; color: var(--dim); font-weight: 500; }

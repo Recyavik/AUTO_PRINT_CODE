@@ -996,13 +996,14 @@ class VersionTest(unittest.TestCase):
         self.assertEqual(hits, [])         # textprint.py остаётся для эталонов веб-версии
 
     def test_readme_current(self):
-        """README описывает 0.10: картинки на месте, нет пульта, окна суфлёра и удалённых примеров."""
+        """README описывает 0.10: картинки на месте, нет окна суфлёра и удалённых примеров. (Старый «пульт» окна
+        программы убран в 0.10; с 1.3 «Пульт» — новое: Macro Deck и Stream Deck, — слово в README снова уместно.)"""
         import re
         root = Path(storage.__file__).resolve().parent.parent
         text = (root / "README.md").read_text(encoding="utf-8")
         missing = [p for p in re.findall(r"docs/images/[\w.-]+\.png", text) if not (root / p).exists()]
         self.assertEqual(missing, [])
-        stale = [w for w in ("пульт", "Суфлёр в отдельном окне", "Без комментариев", "Пример занятия",
+        stale = [w for w in ("Суфлёр в отдельном окне", "Без комментариев", "Пример занятия",
                              "make_screenshots", "тёмная тема.md", "tests/test_ui.py") if w in text]
         self.assertEqual(stale, [])
 

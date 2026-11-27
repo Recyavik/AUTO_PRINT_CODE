@@ -14,7 +14,7 @@ from apphelp import AppPage, note, pump, stage  # noqa: F401
 from autoprint import ai, app_state, system
 from autoprint.storage import Template
 
-SECTIONS = ["view", "lesson", "typing", "sound", "hotkeys", "behavior", "ai", "updates", "about"]
+SECTIONS = ["view", "lesson", "typing", "sound", "hotkeys", "behavior", "deck", "ai", "updates", "about"]
 
 
 def lessons() -> list[Template]:
@@ -110,6 +110,60 @@ class SettingsTest(AppPage):
             self.assertTrue(self.wait_py(lambda: self.app.settings.exercise_start == "auto"))
         finally:
             self.app.settings.exercise_start = "click"
+
+    def test_deck_section(self):
+        """1.3 «Пульт»: выключен — только включатель; включили — ссылки кнопок с ключом, копирование, папка файлов."""
+        from PySide6.QtGui import QGuiApplication
+        self.section("deck")
+        self.assertTrue(self.wait_js("!!document.querySelector('#f-deck_on') && !document.querySelector('#deckCopy-black')"))
+        self.click("#f-deck_on")
+        try:
+            self.assertTrue(self.wait_py(lambda: self.app.settings.deck_on and len(self.app.settings.deck_key) >= 16))
+            key = self.app.settings.deck_key
+            self.assertTrue(self.wait_js("!!document.querySelector('#deckCopy-black')"))
+            urls = self.js("[...document.querySelectorAll('.deckurl')].map(e => e.textContent)")
+            self.assertIn(f"http://127.0.0.1:{self.app.efir.server.port}/api/black?key={key}", urls)
+            self.assertTrue(self.js("document.querySelector('.deckfiles').textContent.includes('left.txt')"))
+            self.click("#deckCopy-black")
+            self.assertTrue(self.wait_py(lambda: QGuiApplication.clipboard().text().endswith("/api/black?key=" + key)))
+        finally:
+            self.app.settings.deck_on = False
+            self.app.deck.apply()
+
+    def test_deck_macro_deck_and_prepare(self):
+        """«Пульт → Macro Deck»: ключ вставили, «Подключить» — страница собрана (подставной Macro Deck), ключ
+        зашифрован; «Подготовка» — список вкладок сохраняется по адресу в строке."""
+        sys_path = __import__("sys").path
+        sys_path.insert(0, __import__("os").path.dirname(__file__))
+        from test_v13 import FakeAudio, FakeMD
+        from autoprint.audio import Mute
+        fake = FakeMD()
+        deck = self.app.deck
+        deck.audio = Mute(FakeAudio())
+        old_client = deck.md_client
+        deck.md_client = lambda token: fake
+        self.section("deck")
+        try:
+            self.assertTrue(self.wait_js("!!document.querySelector('#mdToken')"))
+            self.js("document.querySelector('#mdToken').value = 'mdmcp_page_test'")
+            self.click("#mdConnect")
+            self.assertTrue(self.wait_py(lambda: self.app.settings.md_token != "" and not deck.md_busy, 15))
+            self.assertTrue(self.app.settings.deck_on)
+            self.assertTrue(fake.applied)
+            self.assertTrue(self.wait_js("!!document.querySelector('#mdRebuild')", 10))
+            self.assertTrue(self.wait_js("document.querySelector('#mdStatus').textContent.includes('AutoPrintCode')"))
+            self.assertTrue(self.wait_js("!!document.querySelector('#deckPrepare')"))
+            self.js("const t = document.querySelector('#deckPrepare'); t.value = 'lms.example/course\\nmeet.example'; "
+                    "t.dispatchEvent(new Event('change'))")
+            self.assertTrue(self.wait_py(lambda: self.app.settings.deck_prepare
+                                         == ["https://lms.example/course", "https://meet.example"]))
+        finally:
+            deck._md_stop_sync()
+            deck.md_client = old_client
+            s = self.app.settings
+            s.md_token, s.md_profile, s.deck_prepare = "", "", []
+            s.deck_on = False
+            deck.apply()
 
     def test_start_compact(self):
         self.section("lesson")

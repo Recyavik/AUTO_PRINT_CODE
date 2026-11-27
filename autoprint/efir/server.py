@@ -148,6 +148,10 @@ class _Handler(BaseHTTPRequestHandler):
             if path == "/app":
                 body = (PAGE_DIR / "app.html").read_bytes()
                 return self._send(200, body, "text/html; charset=utf-8")
+            if path.startswith("/api/"):
+                if self.command == "HEAD":         # проверка «жив ли адрес» не должна нажимать кнопку
+                    return self._json({"ok": False, "error": "Пульт: GET или POST"}, 405)
+                return self._deck(path, query, {})
             if path == "/state":
                 return self._json(owner.snapshot(self._channel(query)))
             if path == "/events":
@@ -287,6 +291,16 @@ class _Handler(BaseHTTPRequestHandler):
             return None
         return self.rfile.read(n) if n > 0 else b""
 
+    def _deck(self, path: str, query: str, body: dict) -> None:
+        """Пульт (Macro Deck, Stream Deck, curl): /api/<команда>?key=… или ключ заголовком X-AutoPrint-Key.
+        Ключ и команду проверяет программа (DeckControl) — сервер только передаёт."""
+        q = {k: v[0] for k, v in parse_qs(query).items() if v}
+        params = {**{str(k): v for k, v in body.items()}, **q}
+        key = str(self.headers.get("X-AutoPrint-Key") or params.pop("key", "") or "")
+        params.pop("key", None)
+        code, res = self.server.owner._on_deck(path[len("/api/"):].strip("/"), params, key)
+        self._json(res, code)
+
     def do_POST(self) -> None:
         if not self._host_ok():
             return self._send(403, b"forbidden", "text/plain")
@@ -296,6 +310,20 @@ class _Handler(BaseHTTPRequestHandler):
             # сервер останавливается (выход, перезапуск): правку не терять — страница повторит её позже
             self.close_connection = True
             return self._json({"ok": False, "retry": True}, 503)
+        if path.startswith("/api/"):
+            # тело не дочитали (оборвалось, неверная длина) или оно слишком большое — команду не выполнять
+            try:
+                raw = self._read_body(BODY_LIMIT)
+            except (ValueError, OSError):
+                self.close_connection = True
+                return self._json({"ok": False, "error": "Неверный запрос"}, 400)
+            if raw is None:
+                return self._json({"ok": False, "error": "Слишком большой запрос"}, 413)
+            try:
+                body = json.loads(raw.decode("utf-8")) if raw.strip() else {}
+            except (ValueError, UnicodeDecodeError):
+                body = {}                           # не JSON (форма, текст) — параметры только из адреса
+            return self._deck(path, query, body if isinstance(body, dict) else {})
         if path.startswith(("/lesson/", "/app/")) and (self.headers.get("X-Suflor") != "1" or not self._origin_ok()):
             # тело — дочитать и выбросить: закрыть сокет с непрочитанными данными — Windows шлёт RST вместо ответа
             try:
@@ -365,6 +393,7 @@ class BroadcastServer:
         # окно программы (1.0): команды без ответа и вызовы с ответом (ждут поток интерфейса)
         self.on_app_cmd: Callable[[dict], None] | None = None
         self.on_app_call: Callable[[dict], tuple[int, dict]] | None = None
+        self.on_deck: Callable[[str, dict, str], tuple[int, dict]] | None = None   # пульт: команда, параметры, ключ
         self.stopping = False
         self._httpd: _Server | None = None
         self._thread: threading.Thread | None = None
@@ -504,6 +533,15 @@ class BroadcastServer:
             return self.on_app_call(data)
         except Exception:
             log.exception("on_app_call")
+            return 500, {"ok": False, "error": "Внутренняя ошибка программы"}
+
+    def _on_deck(self, cmd: str, params: dict, key: str) -> tuple[int, dict]:
+        if not self.on_deck:
+            return 503, {"ok": False, "retry": True, "error": "Программа ещё запускается"}
+        try:
+            return self.on_deck(cmd, params, key)
+        except Exception:
+            log.exception("on_deck")
             return 500, {"ok": False, "error": "Внутренняя ошибка программы"}
 
     def _on_edit(self, data: dict) -> tuple[int, dict]:

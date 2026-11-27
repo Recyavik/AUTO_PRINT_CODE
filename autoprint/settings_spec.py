@@ -29,6 +29,8 @@ FIELDS: dict[str, tuple] = {
     # урок
     "start_screen": B, "start_compact": B, "copy_media": B, "exercise_pick": ("choice", ("next", "random", "ask")),
     "exercise_start": ("choice", ("click", "auto")),
+    # пульт (1.3)
+    "deck_on": B, "deck_prepare": ("urls",), "deck_prepare_screen": B,
     # набор кода
     "print_mode": ("choice", ("block", "lines", "steps")),
     "step_nav": ("choice", ("arrows", "home")),
@@ -64,6 +66,33 @@ def clean_width(value) -> str:
     raise ValueError("нет такой ширины")
 
 
+URLS_MAX = 20
+
+
+def clean_urls(value) -> list[str]:
+    """Список адресов (строкой по адресу или списком): только http(s), без повторов, не больше URLS_MAX.
+    «example.com» — https://example.com. Не адрес — ValueError с этой строкой."""
+    import re
+    rows = value if isinstance(value, list) else str(value or "").splitlines()
+    out: list[str] = []
+    for raw in rows:
+        u = str(raw or "").strip()
+        if not u:
+            continue
+        scheme = re.match(r"([a-z][a-z0-9+.-]*):(?!\d)", u, re.I)     # «javascript:…», «file:…» — не сайт
+        if scheme and scheme.group(1).lower() not in ("http", "https"):
+            raise ValueError(f"это не адрес сайта: {u[:60]}")
+        if not scheme:
+            u = "https://" + u
+        if not re.fullmatch(r"https?://[^\s<>\"']+", u, re.I) or len(u) > 2000:
+            raise ValueError(f"это не адрес сайта: {str(raw).strip()[:60]}")
+        if u not in out:
+            out.append(u)
+    if len(out) > URLS_MAX:
+        raise ValueError(f"не больше {URLS_MAX} вкладок")
+    return out
+
+
 def clean(key: str, value):
     """Значение поля key после проверки. ValueError — такого поля нет или значение не подходит."""
     spec = FIELDS.get(key)
@@ -81,6 +110,8 @@ def clean(key: str, value):
             raise ValueError("нужно число") from None
         v = max(spec[1], min(spec[2], v))
         return int(round(v)) if kind == "int" else round(v * 2) / 2        # дробные — шагом 0,5
+    if kind == "urls":
+        return clean_urls(value)
     if kind == "choice":
         for c in spec[1]:
             if str(c) == str(value):

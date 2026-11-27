@@ -87,7 +87,8 @@ def write_fake_data() -> None:
     SETTINGS_FILE.write_text(json.dumps({
         "cpm": 222, "print_mode": "steps", "profile": "plain", "sound_style": "my_ivan_keyboard",
         "window_geometry": "AdnQywADAAAAAAC", "splitter_state": "AAAA", "open_tabs": ["73bf6847855e"],
-        "current_tab": "73bf6847855e"}, ensure_ascii=False), encoding="utf-8")
+        "current_tab": "73bf6847855e", "deck_key": "DeckKeySecret0123456789",
+        "md_token": "dpapi:MdTokenSecret0123456789"}, ensure_ascii=False), encoding="utf-8")
 
     LOG_DIR.mkdir(parents=True, exist_ok=True)
     esc = PROFILE.replace("\\", "\\\\")
@@ -151,6 +152,9 @@ def test_collect_plain() -> dict:
     check("из настроек убраны окно и вкладки",
           not {"window_geometry", "splitter_state", "open_tabs", "current_tab"} & set(st))
     check("свой звук без имени", "ivan" not in st["sound_style"])
+    check("ключ пульта и Macro Deck — только «задан» (иначе любой сайт нажмёт кнопки урока)",
+          st.get("deck_key") == "задан" and "DeckKeySecret" not in json.dumps(rep, ensure_ascii=False)
+          and "MdTokenSecret" not in json.dumps(rep, ensure_ascii=False))
     check("режим печати и профиль", rep["usage"]["print_mode"] == "steps" and rep["usage"]["profile"] == "plain")
 
     md = report.to_markdown(rep)

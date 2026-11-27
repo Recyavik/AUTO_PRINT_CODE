@@ -9,7 +9,8 @@ import { setCrumbs } from "./shell.js";
 
 const SECTIONS = [
   ["view", "eye", "Вид"], ["lesson", "book", "Урок"], ["typing", "keyboard", "Набор кода"], ["sound", "volume", "Звук клавиш"],
-  ["hotkeys", "pointer", "Горячие клавиши"], ["behavior", "sliders", "Поведение"], ["ai", "sparkles", "Нейросеть"],
+  ["hotkeys", "pointer", "Горячие клавиши"], ["behavior", "sliders", "Поведение"], ["deck", "deck", "Пульт"],
+  ["ai", "sparkles", "Нейросеть"],
   ["updates", "refresh", "Обновления"], ["about", "info", "О программе"],
 ];
 const LIMITS = {
@@ -388,8 +389,121 @@ function secAbout() {
   h("a", { class: "rel", href: s.releases_url || "https://github.com/", target: "_blank", rel: "noopener" }, "Выпуски на GitHub")];
 }
 
+// ---------------------------------------------------------------- пульт (1.3)
+// Macro Deck, Stream Deck: ссылки с ключом для кнопок (копировать одним щелчком) и папка файлов со временем и этапами.
+const DECK_FILES = [
+  ["now.txt", "идущий этап"], ["left.txt", "сколько от него осталось, 12:40"], ["prev.txt", "прошедший этап"],
+  ["next.txt", "следующий этап"], ["stage.txt", "«3 из 7»"], ["screen.txt", "что у учеников: idle, black, exercise, break, slide"],
+  ["black.txt", "чёрный экран: true / false"], ["break.txt", "перерыв идёт: true / false"], ["break_left.txt", "сколько осталось перерыва"],
+  ["exercise.txt", "зарядка идёт: true / false"], ["slide.txt", "слайд у учеников: true / false"], ["slides.txt", "в уроке есть слайды"],
+  ["slide_n.txt", "«2 / 12»"], ["mic_muted.txt", "все микрофоны выключены: true / false"],
+  ["sound_muted.txt", "звук выключен: true / false"], ["clock.txt", "часы, 19:42"], ["state.json", "всё вместе"],
+];
+
+function copyRow(title, hint, text, id) {
+  const code = h("code", { class: "mono deckurl" }, text);
+  const b = iconBtn("copy", "Скопировать", async () => {
+    try { await call({ cmd: "deck_copy", text }); toast("Скопировано: " + title); } catch (e) { fail(e); }
+  }, { size: "sm" });
+  if (id) b.id = id;
+  return h("div", { class: "srow deckrow" }, h("div", { class: "srt" }, h("b", null, title), hint ? h("small", null, hint) : null),
+    h("div", { class: "src" }, code, b));
+}
+
+function deckCards(info, box) {
+  clear(box);
+  if (!info.on) { box.append(mdCard(info, box)); return; }
+  const links = card("Ссылки для кнопок",
+    note("Macro Deck: в кнопке действие «Отправить HTTP-запрос», метод GET, адрес — ссылка ниже. Stream Deck — действие "
+      + "«веб-запрос в фоне» (не «открыть сайт»: иначе каждое нажатие открывает вкладку браузера). Ответ — что сейчас идёт (JSON)."),
+    info.port_moved ? h("p", { class: "snote warn", id: "deckPortMoved" }, "Порт " + info.want_port + " был занят при запуске — "
+      + "сейчас пульт на порту " + info.port + ". Эти ссылки — только до перезапуска программы: перезапустите её и "
+      + "возьмите ссылки заново.") : null,
+    ...info.links.map((x) => copyRow(x.title, x.hint, x.url, "deckCopy-" + x.cmd)));
+  const files = card("Время и этапы на кнопках",
+    note("Программа раз в секунду обновляет маленькие файлы. В Macro Deck: Переменные → новая переменная → «Read from file», "
+      + "файл из папки; в подписи кнопки — {{ vars.имя }}. Переменная из black.txt — для подсветки кнопки «Чёрный»."),
+    row("Папка", info.folder, btn("Открыть папку", { icon: "folder", kind: "ghost", onClick: () => send({ cmd: "deck_open_folder" }) })),
+    h("ul", { class: "deckfiles" }, ...DECK_FILES.map(([f, what]) => h("li", null, h("b", { class: "mono" }, f), " — " + what))));
+  const nk = btn("Новый ключ", { icon: "refresh", kind: "ghost", onClick: async () => {
+    if (!await ask("Старые ссылки перестанут работать — их нужно будет заменить в кнопках пульта.", { title: "Новый ключ пульта?", ok: "Новый ключ" })) return;
+    try { deckCards(await call({ cmd: "deck_new_key" }), box); toast("Новый ключ — замените ссылки в кнопках"); } catch (e) { fail(e); }
+  } });
+  nk.id = "deckNewKey";
+  const key = card("Ключ", copyRow("Ключ пульта", "Он уже в ссылках. Без него программа кнопки не слушается: чужой сайт в браузере не нажмёт за вас",
+    info.key, "deckCopyKey"), row("Ссылки попали к другим", "Старые перестанут работать", nk));
+  box.append(mdCard(info, box), prepareCard(info), links, files, key);
+}
+
+// Macro Deck: ключ «mdmcp_…» → программа сама собирает профиль «AutoPrintCode» и шлёт туда время и подсветку
+function mdCard(info, box) {
+  const md = info.md || {};
+  const status = h("p", { class: "snote" + (md.error ? " warn" : ""), id: "mdStatus" }, md.busy ? md.status : (md.error || md.status || ""));
+  const lan = (md.lan || []).length ? row("Адрес этого компьютера в сети", "Для телефона и своего приложения — в той же сети Wi-Fi",
+    h("code", { class: "mono deckurl", id: "mdLan" }, md.lan.join(" · "))) : null;
+  const after = (r) => { renderDeck(r, box); };
+  if (!md.connected) {
+    const inp = h("input", { class: "inp", type: "password", id: "mdToken", autocomplete: "off", placeholder: "mdmcp_…",
+      "aria-label": "Ключ Macro Deck" });
+    const go = btn("Подключить", { icon: "link", kind: "primary", onClick: async () => {
+      if (!inp.value.trim()) { inp.focus(); return; }
+      try { after(await call({ cmd: "deck_md_connect", token: inp.value })); inp.value = ""; } catch (e) { fail(e); }
+    } });
+    go.id = "mdConnect";
+    return card("Macro Deck",
+      note("Страница «Урок» в Macro Deck на телефоне — сама: этапы и время, Фон, Чёрный, Зарядка, Перерыв, слайды, "
+        + "Подготовка, звук и микрофон. В Macro Deck 3 на компьютере: Настройки → AI clients → новый ключ — вставьте его сюда."),
+      row("Ключ Macro Deck", "Хранится зашифрованным, в «Сообщить об ошибке» не попадает", inp, go), md.busy || md.status ? status : null, lan);
+  }
+  const rebuild = btn("Пересобрать страницу", { icon: "refresh", kind: "ghost", onClick: async () => {
+    try { after(await call({ cmd: "deck_md_setup" })); } catch (e) { fail(e); }
+  } });
+  rebuild.id = "mdRebuild";
+  rebuild.disabled = !!md.busy;
+  const forget = btn("Отключить", { icon: "close", kind: "ghost", onClick: async () => {
+    if (!await ask("Программа перестанет обновлять страницу в Macro Deck (сама страница там останется).", { title: "Отключить Macro Deck?", ok: "Отключить" })) return;
+    try { after(await call({ cmd: "deck_md_forget" })); } catch (e) { fail(e); }
+  } });
+  forget.id = "mdForget";
+  return card("Macro Deck",
+    row("Подключён", "В Macro Deck на телефоне — профиль «AutoPrintCode», папка «Урок». Время и подсветка обновляются сами", rebuild, forget),
+    md.busy || md.status || md.error ? status : null, lan);
+}
+
+function prepareCard(info) {
+  const ta = h("textarea", { class: "inp deckprep", id: "deckPrepare", rows: "4", spellcheck: "false",
+    placeholder: "https://…  — по адресу в строке", "aria-label": "Вкладки «Подготовки»" });
+  ta.value = (info.prepare || []).join("\n");
+  ta.addEventListener("change", async () => {
+    const v = await setv("deck_prepare", ta.value);
+    if (Array.isArray(v)) { ta.value = v.join("\n"); toast("Вкладки «Подготовки» сохранены"); }
+  });
+  return card("Подготовка",
+    note("Кнопка «Подготовка» открывает эти вкладки в браузере — у каждого свои: курс, встреча, доска. По адресу в строке."),
+    ta, sw("deck_prepare_screen", "Открывать и вкладку учеников", "Если она ещё не открыта"));
+}
+
+function renderDeck(info, box) {
+  if (!box.isConnected) return;
+  deckCards(info, box);
+  if (info.md && info.md.busy) {
+    // настройка Macro Deck идёт (может ждать разрешения на компьютере) — следить, пока раздел открыт
+    setTimeout(() => { if (box.isConnected) call({ cmd: "deck_info" }).then((r) => renderDeck(r, box)).catch(() => {}); }, 1500);
+  }
+}
+
+function secDeck() {
+  const on = !!st().deck_on;
+  const box = h("div", { id: "deckBox", class: "deckbox" });
+  call({ cmd: "deck_info" }).then((info) => renderDeck(info, box)).catch(fail);
+  return [card("Пульт с телефона",
+    sw("deck_on", "Пульт для Macro Deck и Stream Deck", "Кнопки на телефоне или пульте: фон, чёрный экран, зарядка, перерыв, слайды, "
+      + "звук и микрофон; на кнопках — этапы и сколько осталось. Только на этом компьютере, по ключу в ссылке")),
+  box, on ? null : note("Включите — здесь появятся ссылки для кнопок и папка с временем и этапами.")];
+}
+
 const BUILD = { view: secView, lesson: secLesson, typing: secTyping, sound: secSound, hotkeys: secHotkeys, behavior: secBehavior,
-  ai: secAi, updates: secUpdates, about: secAbout };
+  deck: secDeck, ai: secAi, updates: secUpdates, about: secAbout };
 
 // ---------------------------------------------------------------- экран
 // «Назад» из настроек — туда, откуда пришли (урок — «К уроку»), а не на первый экран
@@ -429,7 +543,8 @@ export function settingsView(root, r) {
   }
   // перерисовать раздел, когда поменялось то, что он показывает (и не во время ввода)
   const keyOf = () => JSON.stringify([sec, sec === "ai" ? [st().ai, st().providers, st().ai_backup_enabled] : sec === "sound" ? st().sound_styles
-    : sec === "lesson" ? st().looks_outside : sec === "updates" ? [st().update_skip_version, st().update_last_check] : 0]);
+    : sec === "lesson" ? st().looks_outside : sec === "updates" ? [st().update_skip_version, st().update_last_check]
+      : sec === "deck" ? st().deck_on : 0]);
   show(r);
   // ушли из поля ввода — показать то, что пришло, пока в нём печатали
   body.addEventListener("focusout", () => setTimeout(() => { if (V) upd(); }, 0));

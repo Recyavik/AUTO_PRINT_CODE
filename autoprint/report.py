@@ -410,6 +410,10 @@ def _settings_snapshot(s: Settings) -> dict:
         d["sound_style"] = _CUSTOM_SOUND + "… (свой звук)"
     # ключи нейросети — только «задан», сами ключи в отчёт не попадают (даже зашифрованными)
     d["ai_keys"] = {k: "задан" for k, v in (d.get("ai_keys") or {}).items() if v}
+    # ключ пульта и ключ Macro Deck — тоже: с ключом пульта любой сайт в браузере нажал бы кнопки урока
+    for k in ("deck_key", "md_token"):
+        if k in d:
+            d[k] = "задан" if d[k] else ""
     last = d.get("update_last_check") or 0
     d["update_last_check"] = time.strftime("%Y-%m-%d %H:%M", time.localtime(last)) if last else "—"
     return d
