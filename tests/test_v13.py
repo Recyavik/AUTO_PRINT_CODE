@@ -1211,6 +1211,39 @@ class ScreenTimerTest(unittest.TestCase):
         self.win.efir.tmr_ends = time.time() - 1                         # время вышло
         self.win.efir.publish()
 
+    def draws_in_background(self, sel: str) -> int:
+        """Вкладку учеников закрыли другой (захват вкладки показывает её ученикам и в фоне): сколько раз за 3 с
+        перерисовался отсчёт (sel — элемент, который меняется каждый раз: дуга, полоса). Браузер урезает таймеры
+        фоновой вкладки до раза в секунду, через 5 минут — до раза в минуту: отсчёт должен идти не от них."""
+        import time
+        self.js("window.__draws = 0; window.__mo && window.__mo.disconnect(); "
+                f"window.__mo = new MutationObserver(m => {{ window.__draws += m.length; }}); "
+                f"window.__mo.observe(document.querySelector({sel!r}), {{ attributes: true }}); true")
+        me = self.edge.call("Target.getTargetInfo")["targetInfo"]["targetId"]
+        other = self.edge.call("Target.createTarget", {"url": "about:blank"})["targetId"]
+        try:
+            self.edge.call("Target.activateTarget", {"targetId": other})
+            self.assertTrue(self.wait("document.visibilityState === 'hidden'", 5))
+            self.js("window.__draws = 0; true")
+            end = time.time() + 3
+            while time.time() < end:
+                pump(20)
+            return self.js("window.__draws")
+        finally:
+            self.edge.call("Target.closeTarget", {"targetId": other})
+            self.edge.call("Target.activateTarget", {"targetId": me})
+            self.wait("document.visibilityState === 'visible'", 5)
+
+    def test_countdown_keeps_pace_in_background_tab(self):
+        self.look_set(timer_full_style="ring", timer_end="zero")
+        self.win.lesson.command({"cmd": "timer", "minutes": 5})
+        self.assertTrue(self.wait("!!document.querySelector('#tmr .full .ring .arc')"))
+        self.assertGreaterEqual(self.draws_in_background("#tmr .full .ring .arc"), 9)     # ~5 раз в секунду
+        self.win.lesson.command({"cmd": "break", "minutes": 5})
+        self.assertTrue(self.wait("document.querySelector('#brk').classList.contains('on')"))
+        self.assertGreaterEqual(self.draws_in_background("#brk .bar i"), 9)
+        self.win.lesson.command({"cmd": "background"})
+
     def test_full_ring_then_zero(self):
         self.look_set(timer_full_style="ring", timer_end="zero")
         self.win.lesson.command({"cmd": "timer"})

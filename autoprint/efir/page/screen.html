@@ -429,12 +429,30 @@ class Scene {
     this.anim.frame(this.ctx, w, h, t, dt);
   }
 }
+// Часы страницы. Вкладку учеников показывают захватом и тогда, когда открыта другая вкладка; такую браузер считает
+// фоновой и урезает её таймеры (не чаще раза в секунду, через 5 минут — раз в минуту) — отсчёт перерыва и таймера
+// дёргался. Таймеры фонового потока (Web Worker) браузер не урезает: такты идут от него; не вышло — обычный таймер.
+const tickers = new Set();
+function every(ms, fn) {
+  let last = -1e9;
+  const t = () => { const n = performance.now(); if (n - last >= ms - 8) { last = n; fn(); } };
+  tickers.add(t);
+  return () => tickers.delete(t);
+}
+(function clock() {
+  const run = () => { for (const t of tickers) { try { t(); } catch (e) { console.error(e); } } };
+  try {
+    const src = URL.createObjectURL(new Blob(['setInterval(() => postMessage(0), 50)'], { type: 'text/javascript' }));
+    new Worker(src).onmessage = run;
+  } catch (e) { setInterval(run, 50); }
+})();
+
 let lastFrame = 0;
 function step(now) { lastFrame = performance.now(); for (const s of scenes) { try { s.tick(now); } catch (e) { console.error(e); scenes.delete(s); } } }
 function loop(now) { step(now); requestAnimationFrame(loop); }
 requestAnimationFrame(loop);
-// кадров нет (вкладка в фоне, снимок без окна) — двигаем анимацию таймером, реже
-setInterval(() => { const n = performance.now(); if (n - lastFrame > 250) step(n); }, 66);
+// кадров нет (вкладка в фоне, снимок без окна) — двигаем анимацию часами страницы, реже
+every(66, () => { const n = performance.now(); if (n - lastFrame > 250) step(n); });
 
 // ======================================================= галерея фонов
 const TITLES = { gradient: 'Градиент', aurora: 'Сияние', lights: 'Огоньки', bubbles: 'Пузыри', cube: 'Куб', stars: 'Звёзды', pipes: 'Трубы' };
@@ -662,19 +680,19 @@ function startScreen() {
     if (st.mode === 'break' && st.brk) {
       if (st.brk.bg) brkBg.set(st.brk.bg); else brkBg.clear();    // без своего фона — виден основной
       brkEl.classList.add('on'); drawBreak();
-      if (!brkTimer) brkTimer = setInterval(drawBreak, 200);
+      if (!brkTimer) brkTimer = every(200, drawBreak);
     } else {
       brkEl.classList.remove('on');
-      if (brkTimer) { clearInterval(brkTimer); brkTimer = 0; }
+      if (brkTimer) { brkTimer(); brkTimer = 0; }
       setTimeout(() => { if (!brkEl.classList.contains('on')) brkBg.clear(); }, 700);
     }
     if ((st.mode === 'timer' || st.mode === 'task') && st.tmr) {
       if (st.tmr.bg) tmrBg.set(st.tmr.bg); else tmrBg.clear();     // без своего фона — виден основной
       tmrEl.classList.add('on'); drawTimer();
-      if (!tmrTimer) tmrTimer = setInterval(drawTimer, 200);
+      if (!tmrTimer) tmrTimer = every(200, drawTimer);
     } else {
       tmrEl.classList.remove('on');
-      if (tmrTimer) { clearInterval(tmrTimer); tmrTimer = 0; }
+      if (tmrTimer) { tmrTimer(); tmrTimer = 0; }
       setTimeout(() => { if (!tmrEl.classList.contains('on')) { tmrBg.clear(); tmrView.innerHTML = ''; tmrKey = ''; } }, 450);
     }
     if (st.mode === 'exercise' && st.exercise && st.exercise.url) showVideo(st.exercise); else hideVideo();
