@@ -1050,7 +1050,7 @@ class EditTest(unittest.TestCase):
         before = [(b.id, b.text, b.role) for b in t.blocks]
         for ops in ([{"op": "set", "block": "nA", "fields": {"text": "x"}},
                      {"op": "set", "block": "nA", "fields": {"role": "zzz"}}],
-                    [{"op": "set", "block": "nA", "fields": {"minutes": 5}}],          # у заметки нет минут
+                    [{"op": "set", "block": "nA", "fields": {"minutes": 5}}],          # у заметки нет минут (у задания — есть, 1.3)
                     [{"op": "set", "block": "sA", "fields": {"minutes": 9999}}],
                     [{"op": "insert", "after": "", "block": {"id": "bad id!", "type": "markdown"}}],
                     [{"op": "insert", "after": "", "block": {"id": "aaaaaaaaaaaa", "type": "video"}}],

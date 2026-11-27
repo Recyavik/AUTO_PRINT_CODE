@@ -146,6 +146,9 @@ def _apply_one(t: Template, blocks: list[Block], op: dict, touched: list[str]) -
             raise ValueError("Нет полей")
         b = blocks[i]
         new = {k: _field(b, k, v) for k, v in fields.items()}
+        role = new.get("role", b.role)
+        if "minutes" in new and b.type == BLOCK_MARKDOWN and role != "task":
+            raise ValueError("Минуты — только у этапа и задания")      # у заметки минут нет (у задания — таймер)
         for k, v in new.items():
             setattr(b, k, v)
         if "text" in new and b.type == BLOCK_CODE and b.sel and b.sel[1] > len(b.text):
