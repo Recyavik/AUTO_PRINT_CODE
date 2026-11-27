@@ -57,6 +57,7 @@ function label(it, kind) {
   if (how && how.how) lbl.appendChild(el("span", "how", "· " + how.how));
   if (it.title) lbl.appendChild(el("span", "sub", "· " + it.title));
   else lbl.appendChild(el("span", "addtitle", "+ заголовок"));
+  if (it.type === "markdown" && kind === "task" && decor.task) lbl.appendChild(decor.task(it));   // «На экран · 5 мин»
   return lbl;
 }
 
@@ -244,7 +245,7 @@ function decorateCode(n, it) {
 }
 
 // шапка блока кода для окна программы (screenctl.js ставит свою); null — «Следующим», как в суфлёре 0.12
-export const decor = { code: null };
+export const decor = { code: null, task: null };
 
 function oldArmSlot(slot, it, P, hk, on, busy, st) {
   let text = "", cls = "armed-chip";
@@ -526,7 +527,7 @@ function groupBox(key, isStage) {
 // какой слайд сейчас у учеников — отметка на ленте (без перерисовки блоков)
 export function markOnScreen() {
   const ef = (A.S && A.S.efir) || {};
-  const bid = ef.mode === "slide" ? ef.slide_bid : "";
+  const bid = ef.mode === "slide" ? ef.slide_bid : ef.mode === "task" ? ef.timer_task : "";   // слайд или задание у учеников
   for (const n of document.querySelectorAll(".blk.onscreen")) if (n.dataset.id !== bid) n.classList.remove("onscreen");
   if (bid) nodeOf(bid)?.classList.add("onscreen");
 }

@@ -81,7 +81,7 @@ class _Files:
 def look_files(look) -> list[Path]:
     """Файлы оформления, которые есть на этом компьютере: фон, заставка перерыва, видео зарядок, шрифт."""
     out = []
-    for spec in (look.background, look.break_background):
+    for spec in (look.background, look.break_background, look.timer_background):
         if spec.startswith("image:") and Path(spec[6:]).is_file():
             out.append(Path(spec[6:]))
     out += [Path(e.path) for e in look.exercises if e.path and Path(e.path).is_file()]
@@ -144,7 +144,7 @@ def export_package(path, lessons=(), plans=(), looks=(), media: bool = True, pro
                     z.writestr(name, to_md(md_t, "media", copy_image=lambda b, a=arcs: a.get(b.id)))
             for look in looks:
                 d = look.to_dict()
-                for k in ("background", "break_background"):
+                for k in ("background", "break_background", "timer_background"):
                     if d[k].startswith("image:") and Path(d[k][6:]).is_file():
                         d[k] = "image:" + lmedia.add(Path(d[k][6:]))
                 for e in d["exercises"]:
@@ -257,7 +257,7 @@ def read_package(path, look_media_dir: Path | None = None) -> Package:
                 def place(a: str) -> str:
                     f = _extract(z, a, look_media_dir) if a in names else None
                     return str(f) if f is not None else ""
-                for k in ("background", "break_background"):
+                for k in ("background", "break_background", "timer_background"):
                     v = str(d.get(k) or "")
                     if v.startswith("image:looks_media/"):
                         f = place(v[6:])

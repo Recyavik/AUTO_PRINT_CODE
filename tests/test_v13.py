@@ -54,9 +54,12 @@ class FakeAudio:
 
 
 def deck_lesson() -> Template:
+    from autoprint.storage import BLOCK_MARKDOWN
     t = Template("Урок пульта", [
         stage("Зарядка для глаз", 5, id="d1", stage_kind="exercise"),
         stage("Тренажёры", 10, id="d2"),
+        Block(BLOCK_MARKDOWN, "Напишите **average(nums)**\n\nПроверьте на [5, 4, 3]", role="task", id="tk1",
+              title="Средний балл", minutes=5),
         Block(BLOCK_IMAGE, "s1.png", id="i1", slide=1), Block(BLOCK_IMAGE, "s2.png", id="i2", slide=2),
         Block(BLOCK_IMAGE, "s3.png", id="i3", slide=3),
         stage("Перерыв", 7, id="d3", stage_kind="break"),
@@ -697,7 +700,7 @@ class MacroDeckPageTest(unittest.TestCase):
         self.assertEqual(sum(c["entity"] == "variable" for c in first), len(md.variables()))
         self.assertIn({"op": "update", "entity": "folder", "id": "home-1", "data": {"name": "Урок"}}, second)
         widgets = [c for c in second if c["entity"] == "widget"]
-        self.assertEqual(len(widgets), 13)
+        self.assertEqual(len(widgets), len(md.IMAGE_KEYS))
         self.assertTrue(all(c["data"]["folderId"] == "home-1" for c in widgets))
         self.assertFalse(any(c["entity"] == "folder" and c["op"] == "create" for c in second))
         shown = [a[1]["actionId"] for a in fake.actions]
@@ -905,6 +908,290 @@ class LanAddressTest(unittest.TestCase):
     def test_real_interfaces_do_not_fail(self):
         from autoprint.ui.deck_control import lan_addresses
         self.assertIsInstance(lan_addresses(), list)
+
+
+class TimerTest(unittest.TestCase):
+    """1.3 таймер: на весь экран и задание с отсчётом; вид и конец — в оформлении урока."""
+    port = 18953
+
+    def setUp(self):
+        from autoprint.efir.model import Look
+        self.win = window([deck_lesson()], self.port)
+        self.look = Look(title="Таймер", background="color:#123456", timer_min=4)
+        self.win.efir.save_look(self.look)
+        self.win.store.get("D").look = self.look.id
+        self.win.printer.set_focus("D")
+
+    def tearDown(self):
+        if self.win.efir.live_webinar() is not None:
+            self.win.efir.stop_live()
+        close(self.win)
+
+    def screen(self) -> dict:
+        return self.win.efir.server._states["screen"]
+
+    def test_look_keeps_timer_settings(self):
+        from autoprint.efir.model import Look, look_from_dict
+        lk = Look(timer_min=3, timer_task_style="strip", timer_full_style="digits", timer_end="text",
+                  timer_end_text="Скоро продолжим", timer_background="color:#000000")
+        back = look_from_dict(lk.to_dict())
+        for k in ("timer_min", "timer_task_style", "timer_full_style", "timer_end", "timer_end_text", "timer_background"):
+            self.assertEqual(getattr(back, k), getattr(lk, k))
+        bad = look_from_dict({**lk.to_dict(), "timer_end": "boom", "timer_min": 9999, "timer_task_style": "x"})
+        self.assertEqual((bad.timer_end, bad.timer_min, bad.timer_task_style), ("zero", 180, "corner"))
+        self.assertEqual(look_from_dict({"title": "Старое"}).timer_end_text, "Время!")    # оформление до 1.3
+
+    def test_full_screen_timer_uses_look_minutes(self):
+        self.win.lesson.command({"cmd": "timer"})
+        ef = self.win.efir
+        self.assertEqual(ef.mode, "timer")
+        tm = self.screen()["tmr"]
+        self.assertEqual(tm["kind"], "full")
+        self.assertEqual(tm["total"], 4 * 60 * 1000)                    # по оформлению урока
+        self.assertEqual(tm["style"], "ring")
+        self.assertEqual(tm["end"], "zero")
+        self.assertIsNone(tm["task"])
+        self.win.lesson.command({"cmd": "timer", "minutes": 3})          # своё время из меню
+        self.assertEqual(self.screen()["tmr"]["total"], 3 * 60 * 1000)
+
+    def test_task_timer_shows_task_with_its_minutes(self):
+        self.win.lesson.command({"cmd": "task_timer", "block": "tk1"})
+        ef = self.win.efir
+        self.assertEqual(ef.mode, "task")
+        tm = self.screen()["tmr"]
+        self.assertEqual((tm["kind"], tm["style"]), ("task", "corner"))
+        self.assertEqual(tm["total"], 5 * 60 * 1000)                    # минуты задания
+        self.assertEqual(tm["task"]["title"], "Средний балл")
+        self.assertIn("<b>average(nums)</b>", tm["task"]["html"])
+        self.win.lesson.command({"cmd": "task_timer", "block": "tk1", "minutes": 3})   # «у меня быстрые ребята»
+        self.assertEqual(self.screen()["tmr"]["total"], 3 * 60 * 1000)
+
+    def test_end_and_style_from_look(self):
+        self.look.timer_end, self.look.timer_end_text, self.look.timer_full_style = "text", "Скоро продолжим", "digits"
+        self.win.efir.save_look(self.look)
+        self.win.efir.webinar = None
+        self.win.lesson.command({"cmd": "timer"})
+        tm = self.screen()["tmr"]
+        self.assertEqual((tm["end"], tm["end_text"], tm["style"]), ("text", "Скоро продолжим", "digits"))
+        self.look.timer_end = "empty"
+        self.win.efir.save_look(self.look)
+        self.win.efir.webinar = None
+        self.win.lesson.command({"cmd": "timer"})
+        self.assertEqual((self.screen()["tmr"]["end"], self.screen()["tmr"]["end_text"]), ("empty", ""))
+
+    def test_pause_add_restart_and_background(self):
+        ef = self.win.efir
+        self.win.lesson.command({"cmd": "timer", "minutes": 2})
+        self.win.lesson.command({"cmd": "timer_pause"})
+        self.assertIsNotNone(ef.tmr_paused)
+        self.assertIsNotNone(self.screen()["tmr"]["paused_left"])
+        left = ef.timer_left()
+        self.win.lesson.command({"cmd": "timer_adjust", "seconds": 60})
+        self.assertAlmostEqual(ef.timer_left(), left + 60, delta=1)
+        self.win.lesson.command({"cmd": "timer_pause"})                  # дальше
+        self.assertIsNone(ef.tmr_paused)
+        self.win.lesson.command({"cmd": "timer_restart"})
+        self.assertAlmostEqual(ef.timer_left(), ef.tmr_total, delta=1)
+        self.win.lesson.command({"cmd": "background"})
+        self.assertEqual(ef.mode, "idle")
+        self.assertNotIn("tmr", self.screen())
+
+    def test_timer_replaces_slide_and_break(self):
+        self.win.lesson.command({"cmd": "start", "force": True})
+        self.win.lesson.command({"cmd": "break", "minutes": 5})
+        self.win.lesson.command({"cmd": "timer"})
+        self.assertNotIn("brk", self.screen())
+        self.assertIsNone(self.win.efir.store.brk)                       # перерыв не вернётся после перезапуска
+
+    def test_page_knows_timer(self):
+        self.win.lesson.command({"cmd": "task_timer", "block": "tk1"})
+        self.win.lesson._last = None
+        self.win.lesson.publish()
+        lc = self.win.efir.server._states["lesson"]
+        ex = lc["efir"]
+        self.assertGreater(ex["timer_ends"], 0)
+        self.assertEqual(ex["timer_task"], "tk1")
+        self.assertEqual(ex["timer_min"], 4)
+        item = next(x for x in lc["lesson"]["items"] if x["id"] == "tk1")
+        self.assertEqual(item["minutes"], 5)
+
+    def test_task_minutes_editable_and_in_markdown(self):
+        from autoprint.lesson_edit import apply
+        from autoprint.lesson_md import parse, to_md
+        t = self.win.store.get("D")
+        md = to_md(t, "media")
+        self.assertIn("[!task] Средний балл · 5 мин", md)
+        back = parse(md, None, "Урок")
+        nb = next(x for x in back.blocks if x.role == "task")
+        self.assertEqual((nb.title, nb.minutes), ("Средний балл", 5))
+        apply(t, [{"op": "set", "block": "tk1", "fields": {"minutes": 3}}])
+        self.assertEqual(t.find_block("tk1").minutes, 3)
+
+    def test_pult_timer_and_task(self):
+        from autoprint.audio import Mute
+        self.win.settings.deck_on = True
+        self.win.deck.apply()
+        self.win.deck.audio = Mute(FakeAudio())
+        d = self.win.deck
+        st = d.run("timer")
+        self.assertEqual(self.win.efir.mode, "timer")
+        self.assertTrue(st["timer"])
+        self.assertRegex(st["timer_left"], r"^0[34]:\d\d$")
+        st = d.run("timer_add")
+        self.assertRegex(st["timer_left"], r"^0[45]:\d\d$")
+        st = d.run("timer")                                              # идёт — убрать
+        self.assertEqual(self.win.efir.mode, "idle")
+        st = d.run("task")
+        self.assertEqual(self.win.efir.mode, "task")
+        self.assertTrue(st["task"])
+        self.assertTrue(st["has_task"])
+        d.run("task")
+        self.assertEqual(self.win.efir.mode, "idle")
+
+    def test_phone_page_timer_buttons(self):
+        from autoprint import macrodeck as md
+        self.assertIn("timer", md.IMAGE_KEYS)
+        self.assertIn("task", md.IMAGE_KEYS)
+        st = {"screen": "timer", "timer": True, "timer_left": "02:41", "has_task": True}
+        pg = md.page(st, "tiles", "http://127.0.0.1:8791/api/?key=K")
+        self.assertEqual(pg["timer"]["label"], "{{ vars.apc_timer_left }}")
+        self.assertEqual(pg["task"]["label"], "")
+        self.assertIn("api/timer?key=K", json.dumps(pg["timer"]["flows"]))
+        self.assertEqual(md.values(st)["apc_timer_left"], "02:41")
+        img = md.images({"screen": "idle", "has_task": False})
+        from autoprint import deckart
+        self.assertIn(deckart.OFF, img["task"])                         # заданий в уроке нет — погашено
+
+
+class ScreenTimerTest(unittest.TestCase):
+    """Что видят ученики (вкладка в невидимом Edge): таймер на весь экран и задание с отсчётом; конец — по
+    оформлению: 0:00, своя надпись или ничего."""
+    port = 18954
+
+    @classmethod
+    def setUpClass(cls):
+        from cdp import Edge
+        from autoprint.efir.model import Look
+        cls.win = window([deck_lesson()], cls.port)
+        cls.look = Look(title="Таймер", background="color:#14234A", timer_min=4, text_color="#FFFFFF")
+        cls.win.efir.save_look(cls.look)
+        cls.win.store.get("D").look = cls.look.id
+        cls.win.printer.set_focus("D")
+        cls.edge = Edge.start(f"http://127.0.0.1:{cls.win.efir.server.port}/?nofade", pump=lambda: pump(5),
+                              width=1280, height=720)
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.edge.close()
+        close(cls.win)
+
+    def look_set(self, **kw):
+        for k, v in kw.items():
+            setattr(self.look, k, v)
+        self.win.efir.save_look(self.look)
+        self.win.efir.webinar = None
+
+    def js(self, code):
+        return self.edge.eval(code)
+
+    def wait(self, cond, timeout=8):
+        return self.edge.wait(cond, timeout)
+
+    def finish(self):
+        import time
+        self.win.efir.tmr_ends = time.time() - 1                         # время вышло
+        self.win.efir.publish()
+
+    def test_full_ring_then_zero(self):
+        self.look_set(timer_full_style="ring", timer_end="zero")
+        self.win.lesson.command({"cmd": "timer"})
+        self.assertTrue(self.wait("document.querySelector('#tmr').classList.contains('on') && "
+                                  "!!document.querySelector('#tmr .full .ring .arc')"))
+        self.assertTrue(self.wait("/^[34]:\\d\\d$/.test(document.querySelector('#tmr .num').textContent)"))
+        self.assertEqual(self.js("document.querySelector('#tmr .of').textContent"), "из 4 мин")
+        self.finish()
+        self.assertTrue(self.wait("document.querySelector('#tmr .num').textContent === '0:00'"))
+        self.win.lesson.command({"cmd": "background"})
+        self.assertTrue(self.wait("!document.querySelector('#tmr').classList.contains('on')"))
+
+    def test_digits_with_minute_ticks_and_own_text(self):
+        self.look_set(timer_full_style="digits", timer_end="text", timer_end_text="Скоро продолжим")
+        self.win.lesson.command({"cmd": "timer", "minutes": 3})
+        self.assertTrue(self.wait("document.querySelectorAll('#tmr .ticks i').length === 3"))
+        self.finish()
+        self.assertTrue(self.wait("(() => { const e = document.querySelector('#tmr .end'); return !!e && "
+                                  "e.textContent === 'Скоро продолжим' && "
+                                  "document.querySelector('#tmr .num').style.display === 'none'; })()"))
+        self.win.lesson.command({"cmd": "background"})
+
+    def test_empty_end(self):
+        self.look_set(timer_full_style="ring", timer_end="empty")
+        self.win.lesson.command({"cmd": "timer", "minutes": 1})
+        self.finish()
+        self.assertTrue(self.wait("(() => { const e = document.querySelector('#tmr .end'); return !!e && "
+                                  "e.textContent === '' && document.querySelector('#tmr .num').style.display === 'none'; })()"))
+        self.win.lesson.command({"cmd": "background"})
+
+    def test_task_corner_and_strip(self):
+        self.look_set(timer_task_style="corner", timer_end="zero")
+        self.win.lesson.command({"cmd": "task_timer", "block": "tk1", "minutes": 3})
+        self.assertTrue(self.wait("!!document.querySelector('#tmr .task .t') && "
+                                  "document.querySelector('#tmr .task .t').textContent === 'Средний балл' && "
+                                  "!!document.querySelector('#tmr .glass .ring .num')"))
+        self.assertIn("average(nums)", self.js("document.querySelector('#tmr .task .body').textContent"))
+        self.assertEqual(self.js("document.querySelector('#tmr .task .lbl').textContent"), "Задание · 3 мин")
+        self.look_set(timer_task_style="strip")
+        self.win.lesson.command({"cmd": "task_timer", "block": "tk1", "minutes": 3})
+        self.assertTrue(self.wait("!!document.querySelector('#tmr .strip .pill .num') && "
+                                  "parseFloat(document.querySelector('#tmr .strip .track i').style.width) > 90"))
+        self.win.lesson.command({"cmd": "background"})
+
+
+class PresetBackgroundTest(unittest.TestCase):
+    """1.3: готовые картинки-фоны внутри программы («preset:<ключ>») — для фона, перерыва и таймера."""
+    port = 18955
+
+    def test_model_accepts_only_known_presets(self):
+        from autoprint.efir.model import PRESET_IMAGES, look_from_dict
+        lk = look_from_dict({"background": "preset:waves", "break_background": "preset:nope",
+                             "timer_background": "preset:night"})
+        self.assertEqual((lk.background, lk.break_background, lk.timer_background), ("preset:waves", "", "preset:night"))
+        root = Path(__file__).resolve().parent.parent / "autoprint" / "efir" / "page" / "backgrounds"
+        for key, title in PRESET_IMAGES:
+            self.assertTrue((root / f"{key}.jpg").is_file(), key)
+            self.assertTrue((root / f"{key}-s.jpg").is_file(), key)
+            self.assertLess((root / f"{key}.jpg").stat().st_size, 600_000)          # программа не толстеет зря
+            self.assertTrue(title)
+
+    def test_served_and_resolved(self):
+        win = window([deck_lesson()], self.port)
+        try:
+            ef = win.efir
+            self.assertEqual(ef._bg("preset:waves"), {"kind": "image", "value": "waves.jpg", "url": "/static/bg/waves.jpg"})
+            self.assertEqual(ef._bg("preset:nope")["kind"], "color")
+            base = f"http://127.0.0.1:{ef.server.port}"
+            with urllib.request.urlopen(base + "/static/bg/waves.jpg", timeout=5) as r:
+                self.assertEqual(r.headers["Content-Type"], "image/jpeg")
+                self.assertEqual(r.read(3), b"\xff\xd8\xff")
+            for bad in ("/static/bg/../screen.html", "/static/bg/nope.jpg", "/static/bg/WAVES.JPG"):
+                with self.assertRaises(urllib.error.HTTPError) as cm:
+                    urllib.request.urlopen(base + bad, timeout=5)
+                self.assertEqual(cm.exception.code, 404)
+                cm.exception.close()
+            from autoprint.app_state import efir_state
+            st = efir_state(win)
+            self.assertIn(["waves", "Волны"], st["bg_presets"])
+            self.assertIsInstance(st["own_images"], list)
+        finally:
+            close(win)
+
+    def test_build_ships_backgrounds(self):
+        sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "tools"))
+        import build_exe
+        datas = build_exe.collect_datas()
+        dests = {(Path(src).name, dest) for src, dest in datas}
+        self.assertIn(("waves.jpg", "autoprint/efir/page/backgrounds"), dests)
+        self.assertIn(("waves-s.jpg", "autoprint/efir/page/backgrounds"), dests)
 
 
 class DeckSettingsTest(unittest.TestCase):

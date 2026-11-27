@@ -237,6 +237,9 @@ def collect_datas() -> list[tuple[str, str]]:
         if d.is_dir():
             datas += [(str(f), f"autoprint/efir/page/{sub}") for f in sorted(d.glob("*"))
                       if f.suffix in (".js", ".css", ".txt")]
+    bgs = page / "backgrounds"                            # готовые фоны экрана учеников (1.3)
+    if bgs.is_dir():
+        datas += [(str(f), "autoprint/efir/page/backgrounds") for f in sorted(bgs.glob("*")) if f.suffix in (".jpg", ".md")]
     fonts = page / "fonts"                                # шрифты окна программы (1.0) — без интернета
     if fonts.is_dir():
         datas += [(str(f), "autoprint/efir/page/fonts") for f in sorted(fonts.glob("*")) if f.suffix in (".woff2", ".txt")]

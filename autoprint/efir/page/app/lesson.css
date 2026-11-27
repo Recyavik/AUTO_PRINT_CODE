@@ -100,15 +100,10 @@ body.lw-drag, body.lw-drag * { cursor: col-resize !important; user-select: none 
 @keyframes scrpulse { 0% { opacity: 1; transform: scale(1); } 100% { opacity: 0; transform: scale(1.35); } }
 @media (prefers-reduced-motion: reduce) { .scricons .scrbtn.pulse::after { animation: none; opacity: 1; } }
 /* место справа от значков — оставлено заранее: стрелки слайдов с номером или отсчёт перерыва выезжают в него */
-.scrinfo { position: relative; flex: none; width: 88px; height: 30px; margin-left: 2px; }
+.scrinfo { position: relative; flex: none; width: 64px; height: 30px; margin-left: 2px; }
 .scrinfo > * { position: absolute; inset: 0; transition: opacity .18s ease, transform .18s ease, visibility 0s linear 0s; }
 .scrinfo > [hidden] { display: flex; visibility: hidden; opacity: 0; transform: translateX(-10px); pointer-events: none;
   transition: opacity .14s ease, transform .14s ease, visibility 0s linear .14s; }
-.slidenav { display: flex; align-items: center; justify-content: space-between; gap: 2px; }
-.slidenav button { width: 26px; height: 30px; border: 0; border-radius: 7px; background: transparent; color: var(--text); font-size: 20px;
-  line-height: 1; cursor: pointer; flex: none; }
-.slidenav button:hover { background: var(--raised); }
-.slidenav .n { flex: 1; text-align: center; font-weight: 600; font-size: 13.5px; font-variant-numeric: tabular-nums; }
 .brkleft { display: flex; align-items: center; justify-content: center; border: 0; border-radius: 8px; background: var(--accent-soft);
   color: var(--accent); font-size: 14px; font-weight: 650; font-variant-numeric: tabular-nums; cursor: pointer; }
 .brkleft:hover { background: color-mix(in srgb, var(--accent) 22%, transparent); }

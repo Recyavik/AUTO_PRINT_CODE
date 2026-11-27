@@ -16,7 +16,7 @@
   .layer { position: fixed; inset: 0; transition: opacity .6s ease; }
   /* фоны — в своём контексте наложения: их z-index при смене не поднимает их над надписями */
   #bgs { position: fixed; inset: 0; z-index: 0; }
-  #caption { z-index: 2; } #brk { z-index: 3; } #vid { z-index: 4; } #slide { z-index: 5; } #black { z-index: 8; } #dot { z-index: 9; }
+  #caption { z-index: 2; } #brk { z-index: 3; } #tmr { z-index: 3; } #vid { z-index: 4; } #slide { z-index: 5; } #black { z-index: 8; } #dot { z-index: 9; }
   /* чёрный экран (учитель нажал «Чёрный экран»): поверх фона, надписи, перерыва, видео и слайда — плавно */
   #black { position: fixed; inset: 0; background: #000; opacity: 0; transition: opacity .4s ease; pointer-events: none; }
   #black.on { opacity: 1; }
@@ -47,6 +47,64 @@
     background: rgba(255,255,255,.12); }
   #brk .bar i { display: block; height: 100%; width: 0; background: var(--fg); opacity: .75; }
   #brk.done .time { font-size: clamp(40px, 11vw, 240px); letter-spacing: .06em; }
+  /* таймер (1.3): задание с отсчётом (кольцо в углу / полоса снизу) или отсчёт на весь экран (кольцо / цифры);
+     цвета и шрифт — оформления урока (--fg, --font); время вышло — 0:00, своя надпись или ничего */
+  #tmr { opacity: 0; transition: opacity .35s ease; color: var(--fg); font-family: var(--font); pointer-events: none;
+    container-type: size; }
+  #tmr.on { opacity: 1; }
+  #tmr .bgwrap { position: absolute; inset: 0; }
+  #tmr .num { font-weight: 800; font-variant-numeric: tabular-nums; letter-spacing: -.02em; line-height: 1; }
+  #tmr .of { font-weight: 600; opacity: .62; letter-spacing: .04em; }
+  #tmr .end { font-weight: 800; letter-spacing: .01em; line-height: 1.05; overflow-wrap: anywhere; }
+  #tmr .ring { position: relative; display: grid; place-items: center; aspect-ratio: 1; }
+  #tmr .ring svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+  #tmr .ring .trk { stroke: currentColor; opacity: .14; }
+  #tmr .ring .arc { stroke: currentColor; transform: rotate(-90deg); transform-origin: 50% 50%;
+    filter: drop-shadow(0 0 .5cqmin color-mix(in srgb, currentColor 70%, transparent)); transition: stroke-dashoffset .25s linear; }
+  #tmr .ring .tick { stroke: currentColor; opacity: .3; }
+  #tmr .mid { position: relative; text-align: center; display: flex; flex-direction: column; align-items: center; }
+  #tmr .glow { text-shadow: 0 0 4cqmin color-mix(in srgb, currentColor 35%, transparent); }
+  /* на весь экран */
+  #tmr .full { position: absolute; inset: 0; display: grid; place-items: center; text-align: center; padding: 4cqh 6cqw; }
+  #tmr .full .ring { width: min(46cqw, 78cqh); }
+  #tmr .full .ring .num { font-size: min(11cqw, 19cqh); }
+  #tmr .full .ring .of { font-size: min(1.9cqw, 3.3cqh); margin-top: 1cqmin; }
+  #tmr .full .ring .end { font-size: min(5.6cqw, 10cqh); }
+  #tmr .full.digits .num { font-size: min(25cqw, 48cqh); }
+  #tmr .full.digits .end { font-size: min(12cqw, 22cqh); }
+  #tmr .ticks { position: absolute; left: 10cqw; right: 10cqw; bottom: 7cqh; display: flex; gap: .8cqw; }
+  #tmr .ticks i { flex: 1; height: max(5px, 1.6cqh); border-radius: 1cqh; background: currentColor; opacity: .16; }
+  #tmr .ticks i.on { opacity: 1; box-shadow: 0 0 1.4cqmin color-mix(in srgb, currentColor 60%, transparent); }
+  /* задание */
+  #tmr .task { position: absolute; left: 6cqw; top: 9cqh; right: 31cqw; bottom: 8cqh; overflow: hidden; }
+  #tmr .task.wide { right: 6cqw; bottom: 22cqh; }
+  #tmr .task .lbl { display: inline-flex; font-weight: 700; font-size: min(1.7cqw, 3cqh); letter-spacing: .18em;
+    text-transform: uppercase; opacity: .75; padding: .9cqmin 1.8cqmin; border-radius: 3cqmin;
+    background: color-mix(in srgb, currentColor 9%, transparent); border: 1px solid color-mix(in srgb, currentColor 16%, transparent); }
+  #tmr .task .t { font-weight: 800; font-size: min(4.6cqw, 8.4cqh); line-height: 1.08; margin: 2.4cqh 0 2cqh; text-wrap: balance; }
+  #tmr .task .body { font-weight: 500; font-size: min(2.5cqw, 4.5cqh); line-height: 1.5; opacity: .9; }
+  #tmr .task .body p { margin: 0 0 1.4cqh; }
+  #tmr .task .body ul, #tmr .task .body ol { margin: 0 0 1.4cqh; padding-left: 1.3em; }
+  #tmr .task .body code { font-family: Consolas, monospace; font-size: .92em; padding: 0 .25em; border-radius: .25em;
+    background: color-mix(in srgb, currentColor 12%, transparent); }
+  #tmr .task .body pre { white-space: pre-wrap; font-size: .85em; padding: 1cqh 1.4cqw; border-radius: 1cqmin;
+    background: color-mix(in srgb, currentColor 10%, transparent); }
+  #tmr .glass { position: absolute; right: 3.6cqw; top: 4.5cqh; width: 22cqw; padding: 1.6cqw; border-radius: 3.2cqw;
+    background: rgba(10,16,36,.38); border: 1px solid color-mix(in srgb, currentColor 16%, transparent);
+    backdrop-filter: blur(14px); box-shadow: 0 2.8cqh 7cqh rgba(0,0,0,.35); }
+  #tmr .glass .num { font-size: min(5.6cqw, 10cqh); }
+  #tmr .glass .of { font-size: min(1.45cqw, 2.6cqh); margin-top: .7cqh; }
+  #tmr .glass .end { font-size: min(2.5cqw, 4.4cqh); }
+  #tmr .strip { position: absolute; left: 4cqw; right: 4cqw; bottom: 6cqh; height: 16cqh; border-radius: 8cqh;
+    display: flex; align-items: center; gap: 2.4cqw; padding: 0 1.4cqw 0 3cqw; background: rgba(10,16,36,.4);
+    border: 1px solid color-mix(in srgb, currentColor 16%, transparent); backdrop-filter: blur(14px); }
+  #tmr .strip .track { flex: 1; height: 2.3cqh; border-radius: 2cqh; background: color-mix(in srgb, currentColor 14%, transparent); overflow: hidden; }
+  #tmr .strip .track i { display: block; height: 100%; border-radius: 2cqh; background: currentColor;
+    box-shadow: 0 0 1.4cqmin color-mix(in srgb, currentColor 70%, transparent); transition: width .25s linear; }
+  #tmr .strip .pill { min-width: 17cqw; height: 11cqh; border-radius: 5.5cqh; display: grid; place-items: center;
+    background: color-mix(in srgb, currentColor 10%, transparent); font-size: min(4.6cqw, 8.2cqh); }
+  #tmr .strip .pill .end { font-size: min(2.6cqw, 4.6cqh); }
+  #tmr .paused .num { opacity: .55; }
   #vid { position: fixed; inset: 0; background: #000; opacity: 0; transition: opacity .45s ease; }
   #vid.on { opacity: 1; }
   #vid video { width: 100%; height: 100%; object-fit: contain; display: block; background: #000; }
@@ -89,6 +147,7 @@
   <div class="inner"><div class="title"></div><div class="time"></div><div class="sub"></div></div>
   <div class="bar"><i></i></div>
 </div>
+<div class="layer" id="tmr"><div class="bgwrap"></div><div class="view"></div></div>
 <div id="vid"><video playsinline preload="auto"></video><img alt=""></div>
 <div id="slide"><div class="sblur"></div><div class="sfill"></div><img alt=""></div>
 <div id="black"></div>
@@ -477,6 +536,76 @@ function startScreen() {
     brkEl.querySelector('.bar i').style.width = (frac * 100).toFixed(2) + '%';
   }
 
+  // ---------------------------------------------------- таймер (1.3)
+  const tmrEl = document.getElementById('tmr'), tmrBg = new Scene(tmrEl.querySelector('.bgwrap'));
+  const tmrView = tmrEl.querySelector('.view');
+  let tmrTimer = 0, tmrKey = '';
+  const R = 42, C = 2 * Math.PI * R;
+  function fmtLeft(ms) {
+    const s = Math.max(0, Math.ceil(ms / 1000)), h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), sec = s % 60;
+    return (h ? h + ':' + String(m).padStart(2, '0') : String(m)) + ':' + String(sec).padStart(2, '0');
+  }
+  function ofText(total) {
+    const m = Math.round(total / 60000);
+    return m >= 1 && total % 60000 === 0 ? 'из ' + m + ' мин' : 'из ' + fmtLeft(total);
+  }
+  function ringSvg(ticks) {
+    let t = '';
+    if (ticks) for (let i = 0; i < 12; i++) {
+      const a = i / 12 * 2 * Math.PI, x1 = 50 + 49 * Math.sin(a), y1 = 50 - 49 * Math.cos(a), x2 = 50 + 45.5 * Math.sin(a), y2 = 50 - 45.5 * Math.cos(a);
+      t += `<line class="tick" x1="${x1.toFixed(2)}" y1="${y1.toFixed(2)}" x2="${x2.toFixed(2)}" y2="${y2.toFixed(2)}" stroke-width=".9"/>`;
+    }
+    return `<svg viewBox="0 0 100 100">${t}<circle class="trk" cx="50" cy="50" r="${R}" fill="none" stroke-width="${ticks ? 3.2 : 6}"/>` +
+      `<circle class="arc" cx="50" cy="50" r="${R}" fill="none" stroke-width="${ticks ? 3.2 : 6}" stroke-linecap="round" ` +
+      `stroke-dasharray="${C.toFixed(2)}" stroke-dashoffset="0"/></svg>`;
+  }
+  function buildTimer(t) {
+    const esc = (x) => String(x || '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+    if (t.kind === 'task') {
+      const head = `<span class="lbl">Задание · ${esc(ofText(t.total).replace('из ', ''))}</span>` +
+        `<div class="t">${esc(t.task.title)}</div><div class="body">${t.task.html || ''}</div>`;   // HTML — готовый и безопасный (программа)
+      if (t.style === 'strip') return `<div class="task wide">${head}</div>` +
+        `<div class="strip"><div class="track"><i></i></div><div class="pill"><span class="num"></span></div></div>`;
+      return `<div class="task">${head}</div><div class="glass"><div class="ring">${ringSvg(false)}` +
+        `<div class="mid"><div class="num"></div><div class="of">${esc(ofText(t.total))}</div></div></div></div>`;
+    }
+    if (t.style === 'digits') {
+      const n = Math.max(1, Math.min(30, Math.round(t.total / 60000)));
+      return `<div class="full digits"><div class="mid"><div class="num glow"></div></div></div>` +
+        `<div class="ticks">${'<i></i>'.repeat(n)}</div>`;
+    }
+    return `<div class="full"><div class="ring">${ringSvg(true)}<div class="mid"><div class="num"></div>` +
+      `<div class="of">${esc(ofText(t.total))}</div></div></div></div>`;
+  }
+  function drawTimer() {
+    const t = S.tmr; if (!t) return;
+    const key = t.seq + '|' + t.kind + '|' + t.style + '|' + t.total + '|' + (t.task ? t.task.title + t.task.html : '');
+    if (key !== tmrKey) { tmrKey = key; tmrView.innerHTML = buildTimer(t); }
+    const left = t.paused_left != null ? t.paused_left : t.ends_at - now();
+    const done = left <= 0;
+    const frac = t.total ? Math.min(1, Math.max(0, left / t.total)) : 0;       // сколько осталось, 1 → 0
+    tmrView.classList.toggle('paused', t.paused_left != null);
+    const num = tmrView.querySelector('.num'), of = tmrView.querySelector('.of');
+    let end = tmrView.querySelector('.end');
+    if (done && t.end !== 'zero') {
+      // время вышло: своя надпись (цветом оформления) или ничего — вместо цифр
+      if (num) num.style.display = 'none';
+      if (of) of.style.display = 'none';
+      if (!end && num) { end = document.createElement('div'); end.className = 'end'; num.after(end); }
+      if (end) { end.textContent = t.end === 'text' ? (t.end_text || '') : ''; end.style.display = ''; }
+    } else {
+      if (end) end.style.display = 'none';
+      if (num) { num.style.display = ''; num.textContent = fmtLeft(left); }
+      if (of) of.style.display = '';
+    }
+    const arc = tmrView.querySelector('.arc');
+    if (arc) arc.setAttribute('stroke-dashoffset', (C * (1 - frac)).toFixed(2));
+    const bar = tmrView.querySelector('.strip .track i');
+    if (bar) bar.style.width = (frac * 100).toFixed(2) + '%';
+    const ticks = tmrView.querySelectorAll('.ticks i');
+    ticks.forEach((el, i) => el.classList.toggle('on', i < Math.ceil(frac * ticks.length - 1e-9)));
+  }
+
   function showVideo(ex) {
     const isImg = /\.(png|jpe?g|gif|webp|bmp)$/i.test(ex.url.split('?')[0]);
     if (ex.seq !== exSeq) {
@@ -538,6 +667,15 @@ function startScreen() {
       brkEl.classList.remove('on');
       if (brkTimer) { clearInterval(brkTimer); brkTimer = 0; }
       setTimeout(() => { if (!brkEl.classList.contains('on')) brkBg.clear(); }, 700);
+    }
+    if ((st.mode === 'timer' || st.mode === 'task') && st.tmr) {
+      if (st.tmr.bg) tmrBg.set(st.tmr.bg); else tmrBg.clear();     // без своего фона — виден основной
+      tmrEl.classList.add('on'); drawTimer();
+      if (!tmrTimer) tmrTimer = setInterval(drawTimer, 200);
+    } else {
+      tmrEl.classList.remove('on');
+      if (tmrTimer) { clearInterval(tmrTimer); tmrTimer = 0; }
+      setTimeout(() => { if (!tmrEl.classList.contains('on')) { tmrBg.clear(); tmrView.innerHTML = ''; tmrKey = ''; } }, 450);
     }
     if (st.mode === 'exercise' && st.exercise && st.exercise.url) showVideo(st.exercise); else hideVideo();
     showSlide(st.mode === 'slide' ? st.slide : null);

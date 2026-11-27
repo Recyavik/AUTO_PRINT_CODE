@@ -299,6 +299,8 @@ def item_state(b: Block, media_url) -> dict:
     else:
         role = b.role if b.role in ROLES else "text"
         d["role"] = role
+        if role == "task":
+            d["minutes"] = max(0, int(b.minutes or 0))
         if role == "ask":
             question, answers = ask_parts(b.text)
             d.update(html=md_html(question), answers=[_inline(a) for a in answers])

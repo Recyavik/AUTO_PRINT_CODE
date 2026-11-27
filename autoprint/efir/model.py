@@ -22,7 +22,7 @@ _BREAK_RE = re.compile(r"перерыв|break", re.I)
 _EXERCISE_RE = re.compile(r"заряд|глаз|гимнаст|физкульт|разминк", re.I)
 _TIME_RE = re.compile(r"^\s*(\d{1,2})[:.](\d{2})\s*$")
 
-# Фон экрана эфира: "color:#RRGGBB" | "anim:<имя>" | "image:<путь>"
+# Фон экрана эфира: "color:#RRGGBB" | "anim:<имя>" | "image:<путь>" | "preset:<ключ>" (готовая картинка, 1.3)
 BG_BLACK = "color:#000000"
 ANIMATIONS = [
     ("gradient", "Градиент"),
@@ -34,6 +34,16 @@ ANIMATIONS = [
     ("pipes", "Трубы"),
 ]
 ANIMATION_NAMES = dict(ANIMATIONS)
+# готовые картинки-фоны (1.3): efir/page/backgrounds/<ключ>.jpg (и <ключ>-s.jpg — превью); "preset:<ключ>"
+PRESET_IMAGES = [
+    ("waves", "Волны"),
+    ("silk", "Шёлк"),
+    ("sunset", "Вечер"),
+    ("tunnel", "Тоннель"),
+    ("board", "Доска"),
+    ("night", "Ночь"),
+]
+PRESET_NAMES = dict(PRESET_IMAGES)
 
 # Шрифт надписей перерыва и занавеса. Веб-шрифты грузятся из Google Fonts (кириллица есть у всех),
 # без интернета — запасной системный. "file:<путь>" — свой файл шрифта (.otf/.ttf/.woff2)
@@ -99,6 +109,13 @@ class Webinar:
     break_title: str = "ПЕРЕРЫВ"
     break_show_title: bool = True    # показывать надпись перерыва (выкл — только фон и, если включён, отсчёт)
     break_done: str = "ПРОДОЛЖАЕМ"   # когда время перерыва вышло
+    # таймер (1.3): «3 минуты на задание» и просто отсчёт на весь экран
+    timer_min: int = 5               # таймер по умолчанию, мин (у задания — свои минуты)
+    timer_task_style: str = "corner" # таймер задания: corner — кольцо в углу | strip — полоса снизу
+    timer_full_style: str = "ring"   # на весь экран: ring — кольцо | digits — крупные цифры
+    timer_end: str = "zero"          # время вышло: zero — 0:00 остаётся | text — надпись | empty — ничего
+    timer_end_text: str = "Время!"   # надпись, когда время вышло (timer_end == "text")
+    timer_background: str = ""       # "" — как основной фон
     font: str = DEFAULT_FONT         # шрифт надписей (перерыв, занавес): имя или "file:<путь>"
     text_color: str = "#FFFFFF"
     id: str = field(default_factory=new_id)
@@ -124,7 +141,11 @@ class Webinar:
 # Расписание (Webinar: название, строки, перерыв по умолчанию) ссылается на оформление (Look: фон, зарядки, экран
 # перерыва, шрифт). Экран эфира и таймер работают с «собранным» Webinar — поля вида в нём копия оформления.
 LOOK_FIELDS = ("background", "caption", "exercises", "break_countdown", "break_background", "break_title",
-               "break_show_title", "break_done", "font", "text_color")
+               "break_show_title", "break_done", "timer_min", "timer_task_style", "timer_full_style", "timer_end",
+               "timer_end_text", "timer_background", "font", "text_color")
+TIMER_TASK_STYLES = ("corner", "strip")
+TIMER_FULL_STYLES = ("ring", "digits")
+TIMER_ENDS = ("zero", "text", "empty")
 
 
 @dataclass
@@ -138,6 +159,12 @@ class Look:
     break_title: str = "ПЕРЕРЫВ"
     break_show_title: bool = True
     break_done: str = "ПРОДОЛЖАЕМ"
+    timer_min: int = 5
+    timer_task_style: str = "corner"
+    timer_full_style: str = "ring"
+    timer_end: str = "zero"
+    timer_end_text: str = "Время!"
+    timer_background: str = ""
     font: str = DEFAULT_FONT
     text_color: str = "#FFFFFF"
     id: str = field(default_factory=new_id)
@@ -211,6 +238,8 @@ def _bg(v, default: str) -> str:
         return v
     if v.startswith("anim:") and v[5:] in ANIMATION_NAMES:
         return v
+    if v.startswith("preset:") and v[7:] in PRESET_NAMES:
+        return v
     if v.startswith("image:") and len(v) > 6:
         return v
     return default
@@ -265,6 +294,12 @@ def webinar_from_dict(d: dict) -> Webinar:
     w.break_title = _str(d.get("break_title"), "ПЕРЕРЫВ") or "ПЕРЕРЫВ"
     w.break_show_title = d.get("break_show_title") if isinstance(d.get("break_show_title"), bool) else True
     w.break_done = _str(d.get("break_done"), "ПРОДОЛЖАЕМ")
+    w.timer_min = _int(d.get("timer_min"), 5, 1, 180)
+    w.timer_task_style = d.get("timer_task_style") if d.get("timer_task_style") in TIMER_TASK_STYLES else "corner"
+    w.timer_full_style = d.get("timer_full_style") if d.get("timer_full_style") in TIMER_FULL_STYLES else "ring"
+    w.timer_end = d.get("timer_end") if d.get("timer_end") in TIMER_ENDS else "zero"
+    w.timer_end_text = _str(d.get("timer_end_text"), "Время!") if "timer_end_text" in d else "Время!"
+    w.timer_background = _bg(d.get("timer_background"), "")
     font = _str(d.get("font"))
     w.font = font if font in dict(FONTS) or font.startswith("file:") else DEFAULT_FONT
     color = _str(d.get("text_color"))
@@ -351,6 +386,7 @@ def ai_prompt(example: Webinar | None = None) -> str:
     ex.exercises = []                 # пути к файлам — только этого компьютера
     ex.background = BG_BLACK if ex.background.startswith("image:") else ex.background
     ex.break_background = "" if ex.break_background.startswith("image:") else ex.break_background
+    ex.timer_background = "" if ex.timer_background.startswith("image:") else ex.timer_background
     ex.font = DEFAULT_FONT if ex.font.startswith("file:") else ex.font
     sample = {"title": ex.title, "start": ex.start, "break_min": ex.break_min,
               "schedule": [{"name": a.name, "min": a.min, "kind": a.kind, "demo": a.demo} for a in ex.schedule]}

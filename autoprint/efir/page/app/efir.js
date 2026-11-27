@@ -292,6 +292,9 @@ function newPanel(box) {
 }
 
 // ---------------------------------------------------------------- оформления
+// выбор фона (основной, перерыв, таймер — одинаково): цвета и анимации, готовые картинки (1.3) и свои картинки —
+// превью, видно, что выбрано; «Картинка…» — своя с диска (сразу появляется превью — и во всех выборах фона)
+const pickedUrls = {};          // своя картинка, только что выбранная (оформление ещё не сохранено): путь → адрес превью
 function bgOptions(cur, onPick, o = {}) {
   const box = h("div", { class: "bgopts", id: o.id || null, role: "radiogroup" });
   const opt = (value, label, swatch) => {
@@ -299,23 +302,41 @@ function bgOptions(cur, onPick, o = {}) {
     b.addEventListener("click", () => onPick(value));
     return b;
   };
+  const pic = (url) => h("i", { class: "sw img", style: { backgroundImage: `url("${url}")` } });
+  const short = (name) => { const n = String(name || "").replace(/\.[^.]+$/, ""); return n.length > 14 ? n.slice(0, 13) + "…" : n || "Картинка"; };
   const draw = () => {
     clear(box);
+    const v = cur();
     if (o.inherit) box.append(opt("", "Как основной", h("i", { class: "sw inh" })));
     box.append(opt("color:#000000", "Чёрный", h("i", { class: "sw", style: { background: "#000" } })));
     for (const [k, t] of ef().animations || []) box.append(opt("anim:" + k, t, h("i", { class: "sw anim a-" + k })));
-    const v = cur();
+    for (const [k, t] of ef().bg_presets || []) box.append(opt("preset:" + k, t, pic("/static/bg/" + k + "-s.jpg")));
+    const own = (ef().own_images || []).slice();
+    if (v.startsWith("image:") && !own.some((x) => x.value === v)) {
+      const path = v.slice(6);
+      const url = pickedUrls[path] || (o.url ? o.url() : "");
+      own.unshift({ value: v, url, name: path.replace(/\\/g, "/").split("/").pop() });
+    }
+    for (const x of own) {
+      const b = opt(x.value, short(x.name), x.url ? pic(x.url) : icon("image"));
+      b.classList.add("ownimg");
+      b.title = x.name;
+      box.append(b);
+    }
     const colorVal = v.startsWith("color:") && v !== "color:#000000" ? v.slice(6) : "#1E3A5F";
     const ci = h("input", { type: "color", value: colorVal, class: "colorin", "aria-label": "Свой цвет" });
     ci.addEventListener("input", () => onPick("color:" + ci.value.toUpperCase()));
-    const own = h("label", { class: "bgopt" + (v.startsWith("color:") && v !== "color:#000000" ? " on" : ""), "aria-pressed": String(v.startsWith("color:") && v !== "color:#000000") }, ci, h("span", null, "Свой цвет…"));
-    box.append(own);
-    const imgOn = v.startsWith("image:");
-    const img = h("button", { class: "bgopt", type: "button", "data-value": "image", "aria-pressed": String(imgOn) }, icon("image"), h("span", null, "Картинка…"));
+    const ownColor = h("label", { class: "bgopt" + (v.startsWith("color:") && v !== "color:#000000" ? " on" : ""), "aria-pressed": String(v.startsWith("color:") && v !== "color:#000000") }, ci, h("span", null, "Свой цвет…"));
+    box.append(ownColor);
+    const img = h("button", { class: "bgopt addimg", type: "button", "data-value": "image" }, icon("plus"), h("span", null, "Картинка…"));
     img.addEventListener("click", async () => {
       try {
         const ps = await call({ cmd: "pick_files", purpose: "background" });
-        if (ps && ps.length) { const r = await call({ cmd: "efir_take_file", path: ps[0] }); onPick("image:" + r.path, r); }
+        if (ps && ps.length) {
+          const r = await call({ cmd: "efir_take_file", path: ps[0] });
+          if (r.url) pickedUrls[r.path] = r.url;
+          onPick("image:" + r.path, r);
+        }
       } catch (e) { fail(e); }
     });
     box.append(img);
@@ -336,12 +357,16 @@ function lookEditor(box, lk, reshow) {
   const isNew = !lk;
   const back = fromLesson();
   const L0 = lk || { id: "", title: "Новое оформление", background: { value: "color:#000000" }, caption: "", exercises: [], break_countdown: true,
-    break_background: { value: "" }, break_title: "ПЕРЕРЫВ", break_show_title: true, break_done: "ПРОДОЛЖАЕМ", font: "Montserrat", text_color: "#FFFFFF", users: [], outside: 0 };
+    break_background: { value: "" }, break_title: "ПЕРЕРЫВ", break_show_title: true, break_done: "ПРОДОЛЖАЕМ", font: "Montserrat", text_color: "#FFFFFF", users: [], outside: 0,
+    timer_min: 5, timer_task_style: "corner", timer_full_style: "ring", timer_end: "zero", timer_end_text: "Время!", timer_background: { value: "" } };
   if (back) setCrumbs([{ label: "Уроки", href: "#/lessons" }, { label: back.title, href: "#/lesson/" + back.id }, { label: "Оформление «" + L0.title + "»" }]);
   else crumbs(L0.title);
   const d = { id: L0.id, title: L0.title, background: L0.background.value, caption: L0.caption,
     exercises: L0.exercises.map((e) => ({ ...e })), break_countdown: L0.break_countdown, break_background: L0.break_background.value,
-    break_title: L0.break_title, break_show_title: L0.break_show_title, break_done: L0.break_done, font: L0.font, text_color: L0.text_color };
+    break_title: L0.break_title, break_show_title: L0.break_show_title, break_done: L0.break_done, font: L0.font, text_color: L0.text_color,
+    timer_min: L0.timer_min || 5, timer_task_style: L0.timer_task_style || "corner", timer_full_style: L0.timer_full_style || "ring",
+    timer_end: L0.timer_end || "zero", timer_end_text: L0.timer_end_text == null ? "Время!" : L0.timer_end_text,
+    timer_background: (L0.timer_background && L0.timer_background.value) || "" };
   const dirtyMark = h("span", { id: "lkdirty", class: "chip warn", hidden: !isNew }, "есть изменения");
   const setDirty = (on = true) => { E.dirty = on; dirtyMark.hidden = !on; };
   const title = h("input", { class: "inp", id: "lktitle", value: d.title, "aria-label": "Название" });
@@ -393,6 +418,23 @@ function lookEditor(box, lk, reshow) {
   count.input.id = "lkcount";
   const done = h("input", { class: "inp", id: "lkdone", value: d.break_done });
   done.addEventListener("input", () => { d.break_done = done.value; setDirty(); });
+  // таймер (1.3): вид, время по умолчанию, что в конце, свой фон
+  const tmrBg = bgOptions(() => d.timer_background, (v) => { d.timer_background = v; setDirty(); tmrBg.redraw(); }, { id: "lktmrbg", inherit: true });
+  const tmrTask = seg([{ value: "corner", label: "Кольцо в углу" }, { value: "strip", label: "Полоса снизу" }], d.timer_task_style,
+    (v) => { d.timer_task_style = v; setDirty(); }, { size: "sm", label: "Таймер задания" });
+  tmrTask.id = "lktmrtask";
+  const tmrFull = seg([{ value: "ring", label: "Кольцо" }, { value: "digits", label: "Крупные цифры" }], d.timer_full_style,
+    (v) => { d.timer_full_style = v; setDirty(); }, { size: "sm", label: "Таймер на весь экран" });
+  tmrFull.id = "lktmrfull";
+  const tmrMin = numberField(d.timer_min, { min: 1, max: 180, step: 1, unit: "мин", label: "Таймер по умолчанию",
+    onChange: (v) => { d.timer_min = v; setDirty(); } });
+  tmrMin.input.id = "lktmrmin";
+  const tmrText = h("input", { class: "inp", id: "lktmrtext", value: d.timer_end_text, placeholder: "Время! · Скоро продолжим",
+    hidden: d.timer_end !== "text" || null });
+  tmrText.addEventListener("input", () => { d.timer_end_text = tmrText.value; setDirty(); });
+  const tmrEnd = seg([{ value: "zero", label: "0:00" }, { value: "text", label: "Надпись" }, { value: "empty", label: "Пусто" }], d.timer_end,
+    (v) => { d.timer_end = v; tmrText.hidden = v !== "text"; setDirty(); }, { size: "sm", label: "Когда время вышло" });
+  tmrEnd.id = "lktmrend";
   const fonts = (ef().fonts || []).map(([k, t]) => [k, t]);
   const fileFont = d.font.startsWith("file:") ? [[d.font, "Свой: " + d.font.slice(5).replace(/\\/g, "/").split("/").pop()]] : [];
   const font = select([...fonts, ...fileFont, ["__file", "Свой файл шрифта…"]], d.font, async (v) => {
@@ -450,6 +492,9 @@ function lookEditor(box, lk, reshow) {
     h("h3", { class: "efh3" }, "Фон (он же занавес)"), bg, h("div", { class: "wrow2" }, gallery), field("Надпись на фоне", caption),
     h("h3", { class: "efh3" }, "Зарядки"), exBox, h("div", { class: "wrow2" }, addVideo),
     h("h3", { class: "efh3" }, "Экран перерыва"), brkBg, showT, brkTitle, count, field("Когда время вышло", done),
+    h("h3", { class: "efh3" }, "Таймер"), tmrBg,
+    h("div", { class: "ef2" }, field("Таймер задания", tmrTask), field("Таймер на весь экран", tmrFull)),
+    h("div", { class: "ef2" }, field("Таймер по умолчанию", tmrMin), field("Когда время вышло", h("div", { class: "tmrend" }, tmrEnd, tmrText))),
     h("div", { class: "ef2" }, field("Шрифт", font), field("Цвет надписей", color)), h("div", { class: "wrow2" }, preview),
     jobsBox("").el,
     h("div", { class: "effoot" }, del, h("span", { class: "spacer" }), cancel, save)));

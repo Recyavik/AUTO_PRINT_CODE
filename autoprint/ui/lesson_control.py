@@ -142,7 +142,12 @@ class LessonController(QObject):
                         "ex_muted": self.efir.mode == "exercise" and (self.efir.video_muted or self.efir.video_waiting
                                                                        and not self.efir.video_ready),
                         "ex_ready": self.efir.mode == "exercise" and self.efir.video_ready,
-                        "ex_waiting": self.efir.mode == "exercise" and self.efir.video_waiting},
+                        "ex_waiting": self.efir.mode == "exercise" and self.efir.video_waiting,
+                        "timer_ends": int(self.efir.tmr_ends * 1000) if self.efir.mode in ("timer", "task") else 0,
+                        "timer_paused": self.efir.mode in ("timer", "task") and self.efir.tmr_paused is not None,
+                        "timer_left": int((self.efir.tmr_paused or 0) * 1000) if self.efir.mode in ("timer", "task") else 0,
+                        "timer_task": (self.efir.tmr_task or {}).get("id", "") if self.efir.mode == "task" else "",
+                        "timer_min": preset.timer_min if preset is not None else 5},
             armed=t.active_block if t is not None else "",
             media_url=self.efir.server.media_url, presets=[(lk.id, lk.title) for lk in self.efir.store.looks],
             preset=preset.id if preset is not None else "", dark=theme.dark, efir_mode=self.efir.mode,
@@ -577,6 +582,16 @@ class LessonController(QObject):
                 self.efir.open_tab()
             elif cmd == "copy_url":
                 self.efir.copy_url()
+            elif cmd == "timer" and t is not None:
+                self._start_timer(t, d.get("minutes"))
+            elif cmd == "task_timer" and t is not None:
+                self._start_task_timer(t, str(d.get("block") or ""), d.get("minutes"))
+            elif cmd == "timer_adjust":
+                self.efir.timer_adjust(max(-3600, min(3600, int(d.get("seconds") or 0))))
+            elif cmd == "timer_pause":
+                self.efir.timer_pause()
+            elif cmd == "timer_restart":
+                self.efir.timer_restart()
             elif cmd == "break_adjust":
                 self.efir.break_adjust(max(-3600, min(3600, int(d.get("seconds") or 0))))
             elif cmd == "break_pause":
@@ -713,6 +728,48 @@ class LessonController(QObject):
             return
         w = self.efir.webinar or self.efir.live_webinar()
         self.efir.start_break(int(minutes or 0) or (w.break_min if w else 10))
+
+    def _timer_minutes(self, t: Template, minutes, fallback: int = 0) -> float:
+        """Минуты таймера: выбранные (1…180) — они; иначе fallback (минуты задания); иначе — по оформлению урока."""
+        try:
+            m = float(minutes)
+        except (TypeError, ValueError):
+            m = 0.0
+        if not 0 < m <= 180:
+            m = float(fallback or 0)
+        if not 0 < m <= 180:
+            look = self.efir.lesson_look(t)
+            m = float(look.timer_min if look is not None else 5)
+        return m * 60
+
+    def _start_timer(self, t: Template, minutes) -> None:
+        """Таймер на весь экран: выбранные минуты или по оформлению урока (1.3)."""
+        self._ensure_screen(t)
+        self.efir.start_timer(self._timer_minutes(t, minutes))
+
+    def _start_task_timer(self, t: Template, bid: str, minutes) -> None:
+        """Задание ученикам с отсчётом: минуты — выбранные, иначе у задания, иначе по оформлению урока (1.3)."""
+        b = t.find_block(bid)
+        if b is None:
+            return
+        self._ensure_screen(t)
+        title = (b.title or "").strip() or "Задание"
+        self.efir.start_timer(self._timer_minutes(t, minutes, int(b.minutes or 0)),
+                              {"id": b.id, "title": title, "html": scenario.md_html(b.text or "")})
+
+    def task_block(self, t: Template):
+        """Задание идущего этапа (или, до урока, первое в уроке) — для «Задание» на пульте."""
+        from ..storage import BLOCK_MARKDOWN
+        stages = scenario.stages(t)[1]
+        tasks = [b for b in t.blocks if b.type == BLOCK_MARKDOWN and b.role == "task" and (b.text or "").strip()]
+        if not tasks:
+            return None
+        if stages and self.efir.store.live is not None and self.efir.live_lesson_id() == t.id:
+            cur = stages[self._current_stage(t)]
+            mine = [b for b in cur.blocks if b in tasks]
+            if mine:
+                return mine[0]
+        return tasks[0]
 
     def _exercise(self, t: Template, d: dict) -> None:
         """Зарядка ученикам. Без номера видео (щелчок по «Зарядке», кнопка этапа, маленький режим) — своё видео этапа:

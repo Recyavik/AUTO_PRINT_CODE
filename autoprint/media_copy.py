@@ -42,7 +42,7 @@ def file_status(path: str) -> str:
 def look_files(look: Look) -> list[str]:
     """Пути файлов оформления: фон и заставка (картинки), видео зарядок, свой шрифт."""
     out = []
-    for v in (look.background, look.break_background):
+    for v in (look.background, look.break_background, look.timer_background):
         if (v or "").startswith("image:"):
             out.append(v[6:])
     out += [e.path for e in look.exercises if e.path]
@@ -144,7 +144,8 @@ def remap(look: Look, moves: dict[str, str]) -> Look:
     new = copy.deepcopy(look)
     if not moves:
         return new
-    for attr, prefix in (("background", "image:"), ("break_background", "image:"), ("font", "file:")):
+    for attr, prefix in (("background", "image:"), ("break_background", "image:"), ("timer_background", "image:"),
+                         ("font", "file:")):
         v = getattr(new, attr) or ""
         if v.startswith(prefix) and v[len(prefix):] in moves:
             setattr(new, attr, prefix + moves[v[len(prefix):]])

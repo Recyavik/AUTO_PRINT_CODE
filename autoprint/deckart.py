@@ -55,6 +55,8 @@ ICONS = {
     "volume": '<path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z"/><path d="M15.5 9a4 4 0 0 1 0 6M18 6.5a7.5 7.5 0 0 1 0 11"/>',
     "volume-off": '<path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z"/><path d="M16 9.5l5 5M21 9.5l-5 5"/>',
     "mic": '<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/>',
+    "timer": '<circle cx="12" cy="13.5" r="7.5"/><path d="M12 9.5v4l2.6 1.8M9.5 2.8h5M12 2.8v3.2M18.6 6.4l1.4-1.4"/>',
+    "task": '<rect x="5" y="4.5" width="14" height="16" rx="2.5"/><path d="M9 4.5V3.2h6v1.3M8.5 10h7M8.5 13.5h7M8.5 17h4"/>',
     "mic-off": '<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3M4 4l16 16"/>',
 }
 
@@ -220,7 +222,7 @@ def timer_color(style: str = DEFAULT_STYLE) -> str:
     return S["on"] if S["shape"] == "dot" else _look("on", S)[1]
 
 
-def timer(label: str, cells: int = 1, style: str = DEFAULT_STYLE, draw_text: bool = True) -> str:
+def timer(label: str, cells: int = 1, style: str = DEFAULT_STYLE, draw_text: bool = True, icon: str = "cup") -> str:
     """Кнопка «Перерыв», пока он идёт: значок и отсчёт крупно вместо подписи («08:12»). draw_text=False — низ
     пустой: отсчёт пишет Macro Deck подписью."""
     S = _st(style)
@@ -232,7 +234,7 @@ def timer(label: str, cells: int = 1, style: str = DEFAULT_STYLE, draw_text: boo
         tcolor = S["on"]
     else:
         tcolor = fg
-    parts.append(_icon("cup", w / 2, 30, 24, fg))
+    parts.append(_icon(icon, w / 2, 30, 24, fg))
     if draw_text:
         lines, size = fit(label, w - 12, 30, lines=1, min_size=16)
         parts.append(_text(lines, w / 2, 70, size, tcolor, weight=700))

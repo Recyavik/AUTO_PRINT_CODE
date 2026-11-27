@@ -27,7 +27,7 @@ _ID = re.compile(r"[0-9A-Za-z_-]{1,40}")   # страница придумыва
 _LANG = re.compile(r"[\w+#.-]{1,30}")
 # какие поля можно менять у блока какого типа
 _FIELDS = {
-    BLOCK_MARKDOWN: {"text", "title", "role"},
+    BLOCK_MARKDOWN: {"text", "title", "role", "minutes"},    # minutes — у задания: время на него (таймер)
     BLOCK_CODE: {"text", "title", "lang", "profile", "steps", "sel"},
     BLOCK_STAGE: {"text", "title", "minutes", "stage_kind", "part", "exercise"},
     BLOCK_IMAGE: {"text", "title", "slide"},
@@ -81,7 +81,7 @@ def _field(b: Block, key: str, v):
         return list(v)
     if key == "minutes":
         if not isinstance(v, int) or isinstance(v, bool) or not 0 <= v <= MAX_MINUTES:
-            raise ValueError(f"Минуты этапа — от 0 до {MAX_MINUTES}")
+            raise ValueError(f"Минуты — от 0 до {MAX_MINUTES}")
         return v
     if key == "stage_kind":
         if v not in STAGE_KINDS:

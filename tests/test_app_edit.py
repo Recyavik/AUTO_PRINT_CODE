@@ -469,7 +469,7 @@ class SlidesTest(EditPage):
         self.click("[data-id=sl2] .toscreen")
         self.assertTrue(self.wait_py(lambda: self.shown() == "sl2"))
         self.assertTrue(self.wait_js("!!document.querySelector('.blk.onscreen[data-id=sl2]')"))
-        self.assertTrue(self.wait_js("document.querySelector('#slideNav .n').textContent === '2'"))
+        self.assertTrue(self.wait_js("document.querySelector('#screenThumb').dataset.tip.includes('слайд 2')"))
 
     def test_restore_keeps_slide_number(self):
         self.editing(True)

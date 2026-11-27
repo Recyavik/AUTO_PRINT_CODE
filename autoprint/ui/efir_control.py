@@ -18,6 +18,7 @@ from PySide6.QtCore import QObject, QTimer, QUrl, Signal
 from PySide6.QtGui import QDesktopServices, QGuiApplication
 
 from ..efir import legacy
+from ..efir.model import PRESET_NAMES
 from ..efir.model import (Look, Webinar, agenda_at, anchor_at, anchor_to_start_at, look_from_dict, norm_hhmm,
                           parse_hhmm, segments, webinar_from_dict)
 from ..efir.server import DEFAULT_PORT, BroadcastServer
@@ -27,6 +28,8 @@ log = logging.getLogger(__name__)
 
 MODE_IDLE, MODE_EXERCISE, MODE_BREAK, MODE_SLIDE = "idle", "exercise", "break", "slide"
 MODE_BLACK = "black"       # чёрный экран по щелчку учителя: ни фона, ни надписи (1.2.2)
+MODE_TIMER = "timer"       # 1.3: отсчёт на весь экран («3 минуты»), без задания
+MODE_TASK = "task"         # 1.3: задание ученикам и отсчёт рядом с ним
 KEEP_LIVE_AFTER_END = timedelta(minutes=30)    # после конца повестки эфир ещё восстанавливается при запуске
 BREAK_HOLD_S = 60          # «когда время вышло» на экране — столько секунд, потом экран сам возвращается к фону
 TAB_REOPEN_S = 30          # сами открыли вкладку экрана учеников — столько секунд ждём, пока она подключится
@@ -68,6 +71,11 @@ class EfirController(QObject):
         self.video_ready = False         # …так и задумано (настройка «по щелчку»): встала на первый кадр — не беда
         # перерыв (время — time.time(), секунды)
         self.brk_seq = 0
+        self.tmr_seq = 0                 # таймер (1.3): номер запуска, конец (time.time()), всего секунд
+        self.tmr_ends = 0.0
+        self.tmr_total = 0.0
+        self.tmr_paused: float | None = None   # на паузе — сколько оставалось
+        self.tmr_task: dict | None = None      # таймер задания: {"id", "title", "html"}
         self.brk_ends = 0.0
         self.slide: dict | None = None     # слайд у учеников: {"ref", "next", "n", "bid"}
         self.brk_left_paused: float | None = None
@@ -195,6 +203,8 @@ class EfirController(QObject):
             return {"kind": "image", "value": p.name, "url": self.server.media_url(p)}
         if kind in ("color", "anim") and value:
             return {"kind": kind, "value": value}
+        if kind == "preset" and value in PRESET_NAMES:      # готовая картинка программы (1.3)
+            return {"kind": "image", "value": value + ".jpg", "url": f"/static/bg/{value}.jpg"}
         return {"kind": "color", "value": "#000000"}
 
     def _font(self, w: Webinar) -> dict:
@@ -220,6 +230,8 @@ class EfirController(QObject):
         if self.mode == MODE_SLIDE and self.slide:
             st["slide"] = {"src": self._media(self.slide["ref"]), "next": self._media(self.slide.get("next", "")),
                            "n": self.slide.get("n", 0)}
+        if self.mode in (MODE_TIMER, MODE_TASK):
+            st["tmr"] = self._timer_state(w)
         if self.mode == MODE_BREAK:
             st["brk"] = {"seq": self.brk_seq, "ends_at": int(self.brk_ends * 1000),
                          "paused_left": None if self.brk_left_paused is None else int(self.brk_left_paused * 1000),
@@ -227,6 +239,16 @@ class EfirController(QObject):
                          "title": w.break_title if w.break_show_title else "", "done": w.break_done,
                          "bg": self._bg(w.break_background), "hold": BREAK_HOLD_S}
         return st
+
+    def _timer_state(self, w: Webinar) -> dict:
+        task = self.tmr_task if self.mode == MODE_TASK else None
+        return {"seq": self.tmr_seq, "ends_at": int(self.tmr_ends * 1000),
+                "paused_left": None if self.tmr_paused is None else int(self.tmr_paused * 1000),
+                "total": int(self.tmr_total * 1000), "kind": "task" if task else "full",
+                "style": w.timer_task_style if task else w.timer_full_style,
+                "end": w.timer_end, "end_text": w.timer_end_text if w.timer_end == "text" else "",
+                "bg": self._bg(w.timer_background) if w.timer_background else None,
+                "task": {"title": task.get("title", ""), "html": task.get("html", "")} if task else None}
 
     def _media(self, ref: str) -> str:
         from ..storage import media_path
@@ -546,6 +568,61 @@ class EfirController(QObject):
             self.store.set_break({"ends_at": self.brk_ends, "total": self.brk_total, "seq": self.brk_seq})
         self.publish()
         self.ensure_tab()
+
+    # ================================================================ таймер (1.3)
+    def start_timer(self, seconds: float, task: dict | None = None) -> None:
+        """Отсчёт ученикам: seconds; task — {"id", "title", "html"}: задание и отсчёт рядом с ним, иначе — на весь
+        экран. Что было у учеников (слайд, перерыв, зарядка, чёрный), убирается — как у перерыва."""
+        w = self.webinar or self.live_webinar()
+        if not w:
+            return
+        self.webinar = w
+        self.ensure_server()
+        self.tmr_total = max(5.0, min(6 * 3600.0, float(seconds)))
+        self.tmr_ends = time.time() + self.tmr_total
+        self.tmr_paused = None
+        self.tmr_seq += 1
+        self.tmr_task = dict(task) if task else None
+        self.mode = MODE_TASK if task else MODE_TIMER
+        self.ex_paused = False
+        self._forget_break()
+        self.publish()
+        self.ensure_tab()
+
+    def timer_left(self) -> float:
+        if self.mode not in (MODE_TIMER, MODE_TASK):
+            return 0.0
+        return self.tmr_paused if self.tmr_paused is not None else max(0.0, self.tmr_ends - time.time())
+
+    def timer_adjust(self, seconds: float) -> None:
+        if self.mode not in (MODE_TIMER, MODE_TASK):
+            return
+        if self.tmr_paused is not None:
+            self.tmr_paused = max(0.0, self.tmr_paused + seconds)
+        else:
+            left = self.tmr_ends - time.time()
+            if left <= 0 and seconds > 0:
+                self.tmr_ends = time.time() + seconds          # время вышло, «+1 мин» — снова отсчёт
+            else:
+                self.tmr_ends = max(time.time(), self.tmr_ends + seconds)
+        self.tmr_total = max(60.0, self.tmr_total + seconds)
+        self.publish()
+
+    def timer_pause(self) -> None:
+        if self.mode not in (MODE_TIMER, MODE_TASK):
+            return
+        if self.tmr_paused is None:
+            self.tmr_paused = max(0.0, self.tmr_ends - time.time())
+        else:
+            self.tmr_ends = time.time() + self.tmr_paused
+            self.tmr_paused = None
+        self.publish()
+
+    def timer_restart(self) -> None:
+        if self.mode in (MODE_TIMER, MODE_TASK):
+            self.tmr_ends = time.time() + self.tmr_total
+            self.tmr_paused = None
+            self.publish()
 
     def break_left(self) -> float:
         if self.brk_left_paused is not None:

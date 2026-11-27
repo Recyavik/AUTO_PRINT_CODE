@@ -49,6 +49,7 @@ PHOTO_SRC = {"фото", "photo", "?", ""}      # ![что на картинке
 _SLIDE_SRC = re.compile(r"^slide:\s*(\d{1,4})$", re.I)
 _PART = re.compile(r"^#\s+(.+?)\s*$")
 _CALLOUT = re.compile(r"^\[!([^\]]+)\]\s*(.*)$")
+_TASK_MIN = re.compile(r"^(.*?)\s*(?:·|—|-|\()?\s*(\d{1,3})\s*мин(?:ут[аы]?|\.)?\)?\s*$")   # «Сумма · 5 мин»
 _FENCE = re.compile(r"^(`{3,}|~{3,})\s*([^\s`]*)\s*(.*)$")
 _SLIDE_CAP = re.compile(r"^Слайд\s+(\d{1,4})(?:\s*[·—:-]\s*(.*))?$", re.I)
 _IMAGE = re.compile(r"^!\[((?:[^\]\\]|\\.)*)\]\((<[^>]+>|[^)\s]*)\)\s*$")
@@ -133,7 +134,10 @@ def to_md(t: Template, media_prefix: str, copy_image=None) -> str:
             if role == "text" and not b.title and not re.search(r"^\s*(```|~~~|>|#|!\[)", text, re.M):
                 out += [text, ""]           # простой текст — как есть (с разметкой внутри — плашкой [!text])
             else:
-                out += [_quote(f"[!{role}]" + (f" {b.title}" if b.title else "") + "\n" + text), ""]
+                head = f"[!{role}]" + (f" {b.title}" if b.title else "")
+                if role == "task" and b.minutes:
+                    head += f" · {int(b.minutes)} мин"        # время на задание (таймер, 1.3)
+                out += [_quote(head + "\n" + text), ""]
     return "\n".join(out).rstrip("\n") + "\n"
 
 
@@ -268,8 +272,12 @@ def parse(text: str, base: Path | None, title: str, local_images: bool = True, r
             c = _CALLOUT.match(quote[0].strip()) if quote else None
             if c:
                 role = _role(c.group(1)) or "text"
+                title, minutes = c.group(2).strip(), 0
+                tm = _TASK_MIN.match(title) if role == "task" else None
+                if tm:
+                    title, minutes = tm.group(1).strip(), min(int(tm.group(2)), 600)
                 blocks.append(Block(BLOCK_MARKDOWN, "\n".join(quote[1:]).strip("\n"), role=role,
-                                    title=c.group(2).strip()))
+                                    title=title, minutes=minutes))
             else:
                 blocks.append(Block(BLOCK_MARKDOWN, "\n".join("> " + q for q in quote), role="text"))
             continue

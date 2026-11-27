@@ -33,7 +33,7 @@ COLS, ROWS = 7, 3
 PREFIX = "apc_"
 MARK = "apc"                    # пометка в данных кнопки: её собрала программа (пересборка заменяет только такие)
 STYLES = ("tiles", "outline")   # «Плитки», «Контур»
-LAYOUT = 2                      # устройство страницы: сменили (кнопки, данные) — программа пересоберёт её сама
+LAYOUT = 3                      # устройство страницы: сменили (кнопки, данные) — программа пересоберёт её сама
 
 # кнопки: ключ → (x, y, команда пульта, значок, подпись)
 BUTTONS = [
@@ -47,10 +47,12 @@ BUTTONS = [
     ("prepare", 0, 2, "prepare", "open", "Подготовка"),
     ("sound", 1, 2, "sound", "volume", "Звук"),
     ("mic", 2, 2, "mic", "mic", "Микрофон"),
+    ("timer", 3, 2, "timer", "timer", "Таймер"),
+    ("task", 4, 2, "task", "task", "Задание"),
 ]
 # верхний ряд: ключ → (x, ширина в ячейках)
 INFO = [("prev", 0, 2), ("now", 2, 3), ("next", 5, 2)]
-TEXT_VARS = ("prev", "now", "left", "next", "stage", "break_left")
+TEXT_VARS = ("prev", "now", "left", "next", "stage", "break_left", "timer_left")
 IMAGE_KEYS = [k for k, _, _ in INFO] + [b[0] for b in BUTTONS]
 
 
@@ -196,6 +198,10 @@ def page(st: dict, style: str = "tiles", base: str = "") -> dict[str, dict]:
         if cid == "break" and (st.get("screen") == "break") and st.get("break_left") and not st.get("off"):
             data.update(label="{{ vars.apc_break_left }}", labelPosition="bottom", textAlign="center",
                         fontSize=BREAK_SIZE, labelColor=deckart.timer_color(style))
+        running = {"timer": st.get("screen") == "timer", "task": st.get("screen") == "task"}
+        if running.get(cid) and st.get("timer_left") and not st.get("off"):
+            data.update(label="{{ vars.apc_timer_left }}", labelPosition="bottom", textAlign="center",
+                        fontSize=BREAK_SIZE, labelColor=deckart.timer_color(style))
         if cid in CMD and base:
             data["flows"] = _flow(cid, _cmd_url(base, CMD[cid]))
         out[cid] = data
@@ -233,7 +239,8 @@ def images(st: dict, style: str = "tiles") -> dict[str, str]:
            "now": deckart.now(st.get("now") or "", st.get("left") or "", frac, warn, "", 3, style, draw_left=False),
            "next": deckart.stage(st.get("next") or "", 2, "right", style)}
     screen = st.get("screen") or "idle"
-    active = {"bg": "idle", "black": "black", "ex": "exercise", "break": "break", "slide": "slide"}
+    active = {"bg": "idle", "black": "black", "ex": "exercise", "break": "break", "slide": "slide", "timer": "timer",
+              "task": "task"}
     for cid, _x, _y, _cmd, icon, label in BUTTONS:
         mode, sub = "", ""
         if cid in active and screen == active[cid]:
@@ -241,6 +248,11 @@ def images(st: dict, style: str = "tiles") -> dict[str, str]:
         if cid == "break" and screen == "break" and st.get("break_left"):
             out[cid] = deckart.timer("", style=style, draw_text=False)
             continue
+        if cid in ("timer", "task") and screen == cid and st.get("timer_left"):
+            out[cid] = deckart.timer("", style=style, draw_text=False, icon=icon)
+            continue
+        if cid == "task" and not st.get("has_task"):
+            mode = "off"
         if cid == "ex" and mode == "on" and st.get("exercise_paused"):
             sub = "пауза"
         if cid == "slide" and st.get("slide_text"):
@@ -260,6 +272,7 @@ def values(st: dict, style: str = "tiles") -> dict[str, str]:
     v = {PREFIX + k: str(st.get(k) or "") for k in ("prev", "now", "left", "next")}
     v[PREFIX + "stage"] = str(st.get("stage_text") or "")
     v[PREFIX + "break_left"] = str(st.get("break_left") or "")
+    v[PREFIX + "timer_left"] = str(st.get("timer_left") or "")
     return v
 
 

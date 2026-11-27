@@ -452,7 +452,7 @@ class ScreenCtlTest(AppPage):
         self.assertTrue(self.js("document.querySelector('#scrEx').classList.contains('pulse')"))
         self.assertIn("ждёт щелчка", self.js("document.querySelector('#screenThumb').dataset.tip"))
 
-    ICONS = ("#scrBg", "#scrBlack", "#scrEx", "#scrBreak", "#scrSlide")
+    ICONS = ("#scrBg", "#scrBlack", "#scrEx", "#scrBreak", "#scrTimer", "#scrSlide")
 
     def icon_x(self):
         sels = ",".join(repr(s) for s in self.ICONS)
@@ -464,19 +464,40 @@ class ScreenCtlTest(AppPage):
         for a, b in zip(before, after):
             self.assertAlmostEqual(a, b, delta=0.5, msg=f"значки сдвинулись: {before} → {after}")
 
-    def test_icons_stay_when_slide_nav_rolls_out(self):
-        """Включили слайд — стрелки и номер выезжают в заранее оставленное место; значки на месте."""
+    def test_no_slide_arrows_in_strip(self):
+        """1.3: стрелок слайдов в полосе нет (листают кликером и с пульта); слайд показан — значки на месте."""
         before = self.icon_x()
         self.click("#scrSlide")
-        self.assertTrue(self.wait_js("!document.querySelector('#slideNav').hidden"))
+        self.assertTrue(self.wait_py(lambda: self.app.efir.mode == "slide"))
+        self.assertTrue(self.wait_js("document.querySelector('#scrSlide').getAttribute('aria-pressed') === 'true'"))
+        self.assertFalse(self.js("!!document.querySelector('#slideNav')"))
         self.assertIconsStay(before)
-        nav = self.js("(() => { const r = document.querySelector('#slideNav').getBoundingClientRect(),"
-                      " s = document.querySelector('#scrInfo').getBoundingClientRect();"
-                      " return [r.left >= s.left - 0.5, r.right <= s.right + 0.5, r.width > 40]; })()")
-        self.assertEqual(nav, [True, True, True])
-        self.click("#slideNav .next")
-        self.assertTrue(self.wait_js("document.querySelector('#slideNav .n').textContent === '2'"))
+
+    def test_timer_icon(self):
+        """1.3 «Таймер» между «Перерывом» и «Слайдом»: щелчок — отсчёт на весь экран на минуты оформления; идёт —
+        отсчёт рядом со значками и меню (+1 мин, пауза, убрать); правая кнопка — своё время."""
+        order = self.js("[...document.querySelectorAll('.scricons > .scrbtn')].map(b => b.id)")
+        self.assertEqual(order, ["scrBg", "scrBlack", "scrEx", "scrBreak", "scrTimer", "scrSlide"])
+        self.assertIn("5 мин", self.js("document.querySelector('#scrTimer').dataset.tip"))
+        before = self.icon_x()
+        self.js("document.querySelector('#scrTimer').dispatchEvent(new MouseEvent('contextmenu', {bubbles: true}))")
+        items = self.menu_items()
+        self.assertIn("3 мин", items)
+        self.js("window.appUI.closePop()")
+        self.click("#scrTimer")
+        self.assertTrue(self.wait_py(lambda: self.app.efir.mode == "timer"))
+        self.assertEqual(self.app.efir.tmr_total, 5 * 60)
+        self.app.lesson.publish()
+        self.assertTrue(self.wait_js("/\\d+:\\d\\d/.test(document.querySelector('#scrInfo .brkleft').textContent) && "
+                                     "!document.querySelector('#scrInfo .brkleft').hidden"))
+        self.assertTrue(self.wait_js("document.querySelector('#scrTimer').getAttribute('aria-pressed') === 'true'"))
         self.assertIconsStay(before)
+        self.click("#scrInfo .brkleft")
+        self.assertIn("+1 мин", self.menu_items())
+        self.js("window.appUI.closePop()")
+        self.click("#scrTimer")                                 # идёт — то же меню
+        items = self.menu_items()
+        self.assertIn("Убрать — снова фон", items)
 
     def test_icons_stay_with_break_countdown(self):
         """Перерыв идёт — отсчёт рядом со значками, в том же месте; значки не раздвигаются."""
@@ -672,12 +693,12 @@ class ScreenCtlTest(AppPage):
         self.assertTrue(self.wait_py(lambda: self.app.efir.mode == "exercise" and self.app.efir.ex_index == 0))
         self.assertFalse(self.js("!!document.querySelector('.pop')"))
 
-    def test_slide_arrows(self):
+    def test_slide_then_next_by_key(self):
+        """Стрелок в полосе нет — следующий слайд клавишей →, как кликером."""
         self.click("#scrSlide")
         self.assertTrue(self.wait_py(lambda: self.app.efir.mode == "slide"))
-        self.assertTrue(self.wait_js("!document.querySelector('#slideNav').hidden"))
-        self.assertTrue(self.wait_js("document.querySelector('#slideNav .n').textContent === '1'"))
-        self.click("#slideNav .next")
+        self.assertTrue(self.wait_js("document.querySelector('#screenThumb').dataset.tip.includes('слайд 1')"))
+        self.app.lesson.command({"cmd": "slide_step", "d": 1})
         self.assertTrue(self.wait_py(lambda: (self.app.efir.slide or {}).get("bid") == "im2"))
 
     def test_thumb_shows_screen_background(self):
@@ -921,6 +942,75 @@ def slide_lessons() -> list[Template]:
     return [Template("Слайды", [stage("Начало", 5, id="f1"), Block(BLOCK_IMAGE, str(paths[0]), slide=1, id="sp1"),
                                 Block(BLOCK_IMAGE, str(paths[1]), slide=2, id="sp2"),
                                 Block(BLOCK_IMAGE, str(paths[2]), slide=3, id="sp3")], id="SF")]
+
+
+def task_lessons() -> list[Template]:
+    return [Template("Задания", [
+        stage("Практика", 20, id="tp1"),
+        note("Напишите **average(nums)**", role="task", id="tq1", title="Средний балл", minutes=5),
+        note("Без времени", role="task", id="tq2", title="Разминка"),
+        note("Это не задание", role="say", id="tq3"),
+    ], id="TT")]
+
+
+class TaskTimerTest(AppPage):
+    """1.3: у задания в тексте урока — «На экран · 5 мин»: щелчок — задание ученикам с отсчётом; правая кнопка —
+    другое время и «Записать время задания»."""
+    port = 18986
+    templates = staticmethod(task_lessons)
+    route = "#/lesson/TT"
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        from autoprint.efir.model import Look
+        cls.look = Look(title="Т", timer_min=4)
+        cls.app.efir.save_look(cls.look)
+        cls.store.get("TT").look = cls.look.id
+
+    def setUp(self):
+        self.app.efir.show_background()
+        self.app.efir.clients = 1
+        self.app.printer.set_focus("TT")
+        self.app.lesson.publish()
+        self.go("#/lesson/TT", "lesson")
+        self.assertTrue(self.wait_js("!!document.querySelector('[data-id=tq1] .tasktimer')"))
+
+    def tearDown(self):
+        self.app.efir.show_background()
+        self.js("window.appUI.closePop()")
+        super().tearDown()
+
+    def test_button_only_on_tasks(self):
+        self.assertEqual(self.js("document.querySelector('[data-id=tq1] .tasktimer').textContent"), "На экран · 5 мин")
+        self.assertEqual(self.js("document.querySelector('[data-id=tq2] .tasktimer').textContent"), "На экран · 4 мин")
+        self.assertFalse(self.js("!!document.querySelector('[data-id=tq3] .tasktimer')"))
+
+    def test_click_shows_task_with_its_minutes(self):
+        self.click("[data-id=tq1] .tasktimer")
+        self.assertTrue(self.wait_py(lambda: self.app.efir.mode == "task"))
+        self.assertEqual(self.app.efir.tmr_total, 5 * 60)
+        self.assertEqual(self.app.efir.tmr_task["title"], "Средний балл")
+        self.app.lesson.publish()
+        self.assertTrue(self.wait_js("!!document.querySelector('.blk.onscreen[data-id=tq1]')"))   # задание у учеников
+
+    def test_right_click_other_minutes_and_write_them(self):
+        self.js("document.querySelector('[data-id=tq1] .tasktimer').dispatchEvent(new MouseEvent('contextmenu', {bubbles: true}))")
+        self.assertTrue(self.wait_js("!!document.querySelector('.pop')"))
+        items = self.js("[...document.querySelectorAll('.pop .mi .ml')].map(e => e.textContent)")
+        self.assertIn("3 мин", items)
+        self.assertIn("Изменить время задания…", items)
+        self.js("[...document.querySelectorAll('.pop .mi')].find(e => e.textContent.includes('3 мин')).click()")
+        self.assertTrue(self.wait_py(lambda: self.app.efir.mode == "task" and self.app.efir.tmr_total == 180))
+        self.assertEqual(self.store.get("TT").find_block("tq1").minutes, 5)       # время задания не поменялось
+        # записать время задания
+        self.js("document.querySelector('[data-id=tq2] .tasktimer').dispatchEvent(new MouseEvent('contextmenu', {bubbles: true}))")
+        self.assertTrue(self.wait_js("!!document.querySelector('.pop')"))
+        self.js("[...document.querySelectorAll('.pop .mi')].find(e => e.textContent.includes('Записать время задания')).click()")
+        self.assertTrue(self.wait_js("!!document.querySelector('#taskMinutes')"))
+        self.js("const m = document.querySelector('#taskMinutes'); m.value = '7'; m.dispatchEvent(new Event('change'))")
+        self.assertTrue(self.wait_py(lambda: self.store.get("TT").find_block("tq2").minutes == 7))
+        self.assertTrue(self.wait_js("document.querySelector('[data-id=tq2] .tasktimer').textContent === 'На экран · 7 мин'"))
 
 
 class ScreenSlideFillTest(AppPage):

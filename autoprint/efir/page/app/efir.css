@@ -161,3 +161,9 @@
   .efleft { position: static; }
   .wrow { grid-template-columns: 36px 1fr 100px; }
 }
+/* таймер в оформлении (1.3): «Когда время вышло» и надпись рядом */
+.tmrend { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.tmrend .inp { flex: 1 1 180px; min-width: 0; }
+/* выбор фона (1.3): превью готовых и своих картинок */
+.bgopt .sw.img { background: center / cover no-repeat var(--sunken); }
+.bgopt.ownimg span { max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

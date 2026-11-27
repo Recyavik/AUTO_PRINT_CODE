@@ -29,7 +29,7 @@ log = logging.getLogger(__name__)
 
 CALL_TIMEOUT_S = 5
 COMMANDS = ("state", "background", "black", "exercise", "break", "break_add", "slide", "slide_prev", "slide_next",
-            "mic", "mic_off", "mic_on", "sound", "sound_off", "sound_on", "prepare")
+            "mic", "mic_off", "mic_on", "sound", "sound_off", "sound_on", "prepare", "timer", "timer_add", "task")
 # для «Настройки → Пульт»: команда → (кнопка, что делает)
 TITLES = {
     "background": ("Фон", "фон ученикам"),
@@ -41,6 +41,9 @@ TITLES = {
     "slide_prev": ("◀", "предыдущий слайд"),
     "slide_next": ("▶", "следующий слайд"),
     "prepare": ("Подготовка", "открыть вкладки из списка ниже"),
+    "timer": ("Таймер", "отсчёт на весь экран (минуты — по оформлению урока, ?min=3 — свои) · идёт — убрать"),
+    "task": ("Задание", "задание идущего этапа с его временем · показано — убрать"),
+    "timer_add": ("+1 мин", "к таймеру; ?min=5 — на 5"),
     "mic": ("Микрофон", "все микрофоны выключить · ещё раз — включить"),
     "sound": ("Звук", "весь звук компьютера выключить · ещё раз — включить"),
     "mic_off": ("Микрофон выкл.", "все микрофоны — выключить (сколько ни нажимай)"),
@@ -53,10 +56,11 @@ FILES = {
     "screen.txt": "screen", "black.txt": "black", "exercise.txt": "exercise", "break.txt": "break",
     "break_left.txt": "break_left", "slide.txt": "slide", "slides.txt": "slides", "slide_n.txt": "slide_text",
     "clock.txt": "clock", "mic_muted.txt": "mic_muted", "sound_muted.txt": "sound_muted",
+    "timer.txt": "timer", "timer_left.txt": "timer_left",
 }
 
 
-BOOL_KEYS = {"black", "exercise", "break", "slide", "slides", "mic_muted", "sound_muted"}
+BOOL_KEYS = {"black", "exercise", "break", "slide", "slides", "mic_muted", "sound_muted", "timer"}
 
 
 def deck_folder() -> Path:
@@ -444,6 +448,27 @@ class DeckControl(QObject):
                 L.command({"cmd": "slide_step", "d": 1 if cmd == "slide_next" else -1})
         elif cmd == "prepare":
             self.prepare()
+        elif cmd == "timer":
+            if mode in ("timer", "task"):
+                L.command({"cmd": "background"}) if t is not None else ef.show_background()
+            elif t is not None:
+                L.command({"cmd": "timer", "minutes": params.get("min")})
+        elif cmd == "task":
+            if mode == "task":
+                L.command({"cmd": "background"})
+            elif t is not None:
+                b = L.task_block(t)
+                if b is not None:
+                    L.command({"cmd": "task_timer", "block": b.id, "minutes": params.get("min")})
+        elif cmd == "timer_add":
+            if mode in ("timer", "task"):
+                raw = params.get("min")
+                try:
+                    m = 1 if raw is None or str(raw).strip() == "" else int(float(raw))
+                except (TypeError, ValueError, OverflowError):
+                    m = 1
+                if m:
+                    ef.timer_adjust(max(-60, min(60, m)) * 60)
         elif cmd in ("mic", "mic_off", "mic_on", "sound", "sound_off", "sound_on"):
             from ..audio import CAPTURE, RENDER
             flow = CAPTURE if cmd.startswith("mic") else RENDER
@@ -508,6 +533,7 @@ class DeckControl(QObject):
             phase, cur = "after", "Урок закончен"
             prev = segs[-1].activity.name
         mode = ef.mode
+        tmr_left = fmt_left(ef.timer_left()) if mode in ("timer", "task") else ""
         brk_left = ""
         if mode == "break":
             sec = ef.brk_left_paused if ef.brk_left_paused is not None else max(0.0, ef.brk_ends - time.time())
@@ -524,6 +550,8 @@ class DeckControl(QObject):
             "screen": mode, "black": mode == "black",
             "exercise": mode == "exercise", "exercise_paused": mode == "exercise" and bool(ef.ex_paused),
             "break": mode == "break", "break_left": brk_left,
+            "timer": mode in ("timer", "task"), "timer_left": tmr_left, "task": mode == "task",
+            "has_task": bool(t is not None and self.app.lesson.task_block(t) is not None),
             "break_paused": mode == "break" and ef.brk_left_paused is not None,
             "slide": mode == "slide", "slides": bool(slides), "slide_n": n, "slides_total": len(slides),
             "slide_text": f"{n} / {len(slides)}" if mode == "slide" and n else "",

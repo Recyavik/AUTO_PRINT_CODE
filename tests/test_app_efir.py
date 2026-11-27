@@ -220,6 +220,61 @@ class LooksTest(EfirPage):
         lk.background = "color:#123456"
         self.app.efir.save_look(lk)
 
+    def test_timer_section(self):
+        """1.3: таймер — в оформлении: вид у задания и на весь экран, минуты по умолчанию, что в конце (0:00,
+        надпись — поле появляется, пусто), свой фон."""
+        self.go(f"#/efir/looks/{self.look.id}", "efir")
+        self.assertTrue(self.wait_js("!!document.querySelector('#lktmrtask')"))
+        self.assertTrue(self.js("document.querySelector('#lktmrtext').hidden"))          # по умолчанию 0:00 — без поля
+        self.click("#lktmrtask button[data-value=strip]")
+        self.click("#lktmrfull button[data-value=digits]")
+        self.click("#lktmrend button[data-value=text]")
+        self.assertTrue(self.wait_js("!document.querySelector('#lktmrtext').hidden"))
+        self.js("const t = document.querySelector('#lktmrtext'); t.value = 'Скоро продолжим'; t.dispatchEvent(new Event('input'))")
+        self.js("const m = document.querySelector('#lktmrmin'); m.value = '3'; m.dispatchEvent(new Event('change'))")
+        self.click("#lktmrbg .bgopt[data-value='color:#000000']")
+        self.click("#lksave")
+        try:
+            self.assertTrue(self.wait_py(lambda: self.app.efir.store.look(self.look.id).timer_end == "text"))
+            lk = self.app.efir.store.look(self.look.id)
+            self.assertEqual((lk.timer_task_style, lk.timer_full_style, lk.timer_end_text, lk.timer_background),
+                             ("strip", "digits", "Скоро продолжим", "color:#000000"))
+            self.assertTrue(self.wait_py(lambda: self.app.efir.store.look(self.look.id).timer_min == 3))
+        finally:
+            lk = self.app.efir.store.look(self.look.id)
+            lk.timer_task_style, lk.timer_full_style, lk.timer_end, lk.timer_end_text = "corner", "ring", "zero", "Время!"
+            lk.timer_min, lk.timer_background = 5, ""
+            self.app.efir.save_look(lk)
+
+    def test_background_previews_everywhere(self):
+        """1.3: в выборе фона — превью готовых картинок и своих; одни и те же в фоне, перерыве и таймере."""
+        import tempfile
+        from pathlib import Path
+        from PySide6.QtGui import QImage
+        img = Path(tempfile.mkdtemp()) / "мой фон.png"
+        q = QImage(32, 18, QImage.Format_RGB32)
+        q.fill(0x335577)
+        q.save(str(img))
+        other = self.app.efir.store.look(self.look.id)
+        old_brk = other.break_background
+        other.break_background = "image:" + str(img)                # своя картинка — в перерыве этого оформления
+        self.app.efir.save_look(other)
+        self.app.publish_now()
+        try:
+            self.go(f"#/efir/looks/{self.look.id}", "efir")
+            self.assertTrue(self.wait_js("!!document.querySelector('#lktmrbg')"))
+            for box in ("#lkbg", "#lkbrkbg", "#lktmrbg"):
+                self.assertTrue(self.js(f"!!document.querySelector(\"{box} .bgopt[data-value='preset:waves'] .sw.img\")"), box)
+                self.assertTrue(self.wait_js(f"!!document.querySelector(\"{box} .bgopt.ownimg .sw.img\")"), box)
+            self.assertEqual(self.js("document.querySelector(\"#lkbrkbg .bgopt.ownimg\").getAttribute('aria-pressed')"), "true")
+            self.click("#lkbg .bgopt[data-value='preset:night']")
+            self.click("#lksave")
+            self.assertTrue(self.wait_py(lambda: self.app.efir.store.look(self.look.id).background == "preset:night"))
+        finally:
+            lk = self.app.efir.store.look(self.look.id)
+            lk.background, lk.break_background = "color:#123456", old_brk
+            self.app.efir.save_look(lk)
+
     def test_font_and_color_mark_dirty(self):
         self.go(f"#/efir/looks/{self.look.id}", "efir")
         self.assertTrue(self.wait_js("!!document.querySelector('#lkfont')"))

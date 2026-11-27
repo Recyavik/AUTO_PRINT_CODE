@@ -1,15 +1,19 @@
 // Экран учеников в эфирной полосе урока и набор кода.
 //  • Миниатюра — что сейчас у учеников и есть ли их вкладка; её панель: открыть вкладку, адрес, оформление.
-//  • Значки «Фон», «Чёрный экран», «Зарядка», «Перерыв», «Слайд» — без подписей, с подсказками; нажатый — то, что
-//    у учеников. «Чёрный экран» и «Слайд» — переключатели: нажаты — щелчок возвращает фон.
+//  • Значки «Фон», «Чёрный экран», «Зарядка», «Перерыв», «Таймер», «Слайд» — без подписей, с подсказками; нажатый —
+//    то, что у учеников. «Чёрный экран» и «Слайд» — переключатели: нажаты — щелчок возвращает фон. Слайды листают
+//    кликером, стрелками и с пульта (стрелок в полосе с 1.3 нет — там отсчёт перерыва или таймера).
+//  • «Таймер» (1.3): щелчок — отсчёт на весь экран на минуты оформления урока; правая кнопка — своё время; идёт —
+//    меню (+1 мин, пауза, заново, убрать). У задания в тексте урока — «На экран · N мин» (taskButton).
 //  • Идёт этап-перерыв или этап-зарядка — значок подсвечивается; экран учеников сам не меняется (включает учитель).
 //  • Блок кода: «Набрать» (с отсчётом) и «▾» — как набирать; полоса набора внизу урока, пока идёт набор.
 "use strict";
-import { h, btn, iconBtn, seg, popover, menu, toggle, clear, closePop, tip } from "./ui.js";
+import { h, btn, iconBtn, seg, popover, menu, toggle, clear, closePop, tip, numberField } from "./ui.js";
 import { icon } from "./icons.js";
 import { go } from "./core.js";
 import { hooks, computeCurrent } from "./lessonview.js";
 import { A, cmd, now, mmss } from "../lesson/state.js";
+import * as E from "../lesson/edit.js";
 import { decor, exerciseList, lightUrl, stageVideo } from "../lesson/render.js";
 
 const BUSY = ["running", "countdown", "paused", "line_wait"];
@@ -63,6 +67,86 @@ function breakMenu(anchor) {
   for (const m of [5, 10, 15, 20]) items.push({ label: m + " мин", on: () => cmd({ cmd: "break", minutes: m }) });
   menu(anchor, items, { cls: "scrmenu" });
 }
+
+// ---------------------------------------------------------------- таймер (1.3)
+const TIMER_MINUTES = [1, 2, 3, 5, 10, 15];
+
+function timerLeft() {
+  const e = ef();
+  if (e.mode !== "timer" && e.mode !== "task") return null;
+  if (e.timer_paused) return (e.timer_left || 0) / 1000;
+  return e.timer_ends ? Math.max(0, (e.timer_ends - now()) / 1000) : null;
+}
+
+function defaultMinutes() { return ef().timer_min || 5; }
+
+// меню идущего таймера: +1 мин, пауза, заново, убрать
+function timerRunMenu(anchor) {
+  const e = ef();
+  menu(anchor, [
+    { head: (e.mode === "task" ? "Задание с таймером" : "Таймер") + (e.timer_paused ? " · на паузе" : "") },
+    { label: "+1 мин", on: () => cmd({ cmd: "timer_adjust", seconds: 60 }) },
+    { label: "+5 мин", on: () => cmd({ cmd: "timer_adjust", seconds: 300 }) },
+    { label: "−1 мин", on: () => cmd({ cmd: "timer_adjust", seconds: -60 }) },
+    { label: e.timer_paused ? "Продолжить отсчёт" : "Пауза отсчёта", on: () => cmd({ cmd: "timer_pause" }) },
+    { label: "Заново", hint: "отсчёт сначала", on: () => cmd({ cmd: "timer_restart" }) },
+    { sep: true },
+    { label: "Убрать — снова фон", on: () => cmd({ cmd: "background" }) },
+  ], { cls: "scrmenu" });
+}
+
+// своё время: run(минуты) — таймер на весь экран или задание
+function minutesMenu(anchor, title, own, run) {
+  const items = [{ head: title }];
+  if (own) items.push({ label: own + " мин", hint: "как записано", on: () => run(own) });
+  for (const m of TIMER_MINUTES) if (m !== own) items.push({ label: m + " мин", on: () => run(m) });
+  menu(anchor, items, { cls: "scrmenu" });
+}
+
+function timerClick(anchor) {
+  const m = ef().mode;
+  if (m === "timer" || m === "task") { timerRunMenu(anchor); return; }
+  cmd({ cmd: "timer", minutes: defaultMinutes() });
+}
+
+function timerTip() {
+  const m = ef().mode;
+  if (m === "timer" || m === "task") return "Таймер идёт · щелчок — +1 мин, пауза, убрать";
+  return "Таймер на весь экран: " + defaultMinutes() + " мин · правой кнопкой — другое время";
+}
+
+// кнопка у задания в тексте урока: «На экран · 5 мин» — задание ученикам с отсчётом; правой кнопкой — другое время
+export function taskButton(it) {
+  const own = it.minutes || 0;
+  const b = h("button", { class: "toscreen tasktimer", type: "button", "data-act": "task-timer" },
+    "На экран · " + (own || defaultMinutes()) + " мин");
+  b.title = "Задание ученикам на экран с отсчётом" + (own ? "" : " (минуты — по оформлению урока)") + " · правой кнопкой — другое время";
+  return b;
+}
+decor.task = taskButton;
+
+// время задания — записать в урок (по нему «На экран», пульт и «· 5 мин» в Markdown)
+function taskMinutes(anchor, it) {
+  const f = numberField(it.minutes || defaultMinutes(), { min: 1, max: 180, step: 1, unit: "мин", label: "Время на задание",
+    onChange: (v) => { if (v !== (it.minutes || 0)) E.setFields(it.id, { minutes: v }); } });
+  f.input.id = "taskMinutes";
+  popover(anchor, h("div", { class: "typepanel" }, h("div", { class: "phead" }, "Время на задание"), f,
+    h("p", { class: "meta" }, "По нему «На экран» с таймером и задание с пульта")), { align: "right" });
+}
+
+hooks.taskTimer = (btnEl, menuOnly) => {
+  const blk = btnEl.closest(".blk");
+  const it = blk && A.byId.get(blk.dataset.id);
+  if (!it) return;
+  const run = (m) => cmd({ cmd: "task_timer", block: it.id, minutes: m });
+  if (!menuOnly) { run(it.minutes || defaultMinutes()); return; }
+  const own = it.minutes || 0;
+  const items = [{ head: "Задание на экран" }];
+  if (own) items.push({ label: own + " мин", hint: "как записано", on: () => run(own) });
+  for (const m of TIMER_MINUTES) if (m !== own) items.push({ label: m + " мин", on: () => run(m) });
+  items.push({ sep: true }, { label: own ? "Изменить время задания…" : "Записать время задания…", on: () => taskMinutes(btnEl, it) });
+  menu(btnEl, items, { cls: "scrmenu" });
+};
 
 // ---------------------------------------------------------------- зарядка
 function exMenu(anchor) {
@@ -157,6 +241,8 @@ function thumbText(e) {
   if (e.mode === "exercise") return "У учеников зарядка" + (e.ex_ready ? " — ждёт щелчка по вкладке" : e.ex_muted ? " без звука" : "") + tab;
   if (e.mode === "slide") return "У учеников слайд " + (e.slide_n || "") + tab;
   if (e.mode === "black") return "У учеников чёрный экран" + tab;
+  if (e.mode === "timer") return "У учеников таймер" + tab;
+  if (e.mode === "task") return "У учеников задание с таймером" + tab;
   return "У учеников фон" + tab;
 }
 
@@ -184,27 +270,27 @@ function mount(V) {
   const openBreak = () => { pulseKind = ""; breakMenu(brk); updateStrip(); };
   const brk = iconBtn("cup", "Перерыв", openBreak, { size: "sm", cls: "scrbtn" });
   brk.id = "scrBreak";
+  const tmr = iconBtn("timer", "Таймер", () => { timerClick(tmr); updateStrip(); }, { size: "sm", cls: "scrbtn" });
+  tmr.id = "scrTimer";
+  tmr.addEventListener("contextmenu", (e) => {
+    e.preventDefault();
+    if (["timer", "task"].includes(ef().mode)) timerRunMenu(tmr);
+    else minutesMenu(tmr, "Таймер на весь экран", 0, (m) => cmd({ cmd: "timer", minutes: m }));
+  });
   const sl = iconBtn("slide", "Слайд", () => cmd(ef().mode === "slide" ? { cmd: "background" } : { cmd: "slide_step", d: 1 }),
     { size: "sm", cls: "scrbtn" });
   sl.id = "scrSlide";
-  const prev = h("button", { class: "prev", type: "button", "aria-label": "Предыдущий слайд" }, "‹");
-  const next = h("button", { class: "next", type: "button", "aria-label": "Следующий слайд" }, "›");
-  prev.addEventListener("click", () => cmd({ cmd: "slide_step", d: -1 }));
-  next.addEventListener("click", () => cmd({ cmd: "slide_step", d: 1 }));
-  tip(prev, "Предыдущий слайд · ←");
-  tip(next, "Следующий слайд · →");
-  const nav = h("span", { id: "slideNav", class: "slidenav", hidden: true }, prev, h("span", { class: "n mono" }), next);
-  // отсчёт перерыва — в том же месте, что и стрелки слайдов (режимы не бывают вместе); щелчок — меню перерыва
-  const left = h("button", { class: "brkleft mono", type: "button", hidden: true, "aria-label": "Перерыв: сколько осталось" });
-  left.addEventListener("click", openBreak);
-  tip(left, "Перерыв: сколько осталось · щёлкните — +5 мин, пауза, убрать");
-  // место под стрелки и отсчёт оставлено заранее: они выезжают, а значки и кнопки рядом не сдвигаются
-  const info = h("span", { id: "scrInfo", class: "scrinfo" }, nav, left);
-  const icons = h("div", { class: "scricons", role: "group", "aria-label": "Что показать ученикам" }, bg, blk, ex, brk, sl, info);
+  // отсчёт перерыва или таймера — справа от значков (режимы не бывают вместе); щелчок — его меню
+  const left = h("button", { class: "brkleft mono", type: "button", hidden: true, "aria-label": "Сколько осталось" });
+  left.addEventListener("click", () => (["timer", "task"].includes(ef().mode) ? timerRunMenu(left) : openBreak()));
+  tip(left, "Сколько осталось · щёлкните — +1 мин, пауза, убрать");
+  // место под отсчёт оставлено заранее: он выезжает, а значки и кнопки рядом не сдвигаются
+  const info = h("span", { id: "scrInfo", class: "scrinfo" }, left);
+  const icons = h("div", { class: "scricons", role: "group", "aria-label": "Что показать ученикам" }, bg, blk, ex, brk, tmr, sl, info);
   box.append(thumb, open, icons);
   const bar = buildTypingBar();
   V.content.closest(".lbody").after(bar);
-  W = { thumb, scr, dot, open, bg, blk, ex, brk, sl, nav, left, bar };
+  W = { thumb, scr, dot, open, bg, blk, ex, brk, tmr, sl, left, bar };
   lastStage = null;
   pulseKind = "";
   updateStrip();
@@ -215,6 +301,13 @@ function updateStrip() {
   const e = ef();
   const mode = e.mode || "idle";
   for (const [b, m] of [[W.bg, "idle"], [W.blk, "black"], [W.ex, "exercise"], [W.brk, "break"], [W.sl, "slide"]]) b.setAttribute("aria-pressed", String(mode === m));
+  W.tmr.setAttribute("aria-pressed", String(mode === "timer" || mode === "task"));
+  W.tmr.dataset.tip = timerTip();
+  // «На экран · N мин» у заданий без своего времени — минуты оформления урока: сменили их — подпись новая
+  for (const b of document.querySelectorAll(".tasktimer")) {
+    const it = A.byId.get(b.closest(".blk")?.dataset.id);
+    if (it) set(b, "На экран · " + (it.minutes || defaultMinutes()) + " мин");
+  }
   W.blk.dataset.tip = mode === "black" ? "Чёрный экран у учеников · щёлкните — снова фон" : "Чёрный экран";
   // миниатюра
   W.thumb.dataset.mode = mode;
@@ -234,6 +327,7 @@ function updateStrip() {
     W.scr.style.backgroundColor = bgd.kind === "color" ? bgd.value : "";
     if (mode === "break") W.scr.append(icon("cup", "sm"));
     else if (mode === "exercise") W.scr.append(icon("activity", "sm"));
+    else if (mode === "timer" || mode === "task") W.scr.append(icon("timer", "sm"));
     else if (mode === "slide" && !(sb && sb.url)) W.scr.append(icon("slide", "sm"));
   }
   W.open.hidden = !!e.tab_open;
@@ -249,8 +343,6 @@ function updateStrip() {
   const has = slides().length > 0;
   W.sl.disabled = !has && mode !== "slide";
   W.sl.dataset.tip = has ? (mode === "slide" ? "Слайд у учеников · щёлкните — снова фон" : "Слайд") : "Слайд — в уроке нет картинок";
-  W.nav.hidden = mode !== "slide";
-  set(W.nav.querySelector(".n"), String(e.slide_n || ""));
   W.brk.dataset.tip = mode === "break" ? (e.break_paused ? "Перерыв · отсчёт на паузе" : "Перерыв идёт") : "Перерыв";
   tickStrip();
   updateTyping();
@@ -270,10 +362,11 @@ function tickStrip(info) {
   const mode = ef().mode || "idle";
   W.brk.classList.toggle("pulse", pulseKind === "break" && mode !== "break");
   W.ex.classList.toggle("pulse", pulseKind === "exercise" && mode !== "exercise" || mode === "exercise" && !!ef().ex_ready);
-  const left = breakLeft();
+  const bl = breakLeft(), tl = timerLeft();
+  const left = bl !== null ? bl : tl;
   W.left.hidden = left === null;
   if (left !== null) set(W.left, mmss(left));
-  W.left.classList.toggle("paused", !!ef().break_paused);
+  W.left.classList.toggle("paused", bl !== null ? !!ef().break_paused : !!ef().timer_paused);
 }
 
 // ---------------------------------------------------------------- набор кода

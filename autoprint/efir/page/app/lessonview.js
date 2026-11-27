@@ -14,7 +14,7 @@ import { renderMain, renderPlan, stagesOf, nodeOf, stageOfBlock, markOnScreen } 
 import * as E from "../lesson/edit.js";
 import { released } from "../lesson/code.js";
 
-export const hooks = { strip: [], tick: [], apply: [], mount: [], exercise: [] };   // экран учеников, набор, правка — свои части
+export const hooks = { strip: [], tick: [], apply: [], mount: [], exercise: [], taskTimer: null };   // экран учеников, набор, правка — свои части
 
 let V = null;                       // смонтированный экран (элементы) или null
 
@@ -540,6 +540,7 @@ function onMainClick(e) {
       if (!hooks.exercise.some((f) => f(actBtn))) cmd({ cmd: "exercise", stage: actBtn.dataset.stage || "" });
     }
     else if (a === "slide") cmd({ cmd: "slide", block: actBtn.closest(".blk").dataset.id });
+    else if (a === "task-timer") { if (hooks.taskTimer) hooks.taskTimer(actBtn, false); }
     else if (a === "clear-sel") E.setFields(actBtn.closest(".blk").dataset.id, { sel: [] });
     else if (a === "place-insert") E.pickImage(actBtn.closest(".blk").dataset.id, true);
     else if (a === "open-tab") cmd({ cmd: "open_tab" });
@@ -574,6 +575,13 @@ function onKey(e) {
   else if (["b", "B", "и", "И", ".", "ю"].includes(e.key)) { e.preventDefault(); cmd({ cmd: "background" }); }
 }
 document.addEventListener("keydown", onKey);
+// «На экран · 5 мин» у задания: правая кнопка — другое время, записать время задания (screenctl.js)
+document.addEventListener("contextmenu", (e) => {
+  const b = e.target.closest && e.target.closest("[data-act='task-timer']");
+  if (!b || !hooks.taskTimer) return;
+  e.preventDefault();
+  hooks.taskTimer(b, true);
+});
 Q.Q.onResult = (res) => {
   for (const [id, it] of Object.entries(res.items || {})) { if (it) A.fresh.set(id, it); released(id); }
   refresh();

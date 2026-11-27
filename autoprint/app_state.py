@@ -59,16 +59,30 @@ _LOOKS: dict[str, tuple[float, str, dict]] = {}
 LOOK_RECHECK_S = 10          # файлы оформлений (флешка, сетевая папка) — проверка не чаще раза в 10 с
 
 
+def _own_images(ef) -> list[dict]:
+    """Свои картинки-фоны из всех оформлений (фон, перерыв, таймер) — превью во всех выборах фона (1.3)."""
+    from pathlib import Path
+    out, seen = [], set()
+    for lk in ef.store.looks:
+        for v in (lk.background, lk.break_background, lk.timer_background):
+            if (v or "").startswith("image:") and v not in seen and Path(v[6:]).is_file():
+                seen.add(v)
+                out.append({"value": v, "url": ef.server.media_url(v[6:]), "name": Path(v[6:]).name})
+    return out[:24]
+
+
 def _look_state(lk, ef, lessons) -> dict:
     """Оформление для страницы. Статусы файлов — из кэша: проверка файла на сетевой папке может длиться секунды."""
     import time
-    sig = repr((lk.background, lk.break_background, lk.font, [(e.title, e.path) for e in lk.exercises]))
+    sig = repr((lk.background, lk.break_background, lk.timer_background, lk.font, [(e.title, e.path) for e in lk.exercises]))
     hit = _LOOKS.get(lk.id)
     if hit is None or hit[1] != sig or time.monotonic() - hit[0] > LOOK_RECHECK_S:
         hit = _LOOKS[lk.id] = (time.monotonic(), sig, _look_files_state(lk, ef))
     d = dict(hit[2])
     d.update(id=lk.id, title=lk.title, caption=lk.caption, break_countdown=lk.break_countdown, break_title=lk.break_title,
              break_show_title=lk.break_show_title, break_done=lk.break_done, font=lk.font, text_color=lk.text_color,
+             timer_min=lk.timer_min, timer_task_style=lk.timer_task_style, timer_full_style=lk.timer_full_style,
+             timer_end=lk.timer_end, timer_end_text=lk.timer_end_text,
              users=ef.look_users(lk.id, lessons))
     d["exercises"] = [dict(x, title=e.title) for x, e in zip(hit[2]["exercises"], lk.exercises)]
     return d
@@ -83,6 +97,8 @@ def _look_files_state(lk, ef) -> dict:
         if kind == "image":
             d.update(status=file_status(val), name=val.replace("\\", "/").rsplit("/", 1)[-1],
                      url=ef.server.media_url(val) if file_status(val) != "missing" else "")
+        elif kind == "preset":                    # готовая картинка программы (1.3) — превью как у своей картинки
+            d.update(kind="image", status="ok", name=val, url=f"/static/bg/{val}-s.jpg")
         return d
     ex = []
     for e in lk.exercises:
@@ -95,6 +111,7 @@ def _look_files_state(lk, ef) -> dict:
                    "size": size})
     font_status = file_status(lk.font[5:]) if (lk.font or "").startswith("file:") else "ok"
     return {"background": bg(lk.background), "exercises": ex, "break_background": bg(lk.break_background),
+            "timer_background": bg(lk.timer_background),
             "font_status": font_status, "outside": outside_size(lk)}
 
 
@@ -162,7 +179,7 @@ def efir_state_cached(app) -> dict:
 
 def efir_state(app) -> dict:
     """Раздел «Эфир»: расписания (без служебных эфиров уроков), оформления с файлами, идёт ли вебинар, экран."""
-    from .efir.model import ANIMATIONS, FONTS
+    from .efir.model import ANIMATIONS, FONTS, PRESET_IMAGES
     ef = app.efir
     live = ef.store.live
     looks = {lk.id: lk for lk in ef.store.looks}
@@ -174,6 +191,7 @@ def efir_state(app) -> dict:
             "live_id": live.webinar_id if live else "", "mode": ef.mode, "tab": ef.tab_status()[0],
             "tab_open": bool(ef.server.running and ef.clients > 0), "legacy_found": _legacy_found(ef),
             "imported_legacy": bool(ef.store.imported_legacy), "animations": [list(a) for a in ANIMATIONS],
+            "bg_presets": [list(p) for p in PRESET_IMAGES], "own_images": _own_images(ef),
             "fonts": [list(f) for f in FONTS], "picked": dict(getattr(app, "efir_picked", {"seq": 0, "value": ""})),
             "brk_ends": int(ef.brk_ends * 1000) if ef.mode == "break" else 0,
             "break_paused": ef.mode == "break" and ef.brk_left_paused is not None,
