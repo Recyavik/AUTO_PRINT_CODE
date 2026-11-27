@@ -30,7 +30,7 @@ FIELDS: dict[str, tuple] = {
     "start_screen": B, "start_compact": B, "copy_media": B, "exercise_pick": ("choice", ("next", "random", "ask")),
     "exercise_start": ("choice", ("click", "auto")),
     # пульт (1.3)
-    "deck_on": B, "deck_prepare": ("urls",), "deck_prepare_screen": B,
+    "deck_on": B, "deck_prepare": ("urls",), "deck_prepare_screen": B, "deck_style": ("choice", ("tiles", "outline")),
     # набор кода
     "print_mode": ("choice", ("block", "lines", "steps")),
     "step_nav": ("choice", ("arrows", "home")),

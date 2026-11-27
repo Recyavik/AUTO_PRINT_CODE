@@ -466,8 +466,11 @@ function mdCard(info, box) {
   } });
   forget.id = "mdForget";
   return card("Macro Deck",
-    row("Подключён", "В Macro Deck на телефоне — профиль «AutoPrintCode», папка «Урок». Время и подсветка обновляются сами", rebuild, forget),
-    md.busy || md.status || md.error ? status : null, lan);
+    row("Подключён", "В Macro Deck на телефоне — профиль «AutoPrintCode». Время и подсветка обновляются сами", rebuild, forget),
+    md.busy || md.status || md.error ? status : null,
+    segRow("deck_style", "Вид кнопок", "«Плитки» — как окно программы, нажатое залито янтарным; «Контур» — тонкие рамки, "
+      + "нажатое — янтарной рамкой. Меняется на телефоне сразу", [["tiles", "Плитки"], ["outline", "Контур"]]),
+    lan);
 }
 
 function prepareCard(info) {

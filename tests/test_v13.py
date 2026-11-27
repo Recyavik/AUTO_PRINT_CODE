@@ -545,40 +545,67 @@ class CoreAudioReadTest(unittest.TestCase):
 
 
 class FakeMD:
-    """Подставной Macro Deck: что программа создаёт и какие значения шлёт (настоящий не трогаем)."""
+    """Подставной Macro Deck: что программа создаёт и какие значения шлёт (настоящий не трогаем). Новый профиль —
+    как настоящий: сам заводит пустую главную страницу «Home»."""
 
-    def __init__(self, pending=0, profiles=None, folders=None, variables=None):
+    def __init__(self, pending=0, profiles=None, folders=None, variables=None, widgets=None):
         self.pending = pending
         self.profiles = profiles or []
         self.folders = folders or []
         self.vars_ = variables or []
+        self.widgets = widgets or []
         self.applied = []
         self.sets = []
+        self.actions = []
         self.down = False
 
-    def items(self, entity, **kw):
+    def _check(self):
         if self.down:
             from autoprint.macrodeck import MacroDeckError
             raise MacroDeckError("Macro Deck не отвечает — он запущен на этом компьютере?")
-        return {"profiles": self.profiles, "folders": self.folders, "variables": self.vars_}[entity]
+
+    def items(self, entity, **kw):
+        self._check()
+        if entity == "folders":
+            return [f for f in self.folders if not kw.get("profileId") or f.get("profileId") == kw["profileId"]]
+        if entity == "widgets":
+            return [w for w in self.widgets if not kw.get("folderId") or w.get("folderId") == kw["folderId"]]
+        return {"profiles": self.profiles, "variables": self.vars_}[entity]
 
     def apply(self, changes, dry=False):
         from autoprint.macrodeck import MacroDeckError
+        self._check()
         if self.pending:
             self.pending -= 1
             raise MacroDeckError("An error occurred: CONFIRMATION_PENDING: Macro Deck is asking the user")
         self.applied.append(changes)
-        return {"valid": True, "applied": True, "createdIds": {"p": "prof-1", "f": "fold-1"}, "confirmations": []}
+        ids = {}
+        for c in changes:
+            if c["op"] == "create" and c["entity"] == "widget" and c.get("ref"):
+                ids[c["ref"]] = "wid-" + c["ref"][2:]
+            if c["op"] == "create" and c["entity"] == "profile":
+                ids[c["ref"]] = "prof-1"
+                self.profiles.append({"id": "prof-1", "name": c["data"]["name"]})
+                self.folders.append({"id": "home-1", "name": "Home", "profileId": "prof-1", "isDefault": True})
+        return {"valid": True, "applied": True, "createdIds": ids, "confirmations": []}
+
+    def call(self, tool, args):
+        self._check()
+        self.actions.append((tool, args))
+        return {"status": "Succeeded"}
 
     def set_var(self, name, value):
-        if self.down:
-            from autoprint.macrodeck import MacroDeckError
-            raise MacroDeckError("Macro Deck не отвечает")
+        self._check()
         self.sets.append((name, value))
 
 
+def svg_of(value: str) -> str:
+    import base64
+    return base64.b64decode(value.split(",", 1)[1]).decode("utf-8")
+
+
 class MacroDeckPageTest(unittest.TestCase):
-    """Страница «Урок» для Macro Deck: раскладка 7 × 3, кнопки — команды пульта, значения — подписи и подсветка."""
+    """Страница «Урок» для Macro Deck: раскладка 7 × 3, кнопки — картинки программы и команды пульта."""
 
     def test_layout_fits_phone_grid(self):
         from autoprint import macrodeck as md
@@ -591,68 +618,149 @@ class MacroDeckPageTest(unittest.TestCase):
                 self.assertLess(cell[0], md.COLS)
                 self.assertLess(cell[1], md.ROWS)
                 cells.add(cell)
-        top = sorted((x["positionX"], x["width"], x["data"]["label"]) for x in w if x["positionY"] == 0)
-        self.assertEqual(top, [(0, 2, "{{ vars.apc_prev }}"), (2, 3, "{{ vars.apc_now }}\n{{ vars.apc_left }}"),
-                               (5, 2, "{{ vars.apc_next }}")])
+        top = sorted((x["positionX"], x["width"], x["data"][md.MARK]) for x in w if x["positionY"] == 0)
+        self.assertEqual(top, [(0, 2, "prev"), (2, 3, "now"), (5, 2, "next")])
         urls = [x["data"]["flows"][0]["children"][0]["parameters"][1]["value"] for x in w if x["data"].get("flows")]
         for c in ("background", "black", "exercise", "break", "slide", "slide_prev", "slide_next", "prepare", "sound", "mic"):
             self.assertIn(f"http://127.0.0.1:8791/api/{c}?key=K", urls)
-        self.assertTrue(all(x["data"]["imageUrl"].startswith("data:image/svg+xml;base64,") for x in w if x["data"].get("flows")))
+        for x in w:
+            self.assertEqual(x["data"]["label"], "")                       # подписи — на картинке, не поверх
+            self.assertTrue(x["data"]["imageUrl"].startswith("data:image/svg+xml;base64,"))
 
-    def test_values_highlight_what_students_see(self):
+    def test_images_show_what_students_see(self):
+        from autoprint import deckart as a
         from autoprint import macrodeck as md
-        v = md.values({"phase": "live", "prev": "Зарядка для глаз", "now": "Тренажёры", "left": "12:40", "left_s": 760,
-                       "next": "Итоги первой части", "screen": "black", "mic_muted": True})
+        st = {"phase": "live", "prev": "Зарядка для глаз", "now": "Тренажёры", "left": "12:40", "left_s": 760,
+              "frac": 0.4, "next": "Итоги первой части", "screen": "black", "mic_muted": True, "slides": True}
+        img = md.images(st, "tiles")
+        self.assertIn(a.ACCENT, img["black"])                             # нажатое — янтарным
+        self.assertNotIn(a.ACCENT, img["bg"])
+        self.assertIn(a.LIVE, img["mic"])                                 # микрофон выключен — красным
+        self.assertIn("Выключен", img["mic"])
+        self.assertIn(a.OFF, img["prev_s"])                               # слайда нет — стрелки погашены
+        self.assertIn("Тренажёры", img["now"])
+        self.assertIn("Зарядка для глаз", img["prev"])
+        self.assertNotIn("12:40", img["now"])                             # время — подписью Macro Deck
+        pg = md.page(st, "tiles", "http://127.0.0.1:8791/api/?key=K")
+        self.assertEqual(pg["now"]["label"], "{{ vars.apc_left }}")
+        self.assertEqual(pg["now"]["labelColor"], a.TEXT)
+        v = md.values(st)
         self.assertEqual((v["apc_prev"], v["apc_now"], v["apc_left"], v["apc_next"]),
                          ("Зарядка для глаз", "Тренажёры", "12:40", "Итоги первой части"))
-        self.assertEqual(v["apc_c_black"], md.ACCENT)
-        self.assertEqual(v["apc_c_bg"], md.RAISED)
-        self.assertEqual(v["apc_c_mic"], md.LIVE)
-        self.assertEqual(v["apc_mic_label"], "Микрофон выкл.")
-        self.assertEqual(v["apc_c_prev_s"], md.PANEL)                     # слайда нет — стрелки погашены
-        self.assertEqual(v["apc_f_left"], md.TEXT)
-        v = md.values({"phase": "live", "left": "00:40", "left_s": 40, "screen": "slide", "slide": True,
-                       "slide_text": "2 / 12"})
-        self.assertEqual(v["apc_f_left"], md.LIVE)                        # последняя минута — красным
-        self.assertEqual(v["apc_slide_label"], "Слайд 2/12")
-        self.assertEqual(v["apc_c_next_s"], md.RAISED)
-        v = md.values({"screen": "break", "break_left": "08:12"})
-        self.assertEqual(v["apc_break_label"], "08:12")
-        self.assertEqual(v["apc_c_break"], md.ACCENT)
+        st2 = {"phase": "live", "now": "Перерыв", "left": "00:40", "left_s": 40, "screen": "break",
+               "break_left": "08:12", "slide": False}
+        pg = md.page(st2, "outline")
+        self.assertEqual(pg["now"]["labelColor"], a.LIVE)                 # последняя минута — красным
+        self.assertEqual(pg["break"]["label"], "{{ vars.apc_break_left }}")   # перерыв — отсчёт на кнопке
+        self.assertEqual(md.values(st2)["apc_break_left"], "08:12")
+        self.assertEqual(md.page({"screen": "idle"})["break"]["label"], "")
+        img = md.images({"screen": "slide", "slide": True, "slides": True, "slide_text": "2 / 12"})
+        self.assertIn("2/12", img["slide"])
+
+    def test_long_names_fit(self):
+        """Длинное название этапа — не шире кнопки: переносится и мельчает, в крайнем случае многоточие."""
+        from autoprint import deckart as a
+        lines, size = a.fit("ФУ 1.6 · Занятие 6 — практика: журнал, настройки и чёрный список", a.width_of(3) - 32, 18, 3, 12)
+        self.assertLessEqual(len(lines), 3)
+        for ln in lines:
+            self.assertLessEqual(a.text_w(ln, size), a.width_of(3) - 32 + 0.5)
+        lines, size = a.fit("Оченьдлинноеслово" * 4, 100, 15, 1, 10)
+        self.assertTrue(lines[0].endswith("…"))
+        self.assertLessEqual(a.text_w(lines[0], size), 100.5)
+
+    def test_both_styles_differ(self):
+        from autoprint import macrodeck as md
+        st = {"screen": "black"}
+        self.assertNotEqual(md.images(st, "tiles")["black"], md.images(st, "outline")["black"])
+        self.assertEqual(md.images(st, "nonsense")["black"], md.images(st, "tiles")["black"])
 
     def test_every_template_variable_is_declared(self):
         """Каждая {{ vars.… }} в кнопках — среди переменных, которые программа создаёт и шлёт."""
         import re
         from autoprint import macrodeck as md
-        used = set(re.findall(r"vars\.(apc_\w+)", json.dumps(md.layout("http://x/api/?key=K"))))
+        st = {"phase": "live", "now": "Этап", "left": "05:00", "left_s": 300, "screen": "break", "break_left": "01:00"}
+        used = set(re.findall(r"vars\.(apc_\w+)", json.dumps(md.layout("http://x/api/?key=K", st))))
+        self.assertEqual(used, {"apc_left", "apc_break_left"})
         declared = {n for n, _, _ in md.variables()}
         self.assertEqual(used - declared, set())
         self.assertEqual(used - set(md.values({})), set())
 
-    def test_setup_new_profile(self):
+    def test_setup_new_profile_on_its_home_page(self):
+        """Новый профиль: кнопки — на его главной странице (её Macro Deck завёл сам), а не в соседней папке;
+        телефоны переключаются на него."""
         from autoprint import macrodeck as md
         fake = FakeMD()
         r = md.setup(fake, "http://127.0.0.1:8791/api/?key=K")
-        self.assertEqual(r["profile"], "prof-1")
-        ch = fake.applied[0]
-        self.assertEqual(ch[0]["entity"], "profile")
-        self.assertEqual(ch[0]["data"]["name"], "AutoPrintCode")
-        self.assertEqual(sum(c["entity"] == "widget" for c in ch), 13)
-        self.assertEqual(sum(c["entity"] == "variable" for c in ch), len(md.variables()))
+        self.assertEqual((r["profile"], r["folder"]), ("prof-1", "home-1"))
+        first, second = fake.applied
+        self.assertEqual(first[0]["entity"], "profile")
+        self.assertEqual(sum(c["entity"] == "variable" for c in first), len(md.variables()))
+        self.assertIn({"op": "update", "entity": "folder", "id": "home-1", "data": {"name": "Урок"}}, second)
+        widgets = [c for c in second if c["entity"] == "widget"]
+        self.assertEqual(len(widgets), 13)
+        self.assertTrue(all(c["data"]["folderId"] == "home-1" for c in widgets))
+        self.assertFalse(any(c["entity"] == "folder" and c["op"] == "create" for c in second))
+        shown = [a[1]["actionId"] for a in fake.actions]
+        self.assertEqual(shown, ["change-profile", "change-folder"])
+        self.assertEqual(set(r["widgets"]), set(md.IMAGE_KEYS))            # id своих кнопок — для обновлений
 
-    def test_setup_again_rebuilds_only_our_folder(self):
-        """Повторно: тот же профиль, папка «Урок» заново, чужие папки и уже созданные переменные — как есть."""
+    def test_setup_again_keeps_owner_buttons(self):
+        """Повторно: свои кнопки заново, кнопки человека на той же странице — как есть; папка прежней версии
+        («Урок» рядом с пустой главной) — убрана; уже созданные переменные не создаются заново."""
         from autoprint import macrodeck as md
         fake = FakeMD(profiles=[{"id": "P", "name": "AutoPrintCode"}],
-                      folders=[{"id": "F1", "name": "Урок"}, {"id": "F2", "name": "Свет"}],
-                      variables=[{"name": n} for n, _, _ in md.variables()])
+                      folders=[{"id": "H", "name": "Home", "profileId": "P", "isDefault": True},
+                               {"id": "OLD", "name": "Урок", "profileId": "P", "isDefault": False},
+                               {"id": "X", "name": "Свет", "profileId": "P", "isDefault": False}],
+                      variables=[{"name": n} for n, _, _ in md.variables()],
+                      widgets=[{"id": "w-ours", "folderId": "H", "data": {"apc": "bg"}},
+                               {"id": "w-owner", "folderId": "H", "data": {"label": "Свет в комнате"}}])
         r = md.setup(fake, "http://127.0.0.1:8791/api/?key=K", profile_id="P")
+        self.assertEqual(len(fake.applied), 1)                              # профиль и переменные уже есть
         ch = fake.applied[0]
         self.assertEqual(r["profile"], "P")
-        self.assertIn({"op": "delete", "entity": "folder", "id": "F1"}, ch)
-        self.assertNotIn({"op": "delete", "entity": "folder", "id": "F2"}, ch)
-        self.assertFalse(any(c["entity"] == "profile" for c in ch))
-        self.assertFalse(any(c["entity"] == "variable" for c in ch))
+        self.assertIn({"op": "delete", "entity": "widget", "id": "w-ours"}, ch)
+        self.assertNotIn({"op": "delete", "entity": "widget", "id": "w-owner"}, ch)
+        self.assertIn({"op": "delete", "entity": "folder", "id": "OLD"}, ch)
+        self.assertNotIn({"op": "delete", "entity": "folder", "id": "X"}, ch)
+        self.assertFalse(any(c["entity"] in ("profile", "variable") for c in ch))
+
+    def test_sync_updates_only_changed_buttons_whole(self):
+        """Нажали «Чёрный» — в Macro Deck уходят только две кнопки (Фон и Чёрный), каждая целиком, с командой."""
+        from autoprint import deckart as a
+        from autoprint import macrodeck as md
+        fake = FakeMD()
+        ids = {k: "id-" + k for k in md.IMAGE_KEYS}
+        sync = md.Sync(fake, ids, "F")
+        base = "http://127.0.0.1:8791/api/?key=K"
+        try:
+            st = {"screen": "idle"}
+            sync.push(md.values(st), md.page(st, "tiles", base))
+            self.assertTrue(wait(lambda: len(fake.applied) == 1))
+            self.assertEqual(len(fake.applied[0]), len(md.IMAGE_KEYS))        # первый раз — все
+            st = {"screen": "black"}
+            sync.push(md.values(st), md.page(st, "tiles", base))
+            self.assertTrue(wait(lambda: len(fake.applied) == 2))
+            ch = {c["id"]: c["data"]["data"] for c in fake.applied[1]}
+            self.assertEqual(set(ch), {"id-bg", "id-black"})
+            self.assertIn(a.ACCENT, svg_of(ch["id-black"]["imageUrl"]))
+            self.assertIn("api/black?key=K", json.dumps(ch["id-black"]["flows"]))   # команда не потерялась
+        finally:
+            sync.stop()
+
+    def test_sync_finds_buttons_after_restart(self):
+        """Id кнопок забыты (программу переустановили) — свои кнопки находятся на странице по пометке."""
+        from autoprint import macrodeck as md
+        fake = FakeMD(widgets=[{"id": "real-" + k, "folderId": "F", "data": {md.MARK: k}} for k in md.IMAGE_KEYS]
+                      + [{"id": "owner", "folderId": "F", "data": {"label": "Свет"}}])
+        sync = md.Sync(fake, {}, "F")
+        try:
+            sync.push({}, md.page({"screen": "black"}))
+            self.assertTrue(wait(lambda: len(fake.applied) == 1))
+            self.assertIn("real-black", {c["id"] for c in fake.applied[0]})
+            self.assertNotIn("owner", {c["id"] for c in fake.applied[0]})
+        finally:
+            sync.stop()
 
     def test_sync_sends_only_changes_and_survives_macro_deck_closed(self):
         from autoprint import macrodeck as md
@@ -705,7 +813,6 @@ class MacroDeckConnectTest(unittest.TestCase):
         close(self.win)
 
     def test_connect_builds_page_and_streams(self):
-        from autoprint import macrodeck as md
         from autoprint.macrodeck import Sync
         Sync.RETRY_S = 0.2
         self.win.commands.call({"cmd": "deck_md_connect", "token": "mdmcp_secret_token"})
@@ -718,17 +825,47 @@ class MacroDeckConnectTest(unittest.TestCase):
         self.assertNotIn("mdmcp_secret_token", s.md_token if s.md_token.startswith("dpapi:") else "")
         self.assertEqual(s.md_profile, "prof-1")
         self.assertIn("AutoPrintCode", self.win.deck.md_status)
-        widgets = [c for c in self.fake.applied[0] if c["entity"] == "widget"]
+        widgets = [c for batch in self.fake.applied for c in batch if c["entity"] == "widget"]
         urls = json.dumps(widgets)
         self.assertIn(f"http://127.0.0.1:{self.win.efir.server.want_port}/api/black?key={s.deck_key}", urls)
+        from autoprint import deckart
+
+        def updated(key, pred=lambda d: True, since=0):
+            return any(c["op"] == "update" and c["entity"] == "widget" and c["data"]["data"].get("apc") == key
+                       and pred(c["data"]["data"])
+                       for batch in self.fake.applied[since:] for c in batch)
+
         self.win.lesson.command({"cmd": "black"})
-        self.assertTrue(wait(lambda: ("apc_c_black", md.ACCENT) in self.fake.sets))
+        self.assertTrue(wait(lambda: updated("black", lambda d: deckart.ACCENT in svg_of(d["imageUrl"]))))
+        n0 = len(self.fake.applied)
+        self.win.commands.call({"cmd": "set", "key": "deck_style", "value": "outline"})     # другой вид — сразу
+        self.assertTrue(wait(lambda: updated("bg", since=n0)))
         self.win.commands.call({"cmd": "deck_md_forget"})
         self.assertEqual(self.win.settings.md_token, "")
         n = len(self.fake.sets)
         self.win.lesson.command({"cmd": "background"})
         pump(300)
         self.assertEqual(len(self.fake.sets), n)
+
+    def test_old_page_rebuilt_after_update(self):
+        """Программу обновили, а страница в Macro Deck собрана прежней версией — пересобирается сама при запуске
+        пульта, и только потом идут значения."""
+        from autoprint import macrodeck as md
+        from autoprint.ai import protect
+        self.fake.pending = 0
+        s = self.win.settings
+        s.md_token, s.md_profile, s.md_layout = protect("mdmcp_old"), "", 1
+        s.deck_on = True
+        self.win.deck.apply()
+        self.assertTrue(wait(lambda: not self.win.deck.md_busy and self.fake.applied, 10))
+        self.assertTrue(wait(lambda: self.win.deck.md_sync is not None, 5))
+        self.assertEqual(s.md_layout, md.LAYOUT)
+        self.assertEqual(set(s.md_widgets), set(md.IMAGE_KEYS))
+        n = len(self.fake.applied)
+        self.win.deck.apply()                                       # уже новая — второй раз не пересобирает
+        pump(300)
+        self.assertFalse(any(c["entity"] == "profile" or (c["entity"] == "widget" and c["op"] == "create")
+                             for batch in self.fake.applied[n:] for c in batch))
 
     def test_bad_token_reported(self):
         from autoprint.macrodeck import MacroDeckError

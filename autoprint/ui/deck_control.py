@@ -173,7 +173,8 @@ class DeckControl(QObject):
         странице Macro Deck."""
         if self.md_sync is not None:
             from .. import macrodeck
-            self.md_sync.push(macrodeck.values({"off": True, "now": text}))
+            off = {"off": True, "now": text}
+            self.md_sync.push(macrodeck.values(off, self._style()), macrodeck.page(off, self._style(), self.md_base()))
         if not self.folder.is_dir():
             return
         off = {name: ("false" if k in BOOL_KEYS else "") for name, k in FILES.items()}
@@ -247,6 +248,7 @@ class DeckControl(QObject):
         self.md_busy = True
         self.md_status = "Собираю страницу в Macro Deck…"
         base, profile = self.md_base(), self.app.settings.md_profile
+        st, style = self.state(), self._style()
         client = self.md_client(token)
         wait_s = self.PENDING_WAIT_S
 
@@ -255,7 +257,7 @@ class DeckControl(QObject):
             end = time.monotonic() + wait_s
             while True:
                 try:
-                    res.update(ok=True, **macrodeck.setup(client, base, profile))
+                    res.update(ok=True, **macrodeck.setup(client, base, profile, st=st, style=style))
                     break
                 except macrodeck.MacroDeckError as e:
                     if "CONFIRMATION_PENDING" in str(e) and time.monotonic() < end:
@@ -282,6 +284,10 @@ class DeckControl(QObject):
                 s.md_token = protect(res["token"])
             if res.get("profile"):
                 s.md_profile = res["profile"]
+            s.md_folder = res.get("folder") or s.md_folder
+            s.md_widgets = dict(res.get("widgets") or {})
+            from .. import macrodeck
+            s.md_layout = macrodeck.LAYOUT
             s.save()
             self.md_status = "Готово: в Macro Deck на телефоне выберите профиль «AutoPrintCode»"
             self._md_stop_sync()
@@ -297,12 +303,20 @@ class DeckControl(QObject):
         token = self.md_token()
         if token:
             from .. import macrodeck
-            self.md_sync = macrodeck.Sync(self.md_client(token))
+            if getattr(self.app.settings, "md_layout", 0) != macrodeck.LAYOUT:
+                self.md_setup()                  # страница от прежней версии — пересобрать; Sync — после сборки
+                return
+            from .. import macrodeck
+            s = self.app.settings
+            self.md_sync = macrodeck.Sync(self.md_client(token), dict(s.md_widgets or {}), s.md_folder)
 
     def _md_stop_sync(self) -> None:
         if self.md_sync is not None:
             self.md_sync.stop()
             self.md_sync = None
+
+    def _style(self) -> str:
+        return getattr(self.app.settings, "deck_style", "tiles") or "tiles"
 
     def md_info(self) -> dict:
         sync = self.md_sync
@@ -470,6 +484,7 @@ class DeckControl(QObject):
         ag = ef.agenda(now)
         prev = cur = nxt = left = ""
         left_s = 0
+        frac = 0.0
         stage = 0
         if not segs:
             phase = "none"
@@ -488,6 +503,7 @@ class DeckControl(QObject):
             nxt = ag.next.activity.name if ag.next else ""
             left_s = int(ag.left_s + 0.999)
             left = fmt_left(ag.left_s)
+            frac = round(float(ag.frac), 3)
         else:
             phase, cur = "after", "Урок закончен"
             prev = segs[-1].activity.name
@@ -503,7 +519,7 @@ class DeckControl(QObject):
             n = next((i + 1 for i, b in enumerate(slides) if b.id == ef.slide.get("bid")), 0)
         return {
             "ok": True, "lesson": t.title if t is not None else "", "phase": phase,
-            "prev": prev, "now": cur, "next": nxt, "left": left, "left_s": left_s,
+            "prev": prev, "now": cur, "next": nxt, "left": left, "left_s": left_s, "frac": frac,
             "stage": stage, "stages": len(segs), "stage_text": f"{stage} из {len(segs)}" if stage else "",
             "screen": mode, "black": mode == "black",
             "exercise": mode == "exercise", "exercise_paused": mode == "exercise" and bool(ef.ex_paused),
@@ -543,7 +559,7 @@ class DeckControl(QObject):
         out["state.json"] = json.dumps(st, ensure_ascii=False, indent=1)
         if self.md_sync is not None:
             from .. import macrodeck
-            self.md_sync.push(macrodeck.values(st))
+            self.md_sync.push(macrodeck.values(st, self._style()), macrodeck.page(st, self._style(), self.md_base()))
         try:
             self.folder.mkdir(parents=True, exist_ok=True)
         except OSError:

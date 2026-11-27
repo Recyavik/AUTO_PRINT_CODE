@@ -281,6 +281,9 @@ class App(QObject):
         if key == "deck_on":
             self.deck.apply()
             return
+        if key == "deck_style":
+            self.deck.write_files()
+            return
         if key in ("close_to_tray", "samples_seen"):
             return
         self.printer.on_settings_changed(key)

@@ -152,6 +152,9 @@ class SettingsTest(AppPage):
             self.assertTrue(fake.applied)
             self.assertTrue(self.wait_js("!!document.querySelector('#mdRebuild')", 10))
             self.assertTrue(self.wait_js("document.querySelector('#mdStatus').textContent.includes('AutoPrintCode')"))
+            self.assertTrue(self.wait_js("!!document.querySelector('#f-deck_style button[data-value=outline]')"))
+            self.click("#f-deck_style button[data-value=outline]")
+            self.assertTrue(self.wait_py(lambda: self.app.settings.deck_style == "outline"))
             self.assertTrue(self.wait_js("!!document.querySelector('#deckPrepare')"))
             self.js("const t = document.querySelector('#deckPrepare'); t.value = 'lms.example/course\\nmeet.example'; "
                     "t.dispatchEvent(new Event('change'))")
@@ -161,7 +164,7 @@ class SettingsTest(AppPage):
             deck._md_stop_sync()
             deck.md_client = old_client
             s = self.app.settings
-            s.md_token, s.md_profile, s.deck_prepare = "", "", []
+            s.md_token, s.md_profile, s.deck_prepare, s.deck_style = "", "", [], "tiles"
             s.deck_on = False
             deck.apply()
 

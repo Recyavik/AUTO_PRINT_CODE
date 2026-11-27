@@ -246,6 +246,10 @@ class Settings:
     deck_prepare_screen: bool = True   # 1.3: «Подготовка» открывает и вкладку экрана учеников
     md_token: str = ""                 # 1.3: ключ Macro Deck (Настройки → AI clients) — зашифрован Windows, «dpapi:…»
     md_profile: str = ""               # 1.3: профиль «AutoPrintCode», который программа собрала в Macro Deck
+    md_folder: str = ""                # 1.3: его главная страница (там кнопки программы)
+    md_widgets: dict = field(default_factory=dict)   # 1.3: кнопки программы в Macro Deck: ключ → id
+    md_layout: int = 0                 # 1.3: устройство страницы, с которым она собрана (другое — пересобрать само)
+    deck_style: str = "tiles"          # 1.3: вид кнопок на телефоне — tiles («Плитки») | outline («Контур»)
     start_timer: bool = False          # до 1.0: «Начать урок» открывал мини-таймер (migrations v1 → start_compact)
     start_compact: bool = False        # 1.0: «Начать урок» — окно в маленький режим поверх всех
     start_screen: bool = False         # «Начать урок» открывает экран учеников (вкладку)
