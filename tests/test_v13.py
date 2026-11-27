@@ -744,6 +744,32 @@ class MacroDeckConnectTest(unittest.TestCase):
         self.assertEqual(self.win.settings.md_token, "")              # неверный ключ не запоминаем
 
 
+class LanAddressTest(unittest.TestCase):
+    """«Адрес этого компьютера в сети» — домашняя сеть (Wi-Fi, провод), а не VPN, Hyper-V или WSL."""
+
+    def test_owner_machine(self):
+        """Как у владельца: VPN «Meta» 198.18.0.1, провод 192.168.2.21, Hyper-V и WSL, отключённый Wi-Fi."""
+        from autoprint.ui.deck_control import lan_addresses
+        nics = [("Meta", "unknown", True, ["198.18.0.1"]), ("Ethernet", "ethernet", True, ["192.168.2.21"]),
+                ("Беспроводная сеть", "wifi", False, ["169.254.72.95"]),
+                ("Сетевое подключение Bluetooth", "ethernet", False, ["169.254.93.124"]),
+                ("Loopback Pseudo-Interface 1", "loopback", True, ["127.0.0.1"]),
+                ("vEthernet (Default Switch)", "ethernet", True, ["192.168.160.1"]),
+                ("vEthernet (WSL (Hyper-V firewall))", "ethernet", True, ["172.29.240.1"])]
+        self.assertEqual(lan_addresses(nics), ["192.168.2.21"])
+
+    def test_wifi_first_and_vpn_dropped(self):
+        from autoprint.ui.deck_control import lan_addresses
+        nics = [("Ethernet 2", "ethernet", True, ["10.0.0.5"]), ("Wi-Fi", "wifi", True, ["192.168.1.40"]),
+                ("Tailscale", "unknown", True, ["100.101.102.103"]), ("VMware Network Adapter VMnet8", "ethernet", True,
+                                                                        ["192.168.47.1"])]
+        self.assertEqual(lan_addresses(nics), ["192.168.1.40", "10.0.0.5"])
+
+    def test_real_interfaces_do_not_fail(self):
+        from autoprint.ui.deck_control import lan_addresses
+        self.assertIsInstance(lan_addresses(), list)
+
+
 class DeckSettingsTest(unittest.TestCase):
     port = 18951
 

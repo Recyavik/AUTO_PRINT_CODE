@@ -64,27 +64,45 @@ def deck_folder() -> Path:
     return DATA_DIR / "deck"
 
 
-def lan_addresses() -> list[str]:
-    """Адреса этого компьютера в домашней сети (IPv4, без 127.* и 169.254.*) — для телефона. Первым — тот, через
-    который компьютер выходит в сеть (пакет никуда не уходит: UDP connect только выбирает сетевую карту)."""
-    import socket
-    out: list[str] = []
+VIRTUAL_NIC = ("vethernet", "virtual", "vmware", "virtualbox", "hyper-v", "wsl", "bluetooth", "tap", "wireguard",
+               "tailscale", "zerotier", "npcap", "loopback", "vpn", "radmin", "hamachi")
+
+
+def _interfaces() -> list[tuple[str, str, bool, list[str]]]:
+    """Сетевые карты: (имя, тип wifi | ethernet | …, включена и на связи, IPv4-адреса)."""
+    from PySide6.QtNetwork import QAbstractSocket, QNetworkInterface
+    kinds = {QNetworkInterface.InterfaceType.Wifi: "wifi", QNetworkInterface.InterfaceType.Ethernet: "ethernet",
+             QNetworkInterface.InterfaceType.Loopback: "loopback"}
+    v4 = QAbstractSocket.NetworkLayerProtocol.IPv4Protocol
+    up = QNetworkInterface.InterfaceFlag.IsUp
+    run = QNetworkInterface.InterfaceFlag.IsRunning
+    out = []
+    for nic in QNetworkInterface.allInterfaces():
+        ips = [e.ip().toString() for e in nic.addressEntries() if e.ip().protocol() == v4]
+        f = nic.flags()
+        out.append((nic.humanReadableName() or nic.name(), kinds.get(nic.type(), "other"), bool(f & up and f & run), ips))
+    return out
+
+
+def lan_addresses(nics: list | None = None) -> list[str]:
+    """Адреса этого компьютера в домашней сети — для телефона: Wi-Fi, потом провод; без VPN-туннелей, Hyper-V,
+    WSL, Bluetooth и отключённых карт (у владельца первым шёл VPN 198.18.0.1, а нужен 192.168.2.21)."""
     try:
-        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
-            s.connect(("192.0.2.1", 9))
-            out.append(s.getsockname()[0])
-    except OSError:
-        pass
-    try:
-        for info in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET):
-            out.append(info[4][0])
-    except OSError:
-        pass
-    seen: list[str] = []
-    for ip in out:
-        if ip not in seen and not ip.startswith(("127.", "169.254.", "0.")):
-            seen.append(ip)
-    return seen
+        nics = _interfaces() if nics is None else nics
+    except Exception:      # noqa: BLE001 — нет QtNetwork — адреса просто не показываем
+        return []
+    order = {"wifi": 0, "ethernet": 1}
+    found: list[tuple[int, str]] = []
+    for name, kind, alive, ips in nics:
+        low = (name or "").lower()
+        if not alive or kind not in order or any(w in low for w in VIRTUAL_NIC):
+            continue
+        for ip in ips:
+            if ip.startswith(("127.", "169.254.", "0.", "198.18.", "198.19.")):
+                continue
+            if (order[kind], ip) not in found:
+                found.append((order[kind], ip))
+    return [ip for _, ip in sorted(found, key=lambda x: x[0])]
 
 
 class DeckControl(QObject):
