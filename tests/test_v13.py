@@ -581,6 +581,19 @@ class FakeMD:
         if self.pending:
             self.pending -= 1
             raise MacroDeckError("An error occurred: CONFIRMATION_PENDING: Macro Deck is asking the user")
+        gone = {c["id"] for c in changes if c["op"] == "delete" and c["entity"] == "widget"}
+        taken = set()
+        for w in self.widgets:
+            if w["id"] not in gone and "positionX" in w:
+                taken |= {(w.get("folderId"), w["positionX"] + dx, w["positionY"]) for dx in range(w.get("width", 1))}
+        for c in changes:
+            if c["op"] == "create" and c["entity"] == "widget":
+                d = c["data"]
+                cells = {(d["folderId"], d["positionX"] + dx, d["positionY"]) for dx in range(d["width"])}
+                if cells & taken:
+                    raise MacroDeckError("Macro Deck: на странице «Урок» клетки заняты (PositionOccupied)")
+                taken |= cells
+        self.widgets = [w for w in self.widgets if w["id"] not in gone]
         self.applied.append(changes)
         ids = {}
         for c in changes:
@@ -720,6 +733,69 @@ class MacroDeckPageTest(unittest.TestCase):
         declared = {n for n, _, _ in md.variables()}
         self.assertEqual(used - declared, set())
         self.assertEqual(used - set(md.values({})), set())
+
+    def test_setup_replaces_first_build_buttons(self):
+        """Кнопки первой сборки 1.3.0 (без пометки "apc": подпись из переменных apc_…, команда пульта) — тоже свои:
+        пересборка их убирает, иначе новые встают на занятые клетки и Macro Deck ничего не создаёт. Кнопку,
+        которую человек добавил сам (свет), не трогаем."""
+        from autoprint import macrodeck as md
+        old_flow = md._flow("x", "http://127.0.0.1:8791/api/background?key=OLD")
+        own_flow = md._flow("y", "http://192.168.1.5/light/toggle")
+        widgets = [
+            {"id": "o-prev", "folderId": "home-1", "positionX": 0, "positionY": 0, "width": 2,
+             "data": {"label": "{{ vars.apc_prev }}"}},
+            {"id": "o-bg", "folderId": "home-1", "positionX": 0, "positionY": 1, "width": 1,
+             "data": {"label": "Фон", "flows": old_flow}},
+            {"id": "o-mic", "folderId": "home-1", "positionX": 2, "positionY": 2, "width": 1,
+             "data": {"label": "{{ vars.apc_mic_label }}", "flows": md._flow("z", "http://127.0.0.1:8791/api/mic?key=OLD")}},
+            {"id": "light", "folderId": "home-1", "positionX": 6, "positionY": 2, "width": 1,
+             "data": {"label": "Свет", "flows": own_flow}},
+            # своя кнопка человека на команду пульта, в свободной клетке — тоже не трогаем
+            {"id": "plus5", "folderId": "home-1", "positionX": 5, "positionY": 2, "width": 1,
+             "data": {"label": "+5", "flows": md._flow("p", "http://127.0.0.1:8791/api/break_add?key=K")}},
+        ]
+        fake = FakeMD(profiles=[{"id": "prof-1", "name": "AutoPrintCode"}],
+                      folders=[{"id": "home-1", "name": "Урок", "profileId": "prof-1", "isDefault": True}],
+                      variables=[{"name": n} for n, _, _ in md.variables()], widgets=widgets)
+        r = md.setup(fake, "http://127.0.0.1:8791/api/?key=K", "prof-1")
+        deleted = {c["id"] for b in fake.applied for c in b if c["op"] == "delete"}
+        self.assertEqual(deleted, {"o-prev", "o-bg", "o-mic"})
+        self.assertEqual(set(r["widgets"]), set(md.IMAGE_KEYS))
+        self.assertIn("light", {w["id"] for w in fake.widgets})
+        self.assertIn("plus5", {w["id"] for w in fake.widgets})
+
+    def test_not_applied_is_an_error(self):
+        """Macro Deck проверил и НЕ применил (клетки заняты, ждёт разрешения) — это ошибка, а не «Готово»."""
+        from autoprint import macrodeck as md
+
+        class Replying(md.Client):
+            def __init__(self, reply):
+                super().__init__("t")
+                self.reply = reply
+
+            def call(self, tool, args):
+                return self.reply
+
+        busy = {"valid": True, "applied": False, "problems": [{"index": 1, "path": "", "code": "PositionOccupied",
+                                                              "message": "Placements overlap the final layout"}],
+                "confirmations": []}
+        with self.assertRaises(md.MacroDeckError) as cm:
+            Replying(busy).apply([{"op": "create"}])
+        self.assertIn("заняты", str(cm.exception))
+        ask = {"valid": True, "applied": False, "problems": [],
+               "confirmations": [{"index": 2, "kind": "risky-action", "detail": "app.macro-deck.http.send-request"}]}
+        with self.assertRaises(md.MacroDeckError) as cm:
+            Replying(ask).apply([{"op": "create"}])
+        self.assertIn("CONFIRMATION_PENDING", str(cm.exception))            # программа подождёт «Разрешить»
+        self.assertTrue(Replying(busy).apply([{"op": "create"}], dry=True)["valid"])   # проверка — не ошибка
+        ok = {"valid": True, "applied": True, "createdIds": {"a": "1"}}
+        self.assertEqual(Replying(ok).apply([{"op": "create"}])["createdIds"], {"a": "1"})
+
+    def test_layout_version_bumped_for_rebuild(self):
+        """1.3.0 с ошибкой записал «страница собрана» (раскладка 3), хотя Macro Deck ничего не создал — новая
+        версия раскладки, чтобы программа пересобрала страницу сама."""
+        from autoprint import macrodeck as md
+        self.assertGreaterEqual(md.LAYOUT, 4)
 
     def test_setup_new_profile_on_its_home_page(self):
         """Новый профиль: кнопки — на его главной странице (её Macro Deck завёл сам), а не в соседней папке;

@@ -16,6 +16,7 @@ from __future__ import annotations
 import json
 import logging
 import queue
+import re
 import threading
 import time
 import urllib.error
@@ -33,7 +34,8 @@ COLS, ROWS = 7, 3
 PREFIX = "apc_"
 MARK = "apc"                    # пометка в данных кнопки: её собрала программа (пересборка заменяет только такие)
 STYLES = ("glass", "tiles", "outline")   # «Стекло», «Плитки», «Контур»
-LAYOUT = 3                      # устройство страницы: сменили (кнопки, данные) — программа пересоберёт её сама
+LAYOUT = 4                      # устройство страницы: сменили (кнопки, данные) — программа пересоберёт её сама
+# (4: 1.3.0 записывал «собрано», хотя Macro Deck ничего не создал — клетки занимали кнопки первой сборки)
 
 # кнопки: ключ → (x, y, команда пульта, значок, подпись)
 BUTTONS = [
@@ -143,11 +145,21 @@ class Client:
         return list(self.call("list", {"entity": entity, **kw}).get("items") or [])
 
     def apply(self, changes: list[dict], dry: bool = False) -> dict:
+        """Изменения одним пакетом. Macro Deck может ответить «проверено, но не применено» (клетки заняты, ждёт
+        разрешения человека) — это ошибка, а не успех: иначе программа скажет «Готово», а на телефоне пусто."""
         r = self.call("apply_changes", {"changes": changes, "dryRun": dry})
+        probs = r.get("problems") or []
+        text = "; ".join(f"{p.get('path', '')}: {p.get('message', '')}".strip(": ") for p in probs)
         if not r.get("valid", False):
-            probs = "; ".join(f"{p.get('path', '')}: {p.get('message', '')}" for p in r.get("problems") or [])
-            raise MacroDeckError("Macro Deck не принял страницу: " + (probs or json.dumps(r, ensure_ascii=False))[:400])
-        return r
+            raise MacroDeckError("Macro Deck не принял страницу: " + (text or json.dumps(r, ensure_ascii=False))[:400])
+        if dry or r.get("applied", True) is not False:
+            return r
+        if any(p.get("code") == "PositionOccupied" for p in probs):
+            raise MacroDeckError("Macro Deck: на странице «Урок» клетки заняты другими кнопками — перенесите или "
+                                 "удалите их и нажмите «Пересобрать страницу»")
+        if r.get("confirmations"):
+            raise MacroDeckError("CONFIRMATION_PENDING: Macro Deck ждёт разрешения")
+        raise MacroDeckError("Macro Deck не применил изменения" + (": " + text[:300] if text else ""))
 
     def set_var(self, name: str, value: str) -> None:
         r = self.call("run_action", {"integrationId": "app.macro-deck.variables", "actionId": "set-variable",
@@ -317,8 +329,15 @@ def setup(client: Client, base: str, profile_id: str = "", dry: bool = False, st
         fid = home["id"]
         if home.get("name") != FOLDER_NAME:
             changes.append({"op": "update", "entity": "folder", "id": fid, "data": {"name": FOLDER_NAME}})
+        cells = {(x + dx, y) for x, y, wd in POS.values() for dx in range(wd)}
         for w in client.items("widgets", folderId=fid):
-            if isinstance(w.get("data"), dict) and w["data"].get(MARK):
+            d = w.get("data")
+            # без пометки (первая сборка 1.3.0) — только на клетках страницы: свою кнопку человека на команду
+            # пульта в свободной клетке не трогаем
+            mine = isinstance(d, dict) and bool(d.get(MARK))
+            spot = {(int(w.get("positionX") or 0) + dx, int(w.get("positionY") or 0))
+                    for dx in range(int(w.get("width") or 1))}
+            if mine or (ours(d) and spot & cells):
                 changes.append({"op": "delete", "entity": "widget", "id": w["id"]})
     # страница прежней версии 1.3 («Урок» отдельной папкой рядом с пустой главной) — убрать
     for f in client.items("folders", profileId=pid):
@@ -335,6 +354,21 @@ def setup(client: Client, base: str, profile_id: str = "", dry: bool = False, st
     widgets = {k[2:]: v for k, v in ids.items() if k.startswith("w_")}
     return {"profile": pid, "folder": fid, "widgets": widgets, "created": len(first) + len(changes),
             "confirmations": r.get("confirmations") or []}
+
+
+_OUR_URL = re.compile(r"http://127\.0\.0\.1:\d+/api/[a-z_]+\?key=")
+
+
+def ours(data) -> bool:
+    """Кнопку собрала программа: с пометкой "apc"; у первой сборки 1.3.0 пометки нет — тогда подпись из её
+    переменных (apc_…) или команда её пульта (http://127.0.0.1:<порт>/api/<команда>?key=…)."""
+    if not isinstance(data, dict):
+        return False
+    if data.get(MARK):
+        return True
+    if "vars." + PREFIX in str(data.get("label") or ""):
+        return True
+    return bool(_OUR_URL.search(json.dumps(data.get("flows") or [])))
 
 
 def find_widgets(client: Client, folder_id: str) -> dict[str, str]:
