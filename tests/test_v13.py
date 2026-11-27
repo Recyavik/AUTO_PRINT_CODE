@@ -1194,6 +1194,50 @@ class PresetBackgroundTest(unittest.TestCase):
         self.assertIn(("waves-s.jpg", "autoprint/efir/page/backgrounds"), dests)
 
 
+class AtomicWriteTest(unittest.TestCase):
+    """Файл на миг занят (антивирус, индексатор Windows: «Отказано в доступе» при подмене) — запись повторяется,
+    а не роняет сохранение урока или оформления."""
+
+    def test_replace_retries_when_file_briefly_busy(self):
+        import os
+        import tempfile
+        from autoprint import storage
+        path = Path(tempfile.mkdtemp()) / "x.json"
+        calls = []
+        real = os.replace
+
+        def flaky(a, b):
+            calls.append(1)
+            if len(calls) < 3:
+                raise PermissionError(5, "Отказано в доступе")
+            return real(a, b)
+
+        storage.os.replace = flaky
+        try:
+            storage._atomic_write(path, {"a": 1})
+        finally:
+            storage.os.replace = real
+        self.assertEqual(json.loads(path.read_text(encoding="utf-8")), {"a": 1})
+        self.assertEqual(len(calls), 3)
+
+    def test_gives_up_after_a_while(self):
+        import os
+        import tempfile
+        from autoprint import storage
+        path = Path(tempfile.mkdtemp()) / "x.json"
+        real = os.replace
+
+        def busy(a, b):
+            raise PermissionError(5, "Отказано в доступе")
+
+        storage.os.replace = busy
+        try:
+            with self.assertRaises(PermissionError):
+                storage._atomic_write(path, {"a": 1})
+        finally:
+            storage.os.replace = real
+
+
 class DeckSettingsTest(unittest.TestCase):
     port = 18951
 

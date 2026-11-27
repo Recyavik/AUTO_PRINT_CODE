@@ -121,7 +121,18 @@ def _atomic_write(path: Path, data: dict, backup: bool = False) -> None:
                 shutil.copy2(path, bak)   # копия, а не переименование: основной файл не исчезает ни на миг
         except OSError as e:
             log.warning("Резервная копия %s не обновлена: %s", bak, e)
-    os.replace(tmp, path)
+    # файл на миг держит антивирус или индексатор Windows («Отказано в доступе») — подождать и повторить
+    for attempt in range(REPLACE_TRIES):
+        try:
+            os.replace(tmp, path)
+            return
+        except PermissionError:
+            if attempt == REPLACE_TRIES - 1:
+                raise
+            time.sleep(0.05 * (attempt + 1))
+
+
+REPLACE_TRIES = 6           # подмена файла: до 6 попыток, всего около 0,75 с
 
 
 def new_id() -> str:
