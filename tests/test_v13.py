@@ -625,7 +625,7 @@ class MacroDeckPageTest(unittest.TestCase):
 
     def test_layout_fits_phone_grid(self):
         from autoprint import macrodeck as md
-        w = md.layout("http://127.0.0.1:8791/api/?key=K")
+        w = [x for x in md.layout("http://127.0.0.1:8791/api/?key=K") if x["folder"] == "main"]   # главная
         cells = set()
         for x in w:
             for dx in range(x["width"]):
@@ -760,7 +760,7 @@ class MacroDeckPageTest(unittest.TestCase):
         r = md.setup(fake, "http://127.0.0.1:8791/api/?key=K", "prof-1")
         deleted = {c["id"] for b in fake.applied for c in b if c["op"] == "delete"}
         self.assertEqual(deleted, {"o-prev", "o-bg", "o-mic"})
-        self.assertEqual(set(r["widgets"]), set(md.IMAGE_KEYS))
+        self.assertEqual(set(r["widgets"]), set(md.ALL_KEYS))
         self.assertIn("light", {w["id"] for w in fake.widgets})
         self.assertIn("plus5", {w["id"] for w in fake.widgets})
 
@@ -804,17 +804,20 @@ class MacroDeckPageTest(unittest.TestCase):
         fake = FakeMD()
         r = md.setup(fake, "http://127.0.0.1:8791/api/?key=K")
         self.assertEqual((r["profile"], r["folder"]), ("prof-1", "home-1"))
-        first, second = fake.applied
+        first, screens, second = fake.applied                      # профиль; экраны выбора (1.3.1); кнопки
         self.assertEqual(first[0]["entity"], "profile")
         self.assertEqual(sum(c["entity"] == "variable" for c in first), len(md.variables()))
+        self.assertEqual({c["data"]["name"] for c in screens if c["entity"] == "folder"},
+                         {"Таймер", "Задание", "Перерыв", "Зарядка"})       # главную («Home») не создаём заново
         self.assertIn({"op": "update", "entity": "folder", "id": "home-1", "data": {"name": "Урок"}}, second)
         widgets = [c for c in second if c["entity"] == "widget"]
-        self.assertEqual(len(widgets), len(md.IMAGE_KEYS))
-        self.assertTrue(all(c["data"]["folderId"] == "home-1" for c in widgets))
+        self.assertEqual(len(widgets), len(md.ALL_KEYS))
+        self.assertTrue(all(c["data"]["folderId"] == "home-1" for c in widgets
+                            if c["data"]["data"][md.MARK] in md.IMAGE_KEYS))
         self.assertFalse(any(c["entity"] == "folder" and c["op"] == "create" for c in second))
         shown = [a[1]["actionId"] for a in fake.actions]
         self.assertEqual(shown, ["change-profile", "change-folder"])
-        self.assertEqual(set(r["widgets"]), set(md.IMAGE_KEYS))            # id своих кнопок — для обновлений
+        self.assertEqual(set(r["widgets"]), set(md.ALL_KEYS))              # id своих кнопок — для обновлений
 
     def test_setup_again_keeps_owner_buttons(self):
         """Повторно: свои кнопки заново, кнопки человека на той же странице — как есть; папка прежней версии
@@ -828,8 +831,9 @@ class MacroDeckPageTest(unittest.TestCase):
                       widgets=[{"id": "w-ours", "folderId": "H", "data": {"apc": "bg"}},
                                {"id": "w-owner", "folderId": "H", "data": {"label": "Свет в комнате"}}])
         r = md.setup(fake, "http://127.0.0.1:8791/api/?key=K", profile_id="P")
-        self.assertEqual(len(fake.applied), 1)                              # профиль и переменные уже есть
-        ch = fake.applied[0]
+        self.assertEqual(len(fake.applied), 2)              # профиль и переменные уже есть; экраны выбора — новые
+        self.assertTrue(all(c["entity"] == "folder" and c["op"] == "create" for c in fake.applied[0]))
+        ch = fake.applied[1]
         self.assertEqual(r["profile"], "P")
         self.assertIn({"op": "delete", "entity": "widget", "id": "w-ours"}, ch)
         self.assertNotIn({"op": "delete", "entity": "widget", "id": "w-owner"}, ch)
@@ -838,25 +842,26 @@ class MacroDeckPageTest(unittest.TestCase):
         self.assertFalse(any(c["entity"] in ("profile", "variable") for c in ch))
 
     def test_sync_updates_only_changed_buttons_whole(self):
-        """Нажали «Чёрный» — в Macro Deck уходят только две кнопки (Фон и Чёрный), каждая целиком, с командой."""
+        """Нажали «Чёрный» — в Macro Deck уходят только две кнопки (Фон и Чёрный), каждая целиком, с командой
+        (1.3.1: удаляются и создаются заново — подробно в test_v131)."""
         from autoprint import deckart as a
         from autoprint import macrodeck as md
         fake = FakeMD()
-        ids = {k: "id-" + k for k in md.IMAGE_KEYS}
-        sync = md.Sync(fake, ids, "F")
+        sync = md.Sync(fake, {}, "F")
         base = "http://127.0.0.1:8791/api/?key=K"
         try:
             st = {"screen": "idle"}
             sync.push(md.values(st), md.page(st, "tiles", base))
             self.assertTrue(wait(lambda: len(fake.applied) == 1))
-            self.assertEqual(len(fake.applied[0]), len(md.IMAGE_KEYS))        # первый раз — все
+            self.assertEqual(sum(c["op"] == "create" for c in fake.applied[0]), len(md.IMAGE_KEYS))   # все
             st = {"screen": "black"}
             sync.push(md.values(st), md.page(st, "tiles", base))
             self.assertTrue(wait(lambda: len(fake.applied) == 2))
-            ch = {c["id"]: c["data"]["data"] for c in fake.applied[1]}
-            self.assertEqual(set(ch), {"id-bg", "id-black"})
-            self.assertIn(a.ACCENT, svg_of(ch["id-black"]["imageUrl"]))
-            self.assertIn("api/black?key=K", json.dumps(ch["id-black"]["flows"]))   # команда не потерялась
+            ch = {c["data"]["data"][md.MARK]: c["data"]["data"] for c in fake.applied[1] if c["op"] == "create"}
+            self.assertEqual(set(ch), {"bg", "black"})
+            self.assertEqual({c["id"] for c in fake.applied[1] if c["op"] == "delete"}, {"wid-bg", "wid-black"})
+            self.assertIn(a.ACCENT, svg_of(ch["black"]["imageUrl"]))
+            self.assertIn("api/black?key=K", json.dumps(ch["black"]["flows"]))   # команда не потерялась
         finally:
             sync.stop()
 
@@ -869,8 +874,9 @@ class MacroDeckPageTest(unittest.TestCase):
         try:
             sync.push({}, md.page({"screen": "black"}))
             self.assertTrue(wait(lambda: len(fake.applied) == 1))
-            self.assertIn("real-black", {c["id"] for c in fake.applied[0]})
-            self.assertNotIn("owner", {c["id"] for c in fake.applied[0]})
+            gone = {c["id"] for c in fake.applied[0] if c["op"] == "delete"}
+            self.assertIn("real-black", gone)
+            self.assertNotIn("owner", gone)
         finally:
             sync.stop()
 
@@ -942,8 +948,8 @@ class MacroDeckConnectTest(unittest.TestCase):
         self.assertIn(f"http://127.0.0.1:{self.win.efir.server.want_port}/api/black?key={s.deck_key}", urls)
         from autoprint import deckart
 
-        def updated(key, pred=lambda d: True, since=0):
-            return any(c["op"] == "update" and c["entity"] == "widget" and c["data"]["data"].get("apc") == key
+        def updated(key, pred=lambda d: True, since=0):          # 1.3.1: новый вид — кнопка создаётся заново
+            return any(c["op"] == "create" and c["entity"] == "widget" and c["data"]["data"].get("apc") == key
                        and pred(c["data"]["data"])
                        for batch in self.fake.applied[since:] for c in batch)
 
@@ -972,12 +978,12 @@ class MacroDeckConnectTest(unittest.TestCase):
         self.assertTrue(wait(lambda: not self.win.deck.md_busy and self.fake.applied, 10))
         self.assertTrue(wait(lambda: self.win.deck.md_sync is not None, 5))
         self.assertEqual(s.md_layout, md.LAYOUT)
-        self.assertEqual(set(s.md_widgets), set(md.IMAGE_KEYS))
-        n = len(self.fake.applied)
+        self.assertEqual(set(s.md_widgets), set(md.ALL_KEYS))
+        n, acts = len(self.fake.applied), len(self.fake.actions)
         self.win.deck.apply()                                       # уже новая — второй раз не пересобирает
         pump(300)
-        self.assertFalse(any(c["entity"] == "profile" or (c["entity"] == "widget" and c["op"] == "create")
-                             for batch in self.fake.applied[n:] for c in batch))
+        self.assertFalse(any(c["entity"] in ("profile", "folder") for batch in self.fake.applied[n:] for c in batch))
+        self.assertEqual(len(self.fake.actions), acts)              # телефоны заново не переключались
 
     def test_bad_token_reported(self):
         from autoprint.macrodeck import MacroDeckError

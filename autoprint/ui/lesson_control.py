@@ -781,7 +781,8 @@ class LessonController(QObject):
         ef = self.efir
         if not chosen and ef.mode == "exercise" and time.monotonic() - ef.ex_started < EX_DOUBLE_S:
             return
-        stage = str(d.get("stage") or "") or self._live_exercise_stage(t)
+        # exact — видео выбрали на пульте (экран «Зарядка»): оно, а не видео идущего этапа-зарядки
+        stage = "" if d.get("exact") else (str(d.get("stage") or "") or self._live_exercise_stage(t))
         self._ensure_screen(t)
         ef.start_exercise(self._exercise_index(t, stage, index, str(d.get("pick") or "")))
 

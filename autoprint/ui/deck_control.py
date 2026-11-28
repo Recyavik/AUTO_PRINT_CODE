@@ -29,20 +29,28 @@ log = logging.getLogger(__name__)
 
 CALL_TIMEOUT_S = 5
 COMMANDS = ("state", "background", "black", "exercise", "break", "break_add", "slide", "slide_prev", "slide_next",
-            "mic", "mic_off", "mic_on", "sound", "sound_off", "sound_on", "prepare", "timer", "timer_add", "task")
+            "mic", "mic_off", "mic_on", "sound", "sound_off", "sound_on", "prepare", "timer", "timer_add", "task",
+            "stop", "break_pause", "ex_pause", "ex_restart")
 # для «Настройки → Пульт»: команда → (кнопка, что делает)
 TITLES = {
     "background": ("Фон", "фон ученикам"),
     "black": ("Чёрный", "чёрный экран · ещё раз — фон"),
-    "exercise": ("Зарядка", "включить видео · идёт — пауза, ещё раз — дальше"),
-    "break": ("Перерыв", "по плану урока, с этой минуты"),
-    "break_add": ("+5 мин", "к перерыву; ?min=1 — на минуту"),
+    "exercise": ("Зарядка", "включить видео · идёт — пауза, ещё раз — дальше; ?index=0 — это видео, "
+                            "?pick=next или random — следующее по очереди или случайное"),
+    "break": ("Перерыв", "по плану урока, с этой минуты; ?min=10 — на 10 минут (идёт — заново)"),
+    "break_add": ("+5 мин", "к перерыву; ?min=1 — на минуту, ?min=-5 — убавить"),
+    "break_pause": ("Пауза перерыва", "остановить отсчёт · ещё раз — дальше"),
+    "ex_pause": ("Пауза зарядки", "остановить видео · ещё раз — дальше"),
+    "ex_restart": ("Зарядка сначала", "видео с начала"),
+    "stop": ("Убрать", "?what=timer, break или exercise — убрать это с экрана учеников (другое не трогает)"),
     "slide": ("Слайд", "показать слайд · ещё раз — фон"),
     "slide_prev": ("◀", "предыдущий слайд"),
     "slide_next": ("▶", "следующий слайд"),
     "prepare": ("Подготовка", "открыть вкладки из списка ниже"),
-    "timer": ("Таймер", "отсчёт на весь экран (минуты — по оформлению урока, ?min=3 — свои) · идёт — убрать"),
-    "task": ("Задание", "задание идущего этапа с его временем · показано — убрать"),
+    "timer": ("Таймер", "отсчёт на весь экран (минуты — по оформлению урока) · идёт — убрать; ?min=3 — на 3 "
+                        "минуты (идёт — заново)"),
+    "task": ("Задание", "задание идущего этапа с его временем · показано — убрать; ?min=10 — на 10 минут, "
+                        "?min=0 — его время (показано — заново)"),
     "timer_add": ("+1 мин", "к таймеру; ?min=5 — на 5"),
     "mic": ("Микрофон", "все микрофоны выключить · ещё раз — включить"),
     "sound": ("Звук", "весь звук компьютера выключить · ещё раз — включить"),
@@ -50,6 +58,22 @@ TITLES = {
     "sound_off": ("Звук выкл.", "весь звук — выключить"),
     "state": ("Что идёт", "этапы, время, экран учеников (JSON)"),
 }
+
+
+def _given(params: dict, name: str) -> bool:
+    return str(params.get(name) if params.get(name) is not None else "").strip() != ""
+
+
+def _int(raw) -> int | None:
+    """Число из ссылки кнопки («5», «5.0», «-1»); пусто или не число — None."""
+    if raw is None or str(raw).strip() == "":
+        return None
+    try:
+        return int(float(raw))
+    except (TypeError, ValueError, OverflowError):
+        return None
+
+
 # файлы для кнопок: имя → ключ состояния (bool — "true" / "false")
 FILES = {
     "prev.txt": "prev", "now.txt": "now", "next.txt": "next", "left.txt": "left", "stage.txt": "stage_text",
@@ -178,7 +202,8 @@ class DeckControl(QObject):
         if self.md_sync is not None:
             from .. import macrodeck
             off = {"off": True, "now": text}
-            self.md_sync.push(macrodeck.values(off, self._style()), macrodeck.page(off, self._style(), self.md_base()))
+            self.md_sync.push(macrodeck.values(off, self._style()),
+                              macrodeck.page(off, self._style(), self.md_base(), self.md_folders()))
         if not self.folder.is_dir():
             return
         off = {name: ("false" if k in BOOL_KEYS else "") for name, k in FILES.items()}
@@ -290,6 +315,7 @@ class DeckControl(QObject):
                 s.md_profile = res["profile"]
             s.md_folder = res.get("folder") or s.md_folder
             s.md_widgets = dict(res.get("widgets") or {})
+            s.md_folders = {k: v for k, v in (res.get("folders") or {}).items() if k != "main" and v}
             from .. import macrodeck
             s.md_layout = macrodeck.LAYOUT
             s.save()
@@ -312,12 +338,20 @@ class DeckControl(QObject):
                 return
             from .. import macrodeck
             s = self.app.settings
-            self.md_sync = macrodeck.Sync(self.md_client(token), dict(s.md_widgets or {}), s.md_folder)
+            self.md_sync = macrodeck.Sync(self.md_client(token), dict(s.md_widgets or {}), self.md_folders())
 
     def _md_stop_sync(self) -> None:
         if self.md_sync is not None:
             self.md_sync.stop()
             self.md_sync = None
+
+    def md_folders(self) -> dict:
+        """Страницы пульта в Macro Deck: главная ("main") и экраны выбора → id (что собрано)."""
+        s = self.app.settings
+        out = {k: v for k, v in (getattr(s, "md_folders", None) or {}).items() if isinstance(v, str) and v}
+        if s.md_folder:
+            out["main"] = s.md_folder
+        return out
 
     def _style(self) -> str:
         return getattr(self.app.settings, "deck_style", "glass") or "glass"
@@ -413,8 +447,24 @@ class DeckControl(QObject):
             else:
                 L.command({"cmd": "black"}) if t is not None else ef.show_black()
         elif cmd == "exercise":
-            if mode == "exercise":
-                if time.monotonic() - ef.ex_started >= EX_DOUBLE_S:      # двойное нажатие — не пауза
+            index, pick = _int(params.get("index")), str(params.get("pick") or "")
+            double = mode == "exercise" and time.monotonic() - ef.ex_started < EX_DOUBLE_S
+            if index is not None:                       # экран «Зарядка»: это видео (не видео этапа)
+                if t is not None:
+                    L.command({"cmd": "exercise", "index": index, "exact": True})
+                else:
+                    ef.start_exercise(index)
+            elif pick in ("next", "random"):            # «По очереди», «Случайная»: идёт — другое, не пауза
+                if double:
+                    pass
+                elif t is not None:
+                    L.command({"cmd": "exercise", "pick": pick, "exact": mode == "exercise" or pick == "random"})
+                else:
+                    w = ef.webinar or ef.live_webinar()
+                    if w is not None and w.exercises:
+                        ef.start_exercise(L._next_exercise(w.exercises, pick))
+            elif mode == "exercise":
+                if not double:                                            # двойное нажатие — не пауза
                     ef.exercise_pause()
             elif t is not None:
                 L.command({"cmd": "exercise", "pick": self._pick()})
@@ -423,12 +473,33 @@ class DeckControl(QObject):
                 if w is not None and w.exercises:
                     ef.start_exercise(L._next_exercise(w.exercises, self._pick()))
         elif cmd == "break":
-            if mode != "break":
+            m = _int(params.get("min"))
+            if m is not None and m > 0:                 # экран «Перерыв»: минуты — с этой минуты (идёт — заново)
+                m = min(m, 180)
+                if t is not None:
+                    L.command({"cmd": "break", "stage": "", "minutes": m})
+                else:
+                    ef.start_break(m)
+            elif mode != "break" or str(params.get("plan") or "") not in ("", "0"):
                 if t is not None:
                     L.command({"cmd": "break", "stage": self._plan_break(t)})
                 else:
                     w = ef.webinar or ef.live_webinar()
                     ef.start_break(w.break_min if w else 10)
+        elif cmd == "break_pause":
+            if mode == "break":
+                L.command({"cmd": "break_pause"})
+        elif cmd == "ex_pause":
+            if mode == "exercise":
+                L.command({"cmd": "exercise_pause"})
+        elif cmd == "ex_restart":
+            if mode == "exercise":
+                L.command({"cmd": "exercise_restart"})
+        elif cmd == "stop":
+            what = {"timer": ("timer", "task"), "task": ("task",), "break": ("break",),
+                    "exercise": ("exercise",)}.get(str(params.get("what") or ""), ())
+            if mode in what:                            # убрать только своё: слайд «Убрать» таймера не трогает
+                L.command({"cmd": "background"}) if t is not None else ef.show_background()
         elif cmd == "break_add":
             if mode == "break":
                 raw = params.get("min")
@@ -449,12 +520,12 @@ class DeckControl(QObject):
         elif cmd == "prepare":
             self.prepare()
         elif cmd == "timer":
-            if mode in ("timer", "task"):
+            if mode in ("timer", "task") and not _given(params, "min"):     # минуты выбраны — заново, не «убрать»
                 L.command({"cmd": "background"}) if t is not None else ef.show_background()
             elif t is not None:
                 L.command({"cmd": "timer", "minutes": params.get("min")})
         elif cmd == "task":
-            if mode == "task":
+            if mode == "task" and not _given(params, "min"):
                 L.command({"cmd": "background"})
             elif t is not None:
                 b = L.task_block(t)
@@ -543,6 +614,14 @@ class DeckControl(QObject):
         n = 0
         if mode == "slide" and ef.slide:
             n = next((i + 1 for i, b in enumerate(slides) if b.id == ef.slide.get("bid")), 0)
+        # экраны выбора на телефоне: видео зарядки, сколько у задания и у перерыва по плану
+        w = ef.webinar or ef.live_webinar() or (ef.lesson_look(t) if t is not None else None)
+        exs = [str(e.title or "Зарядка") for e in (getattr(w, "exercises", None) or [])]
+        tb = self.app.lesson.task_block(t) if t is not None else None
+        task_min = round(self.app.lesson._timer_minutes(t, None, int(tb.minutes or 0)) / 60, 1) if tb is not None else 0
+        sid = self._plan_break(t) if t is not None else ""
+        pst = next((s for s in scenario.stages(t)[1] if s.block.id == sid), None) if sid else None
+        plan_min = (pst.end_min - pst.start_min) if pst is not None else (getattr(w, "break_min", 0) or 10)
         return {
             "ok": True, "lesson": t.title if t is not None else "", "phase": phase,
             "prev": prev, "now": cur, "next": nxt, "left": left, "left_s": left_s, "frac": frac,
@@ -555,6 +634,9 @@ class DeckControl(QObject):
             "break_paused": mode == "break" and ef.brk_left_paused is not None,
             "slide": mode == "slide", "slides": bool(slides), "slide_n": n, "slides_total": len(slides),
             "slide_text": f"{n} / {len(slides)}" if mode == "slide" and n else "",
+            "exercises": exs, "ex_index": ef.ex_index if mode == "exercise" else -1,
+            "task_min": task_min, "task_title": ((tb.title or "").strip() or "Задание") if tb is not None else "",
+            "break_plan_min": plan_min,
             "clock": now.strftime("%H:%M"),
             **self._audio_state(),
         }
@@ -587,7 +669,8 @@ class DeckControl(QObject):
         out["state.json"] = json.dumps(st, ensure_ascii=False, indent=1)
         if self.md_sync is not None:
             from .. import macrodeck
-            self.md_sync.push(macrodeck.values(st, self._style()), macrodeck.page(st, self._style(), self.md_base()))
+            self.md_sync.push(macrodeck.values(st, self._style()),
+                              macrodeck.page(st, self._style(), self.md_base(), self.md_folders()))
         try:
             self.folder.mkdir(parents=True, exist_ok=True)
         except OSError:

@@ -71,6 +71,16 @@ ICONS = {
     "mic-off": '<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3M4 4l16 16"/>',
     "cap": '<path d="M2.5 9.5L12 5l9.5 4.5L12 14z"/><path d="M6.5 11.6v4.2c0 1.5 2.5 2.7 5.5 2.7s5.5-1.2 5.5-2.7v-4.2"/>'
            '<path d="M21.5 9.5v5.5"/><circle cx="21.5" cy="16.3" r="1" fill="currentColor"/>',
+    # 1.3.1: экраны выбора (минуты, видео зарядки)
+    "back": '<path d="M19.5 12H5M11 6l-6 6 6 6"/>',
+    "stop": '<rect x="6.5" y="6.5" width="11" height="11" rx="2.2"/>',
+    "pause": '<path d="M9 6.5v11M15 6.5v11"/>',
+    "play": '<path d="M8.5 5.8v12.4L18.5 12z"/>',
+    "restart": '<path d="M4.5 12a7.5 7.5 0 1 0 2.2-5.3"/><path d="M4.5 4.8v4.2h4.2"/>',
+    "shuffle": '<path d="M3.5 7.5h3c4.5 0 6.5 9 11 9h3M3.5 16.5h3c1.4 0 2.6-.9 3.6-2.2M14 9.7c1-1.3 2.2-2.2 3.5-2.2h3"/>'
+               '<path d="M18 5l2.5 2.5L18 10M18 14l2.5 2.5L18 19"/>',
+    "queue": '<path d="M10 7h10M10 12h10M10 17h7"/><path d="M3.5 5.2l3.5 1.8-3.5 1.8z"/>',
+    "plan": '<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>',
 }
 
 
@@ -331,6 +341,71 @@ def timer(label: str, cells: int = 1, style: str = DEFAULT_STYLE, draw_text: boo
     if draw_text:
         lines, size = fit(label, w - 12, 30, lines=1, min_size=16)
         parts.append(_text(lines, w / 2, 70, size, tcolor, weight=700))
+    return _svg(w, h, "".join(parts))
+
+
+def _face(mode: str, w: float, h: float, S: dict) -> tuple[list[str], str, str]:
+    """Плашка кнопки в любом стиле → (части SVG, цвет главного, цвет второстепенного)."""
+    if S["shape"] == "glass":
+        sub = {"on": "#C9DCFF", "off": GLASS_OFF_FG, "alert": GLASS_ALERT_FG}.get(mode, GLASS_DIM)
+        return [_glass(w, h, mode, S["radius"])], _glass_fg(mode), sub
+    fill, fg, line, lw = _look(mode, S)
+    parts = [_plate(w, h, fill, line, S["radius"] if S["shape"] != "dot" else 14, lw)]
+    if S["shape"] == "dot" and mode in ("on", "alert"):
+        parts.append(f'<circle cx="{w / 2:.1f}" cy="{h / 2:.1f}" r="{min(w, h) * 0.42:.1f}" '
+                     f'fill="{S["on"] if mode == "on" else S["alert"]}"/>')
+    return parts, fg, (fg if mode in ("on", "alert", "off") else DIM)
+
+
+def number(value: str, unit: str = "мин", mode: str = "", style: str = DEFAULT_STYLE) -> str:
+    """Кнопка экрана выбора: крупное число («5», «+1», «−5») и под ним мелко «мин»."""
+    S = _st(style)
+    w, h = width_of(1), 100.0
+    parts, fg, dim = _face(mode, w, h, S)
+    lines, size = fit(value, w - 16, 40, lines=1, min_size=24)
+    parts.append(_text(lines, w / 2, 45, size, fg, weight=500 if S["shape"] == "glass" else 700))
+    if unit:
+        parts.append(_text([unit], w / 2, 77, 13.5, dim, weight=400 if S["shape"] == "glass" else 500))
+    return _svg(w, h, "".join(parts))
+
+
+def video(title: str, mode: str = "", style: str = DEFAULT_STYLE) -> str:
+    """Видео зарядки на экране выбора: значок сверху, название до трёх строк (длинное — мельче)."""
+    S = _st(style)
+    w, h = width_of(1), 100.0
+    parts, fg, _dim = _face(mode, w, h, S)
+    parts.append(_icon("activity", w / 2, 24, 24, fg, 1.6))
+    lines, size = fit(title, w - 14, 14, lines=3, min_size=9.5)
+    parts.append(_text(lines, w / 2, 66, size, fg, weight=400 if S["shape"] == "glass" else 600, lh=1.12))
+    return _svg(w, h, "".join(parts))
+
+
+def title(name: str, sub: str = "", icon: str = "", mode: str = "", cells: int = 5,
+          style: str = DEFAULT_STYLE) -> str:
+    """Заголовок экрана выбора: значок, название и пояснение — слева; правая часть пустая: там Macro Deck пишет
+    подписью отсчёт (таймера, перерыва). mode "on" — это сейчас у учеников (синим)."""
+    S = _st(style)
+    w, h = width_of(cells), 100.0
+    if S["shape"] == "glass":
+        parts = [_glass(w, h, "panel" if mode == "on" else "", S["radius"])]
+        fg, dim = GLASS_FG, ("#C6D6F2" if mode == "on" else GLASS_DIM)
+    else:
+        parts, fg, dim = _face("on" if mode == "on" else "", w, h, S)
+        if S["shape"] == "dot":
+            parts = parts[:1]
+            fg, dim = (S["on"], S["on"]) if mode == "on" else (fg, dim)
+    x = 22.0
+    if icon:
+        parts.append(_icon(icon, 46, h / 2, 34, fg, 1.5))
+        x = 84.0
+    room = w - x - w * 0.34                                  # справа — место под отсчёт
+    nl, ns = fit(name, room, 22, lines=1, min_size=14)
+    if sub:
+        parts.append(_text(nl, x, 38, ns, fg, weight=500, anchor="start"))
+        sl, ss = fit(sub, room, 14, lines=2, min_size=10)
+        parts.append(_text(sl, x, 66 if len(sl) == 1 else 70, ss, dim, weight=400, anchor="start", lh=1.15))
+    else:
+        parts.append(_text(nl, x, h / 2, ns, fg, weight=500, anchor="start"))
     return _svg(w, h, "".join(parts))
 
 
